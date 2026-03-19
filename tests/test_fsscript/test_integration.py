@@ -720,3 +720,155 @@ class TestChainedModuleLoader:
         # Should fail if not found in any loader
         with pytest.raises(ModuleNotFoundError):
             chained.load_module("c.fsscript", {})
+
+
+class TestTryCatchFinally:
+    """Test try-catch-finally exception handling."""
+
+    def test_try_no_exception(self):
+        """Test try block without exception."""
+        check_exp("try { 1 + 1; } catch(e) { 0; }", 2)
+
+    def test_try_catch_simple(self):
+        """Test try-catch with thrown exception."""
+        code = """
+        try {
+            throw 'error';
+        } catch(e) {
+            e;
+        }
+        """
+        check_exp(code, 'error')
+
+    def test_try_catch_with_message(self):
+        """Test catch block receives thrown value."""
+        code = """
+        try {
+            throw { message: 'test error' };
+        } catch(err) {
+            err.message;
+        }
+        """
+        check_exp(code, 'test error')
+
+    def test_try_finally(self):
+        """Test finally block executes."""
+        code = """
+        var x = 1;
+        try {
+            x = 2;
+        } finally {
+            x = 3;
+        }
+        x;
+        """
+        check_exp(code, 3)
+
+    def test_try_catch_finally(self):
+        """Test try-catch-finally combination."""
+        code = """
+        var result = '';
+        try {
+            result = result + 'a';
+            throw 'err';
+            result = result + 'b';
+        } catch(e) {
+            result = result + 'c';
+        } finally {
+            result = result + 'd';
+        }
+        result;
+        """
+        check_exp(code, 'acd')
+
+    def test_throw_number(self):
+        """Test throwing a number."""
+        code = """
+        try {
+            throw 42;
+        } catch(e) {
+            e;
+        }
+        """
+        check_exp(code, 42)
+
+    def test_nested_try_catch(self):
+        """Test nested try-catch blocks."""
+        code = """
+        try {
+            try {
+                throw 'inner';
+            } catch(e1) {
+                throw 'outer';
+            }
+        } catch(e2) {
+            e2;
+        }
+        """
+        check_exp(code, 'outer')
+
+    def test_catch_without_variable(self):
+        """Test catch block without variable binding."""
+        code = """
+        try {
+            throw 'error';
+        } catch {
+            'caught';
+        }
+        """
+        check_exp(code, 'caught')
+
+    def test_exception_propagation(self):
+        """Test that uncaught exceptions propagate."""
+        from foggy.fsscript.expressions.control_flow import ThrowException
+
+        code = "throw 'uncaught';"
+        parser = FsscriptParser(code)
+        ast = parser.parse_program()
+        evaluator = ExpressionEvaluator()
+        with pytest.raises(ThrowException) as exc:
+            evaluator.evaluate(ast)
+        assert exc.value.value == 'uncaught'
+
+    def test_finally_on_exception(self):
+        """Test finally executes even when exception is uncaught."""
+        from foggy.fsscript.expressions.control_flow import ThrowException
+
+        code = """
+        var x = 1;
+        try {
+            throw 'error';
+        } finally {
+            x = 2;
+        }
+        """
+        parser = FsscriptParser(code)
+        ast = parser.parse_program()
+        evaluator = ExpressionEvaluator()
+        with pytest.raises(ThrowException):
+            evaluator.evaluate(ast)
+        assert evaluator.get_variable('x') == 2
+
+
+class TestTemplateLiterals:
+    """Test template literal (backtick strings) support."""
+
+    def test_simple_template(self):
+        """Test simple template literal without interpolation."""
+        check_exp("`hello world`", "hello world")
+
+    def test_template_with_variable(self):
+        """Test template with variable interpolation."""
+        check_exp("let name = 'world'; `hello ${name}`", "hello world")
+
+    def test_template_with_expression(self):
+        """Test template with expression interpolation."""
+        check_exp("`sum: ${1 + 2}`", "sum: 3")
+
+    def test_template_multiple_interpolations(self):
+        """Test template with multiple interpolations."""
+        check_exp("let a = 1; let b = 2; `${a} + ${b} = ${a + b}`", "1 + 2 = 3")
+
+    def test_nested_template(self):
+        """Test nested template expressions."""
+        check_exp("`outer ${`inner`}`", "outer inner")

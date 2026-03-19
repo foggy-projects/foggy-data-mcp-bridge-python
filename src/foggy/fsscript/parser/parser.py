@@ -605,13 +605,21 @@ class FsscriptParser:
 
     def _parse_throw_statement(self) -> Expression:
         """Parse throw statement."""
+        from foggy.fsscript.expressions.control_flow import ThrowExpression
+
         keyword = self._advance()
         value = self.parse_expression()
         self._match(TokenType.SEMICOLON)
-        return value  # In Python, we just return the expression
+        return ThrowExpression(
+            value=value,
+            line=keyword.line,
+            column=keyword.column,
+        )
 
     def _parse_try_statement(self) -> Expression:
         """Parse try-catch-finally statement."""
+        from foggy.fsscript.expressions.control_flow import TryCatchExpression
+
         keyword = self._advance()  # try
 
         try_body = self._parse_block()
@@ -628,8 +636,14 @@ class FsscriptParser:
         if self._match(TokenType.FINALLY):
             finally_body = self._parse_block()
 
-        # Simplified: return try body
-        return try_body
+        return TryCatchExpression(
+            try_body=try_body,
+            catch_body=catch_body,
+            catch_var=catch_var,
+            finally_body=finally_body,
+            line=keyword.line,
+            column=keyword.column,
+        )
 
     def _parse_export_statement(self) -> Expression:
         """Parse export statement."""
@@ -1122,7 +1136,9 @@ class FsscriptParser:
         return StringExpression(value=token.value, line=token.line, column=token.column)
 
     def _parse_template_string(self) -> Expression:
-        """Parse template string literal."""
+        """Parse template string literal with interpolation."""
+        from foggy.fsscript.expressions.literals import TemplateLiteralExpression
+
         token = self._advance()
         parts = token.value
 
@@ -1134,14 +1150,27 @@ class FsscriptParser:
             value = ''.join(p[1] for p in parts)
             return StringExpression(value=value, line=token.line, column=token.column)
 
-        # Has interpolation - simplified for now
+        # Has interpolation - parse expressions
         result_parts = []
         for p in parts:
             if p[0] == 'str':
                 result_parts.append(StringExpression(value=p[1]))
-            # For interpolation, we'd need to parse the expression
-            # Simplified: just concatenate string parts
-        return StringExpression(value=''.join(p[1] for p in parts if p[0] == 'str'))
+            elif p[0] == 'expr':
+                # Parse the expression string
+                expr_str = p[1]
+                expr_parser = FsscriptParser(expr_str)
+                try:
+                    expr = expr_parser.parse_expression()
+                    result_parts.append(expr)
+                except Exception:
+                    # If parsing fails, treat as string
+                    result_parts.append(StringExpression(value=expr_str))
+
+        return TemplateLiteralExpression(
+            parts=result_parts,
+            line=token.line,
+            column=token.column,
+        )
 
     def _parse_boolean(self, value: bool) -> BooleanExpression:
         """Parse boolean literal."""

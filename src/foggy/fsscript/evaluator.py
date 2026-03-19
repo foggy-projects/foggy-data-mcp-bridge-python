@@ -14,6 +14,7 @@ from foggy.fsscript.expressions.literals import (
     LiteralExpression,
     ArrayExpression,
     ObjectExpression,
+    TemplateLiteralExpression,
 )
 from foggy.fsscript.expressions.operators import (
     BinaryExpression,
@@ -316,6 +317,18 @@ class ExpressionEvaluator(ExpressionVisitor):
 
     def visit_switch(self, expr: "SwitchExpression") -> Any:
         """Visit a switch expression."""
+        return expr.evaluate(self._context)
+
+    def visit_throw(self, expr: "ThrowExpression") -> Any:
+        """Visit a throw expression."""
+        return expr.evaluate(self._context)
+
+    def visit_try_catch(self, expr: "TryCatchExpression") -> Any:
+        """Visit a try-catch-finally expression."""
+        return expr.evaluate(self._context)
+
+    def visit_template_literal(self, expr: "TemplateLiteralExpression") -> Any:
+        """Visit a template literal expression."""
         return expr.evaluate(self._context)
 
     def get_exports(self) -> Dict[str, Any]:

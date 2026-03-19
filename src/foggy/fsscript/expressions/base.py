@@ -149,6 +149,21 @@ class ExpressionVisitor(ABC):
         """Visit a switch expression."""
         pass
 
+    @abstractmethod
+    def visit_throw(self, expr: "ThrowExpression") -> Any:
+        """Visit a throw expression."""
+        pass
+
+    @abstractmethod
+    def visit_try_catch(self, expr: "TryCatchExpression") -> Any:
+        """Visit a try-catch-finally expression."""
+        pass
+
+    @abstractmethod
+    def visit_template_literal(self, expr: "TemplateLiteralExpression") -> Any:
+        """Visit a template literal expression."""
+        pass
+
 
 # Import these at module level to avoid circular imports
 # They will be imported after the classes are defined

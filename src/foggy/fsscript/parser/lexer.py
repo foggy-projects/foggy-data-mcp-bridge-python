@@ -218,11 +218,35 @@ class FsscriptLexer:
                 parts.append(('str', escape_map.get(self._current_char, self._current_char)))
                 self._advance()
             elif self._current_char == '$' and self._peek() == '{':
-                # Start of interpolation - this will be handled by parser
-                # For now, return what we have and let parser handle the rest
+                # Start of interpolation - extract the expression
                 self._advance()  # Skip $
                 self._advance()  # Skip {
-                parts.append(('interp_start', None))
+
+                # Read the expression until matching }
+                brace_count = 1
+                expr_chars = []
+
+                while self._current_char is not None and brace_count > 0:
+                    if self._current_char == '{':
+                        brace_count += 1
+                        expr_chars.append(self._current_char)
+                    elif self._current_char == '}':
+                        brace_count -= 1
+                        if brace_count > 0:
+                            expr_chars.append(self._current_char)
+                    elif self._current_char == '\\' and self._peek() is not None:
+                        # Handle escape sequences in expression
+                        expr_chars.append(self._current_char)
+                        self._advance()
+                        if self._current_char is not None:
+                            expr_chars.append(self._current_char)
+                    else:
+                        expr_chars.append(self._current_char)
+                    self._advance()
+
+                # Store the expression (excluding the final })
+                expr_str = ''.join(expr_chars).strip()
+                parts.append(('expr', expr_str))
             else:
                 parts.append(('str', self._current_char))
                 self._advance()

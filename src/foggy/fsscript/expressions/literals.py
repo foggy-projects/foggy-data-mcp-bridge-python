@@ -1,6 +1,6 @@
 """Literal expression types."""
 
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 from pydantic import Field
 
 from foggy.fsscript.expressions.base import Expression, ExpressionVisitor
@@ -138,6 +138,44 @@ class ObjectExpression(Expression):
         return f"Object({len(self.properties)} properties)"
 
 
+class TemplateLiteralExpression(Expression):
+    """Template literal expression with interpolation.
+
+    Handles backtick strings like: `hello ${name}!`
+    """
+
+    parts: List[Expression] = Field(
+        default_factory=list,
+        description="List of string expressions and interpolated expressions"
+    )
+
+    def evaluate(self, context: Dict[str, Any]) -> str:
+        """Evaluate all parts and concatenate as string."""
+        result = []
+        for part in self.parts:
+            val = part.evaluate(context)
+            if val is None:
+                result.append('null')
+            elif isinstance(val, bool):
+                result.append('true' if val else 'false')
+            elif isinstance(val, float) and val == int(val):
+                # Display 3.0 as "3" for cleaner output
+                result.append(str(int(val)))
+            elif isinstance(val, (list, dict)):
+                import json
+                result.append(json.dumps(val, ensure_ascii=False))
+            else:
+                result.append(str(val))
+        return ''.join(result)
+
+    def accept(self, visitor: ExpressionVisitor) -> Any:
+        """Accept visitor."""
+        return visitor.visit_template_literal(self)
+
+    def __repr__(self) -> str:
+        return f"TemplateLiteral({len(self.parts)} parts)"
+
+
 __all__ = [
     "LiteralExpression",
     "NullExpression",
@@ -147,4 +185,5 @@ __all__ = [
     "ArrayExpression",
     "ObjectExpression",
     "SpreadExpression",
+    "TemplateLiteralExpression",
 ]

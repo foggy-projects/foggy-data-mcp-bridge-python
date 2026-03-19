@@ -442,6 +442,110 @@ class SwitchExpression(Expression):
         return f"switch ({self.discriminant}) {{ ... }}"
 
 
+class ThrowException(Exception):
+    """Exception raised by throw statement."""
+
+    def __init__(self, value: Any = None):
+        super().__init__()
+        self.value = value
+
+
+class ThrowExpression(Expression):
+    """Throw expression for throwing exceptions."""
+
+    value: Expression = Field(..., description="Value to throw")
+
+    def evaluate(self, context: Dict[str, Any]) -> Any:
+        """Evaluate and throw exception."""
+        val = self.value.evaluate(context)
+        raise ThrowException(val)
+
+    def accept(self, visitor: ExpressionVisitor) -> Any:
+        """Accept visitor."""
+        return visitor.visit_throw(self)
+
+    def __repr__(self) -> str:
+        return f"throw {self.value}"
+
+
+class TryCatchExpression(Expression):
+    """Try-catch-finally expression.
+
+    Handles exception catching with optional catch variable and finally block.
+    """
+
+    try_body: Expression = Field(..., description="Try block body")
+    catch_body: Optional[Expression] = Field(default=None, description="Catch block body")
+    catch_var: Optional[str] = Field(default=None, description="Variable name for caught exception")
+    finally_body: Optional[Expression] = Field(default=None, description="Finally block body")
+
+    def evaluate(self, context: Dict[str, Any]) -> Any:
+        """Evaluate try-catch-finally."""
+        result = None
+
+        try:
+            result = self.try_body.evaluate(context)
+        except ThrowException as e:
+            # Handle user-thrown exceptions
+            if self.catch_body:
+                # Save old value of catch variable if it exists
+                old_value = context.get(self.catch_var) if self.catch_var else None
+
+                # Set catch variable to thrown value
+                if self.catch_var:
+                    context[self.catch_var] = e.value
+
+                try:
+                    result = self.catch_body.evaluate(context)
+                finally:
+                    # Restore old value
+                    if self.catch_var:
+                        if old_value is None:
+                            context.pop(self.catch_var, None)
+                        else:
+                            context[self.catch_var] = old_value
+            else:
+                # No catch block, re-raise after finally
+                raise
+        except Exception as e:
+            # Handle other exceptions (runtime errors)
+            if self.catch_body:
+                # Save old value of catch variable if it exists
+                old_value = context.get(self.catch_var) if self.catch_var else None
+
+                # Set catch variable to exception
+                if self.catch_var:
+                    context[self.catch_var] = e
+
+                try:
+                    result = self.catch_body.evaluate(context)
+                finally:
+                    # Restore old value
+                    if self.catch_var:
+                        if old_value is None:
+                            context.pop(self.catch_var, None)
+                        else:
+                            context[self.catch_var] = old_value
+            else:
+                # No catch block, execute finally and re-raise
+                if self.finally_body:
+                    self.finally_body.evaluate(context)
+                raise
+        finally:
+            # Always execute finally block
+            if self.finally_body:
+                self.finally_body.evaluate(context)
+
+        return result
+
+    def accept(self, visitor: ExpressionVisitor) -> Any:
+        """Accept visitor."""
+        return visitor.visit_try_catch(self)
+
+    def __repr__(self) -> str:
+        return f"try {{ ... }} catch ({self.catch_var}) {{ ... }}"
+
+
 __all__ = [
     "BlockExpression",
     "IfExpression",
@@ -456,4 +560,7 @@ __all__ = [
     "ExportExpression",
     "ImportExpression",
     "SwitchExpression",
+    "ThrowException",
+    "ThrowExpression",
+    "TryCatchExpression",
 ]
