@@ -48,6 +48,7 @@ from foggy.fsscript.expressions.control_flow import (
 from foggy.fsscript.globals.array import ArrayGlobal
 from foggy.fsscript.globals.console import ConsoleGlobal
 from foggy.fsscript.globals.json_global import JsonGlobal
+from foggy.fsscript.scope import ScopeChain
 
 
 class ExpressionEvaluator(ExpressionVisitor):
@@ -63,7 +64,10 @@ class ExpressionEvaluator(ExpressionVisitor):
             context: Initial context with variables and functions
             module_loader: Module loader for import statements
         """
-        self._context = context or {}
+        if isinstance(context, ScopeChain):
+            self._context = context
+        else:
+            self._context = ScopeChain([context or {}])
         self._module_loader = module_loader
         self._setup_builtins()
 
@@ -199,55 +203,99 @@ class ExpressionEvaluator(ExpressionVisitor):
         return None
 
     def visit_for(self, expr: ForExpression) -> Any:
-        """Visit a for expression."""
+        """Visit a for expression with per-iteration let scoping."""
         result = None
 
         if expr.variable and expr.iterable:
             # For-each style
             iterable_val = expr.iterable.accept(self)
-            if isinstance(iterable_val, (list, tuple, str)):
-                if expr.is_for_in:
-                    # for-in: iterate over indices
-                    for i in range(len(iterable_val)):
-                        self._context[expr.variable] = i
-                        try:
-                            result = expr.body.accept(self)
-                        except BreakException:
-                            break
-                        except ContinueException:
-                            continue
+            items = self._for_iteration_items(expr, iterable_val)
+            for item in items:
+                # Per-iteration scope for let variables
+                if isinstance(self._context, ScopeChain):
+                    self._context.push_scope()
+                    self._context.declare(expr.variable, item)
                 else:
-                    # for-of: iterate over values
-                    for item in iterable_val:
-                        self._context[expr.variable] = item
-                        try:
-                            result = expr.body.accept(self)
-                        except BreakException:
-                            break
-                        except ContinueException:
-                            continue
-            elif isinstance(iterable_val, dict):
-                for key in iterable_val:
-                    self._context[expr.variable] = key
-                    try:
-                        result = expr.body.accept(self)
-                    except BreakException:
-                        break
-                    except ContinueException:
-                        continue
-
-        elif expr.init and expr.condition:
-            # C-style
-            expr.init.accept(self)
-            while self._to_bool(expr.condition.accept(self)):
+                    self._context[expr.variable] = item
                 try:
                     result = expr.body.accept(self)
                 except BreakException:
                     break
                 except ContinueException:
+                    continue
+                finally:
+                    if isinstance(self._context, ScopeChain):
+                        self._context.pop_scope()
+
+        elif expr.init and expr.condition:
+            # C-style for loop
+            # Check if init is a let/const declaration (is_declaration flag)
+            is_let = self._is_let_init(expr.init)
+
+            # Push a scope for the for-loop's init variable
+            if is_let and isinstance(self._context, ScopeChain):
+                self._context.push_scope()
+
+            expr.init.accept(self)
+            var_name = self._get_init_var_name(expr.init)
+
+            while self._to_bool(expr.condition.accept(self)):
+                if is_let and var_name and isinstance(self._context, ScopeChain):
+                    # Per-iteration scope: snapshot current loop var value
+                    current_val = self._context.get(var_name)
+                    self._context.push_scope()
+                    self._context.declare(var_name, current_val)
+
+                try:
+                    result = expr.body.accept(self)
+                except BreakException:
+                    if is_let and var_name and isinstance(self._context, ScopeChain):
+                        self._context.pop_scope()
+                    break
+                except ContinueException:
                     pass
+
+                if is_let and var_name and isinstance(self._context, ScopeChain):
+                    self._context.pop_scope()
+
                 if expr.update:
                     expr.update.accept(self)
+
+            if is_let and isinstance(self._context, ScopeChain):
+                self._context.pop_scope()
+
+        return result
+
+    @staticmethod
+    def _for_iteration_items(expr, iterable_val):
+        """Get items for for-each iteration."""
+        if isinstance(iterable_val, (list, tuple)):
+            if expr.is_for_in:
+                return list(range(len(iterable_val)))
+            return list(iterable_val)
+        elif isinstance(iterable_val, dict):
+            return list(iterable_val.keys())
+        elif isinstance(iterable_val, str):
+            if expr.is_for_in:
+                return list(range(len(iterable_val)))
+            return list(iterable_val)
+        return []
+
+    @staticmethod
+    def _is_let_init(init_expr) -> bool:
+        """Check if for-loop init is a let/const (block-scoped) declaration."""
+        from foggy.fsscript.expressions.variables import AssignmentExpression
+        if isinstance(init_expr, AssignmentExpression):
+            return init_expr.is_block_scoped
+        return False
+
+    @staticmethod
+    def _get_init_var_name(init_expr) -> str:
+        """Extract variable name from for-loop init expression."""
+        from foggy.fsscript.expressions.variables import AssignmentExpression, VariableExpression
+        if isinstance(init_expr, AssignmentExpression) and isinstance(init_expr.target, VariableExpression):
+            return init_expr.target.name
+        return None
 
         return result
 

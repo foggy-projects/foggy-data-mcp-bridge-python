@@ -224,51 +224,51 @@ class ForExpression(Expression):
     body: Expression = Field(..., description="Loop body")
 
     def evaluate(self, context: Dict[str, Any]) -> Any:
-        """Execute the for loop."""
+        """Execute the for loop with proper break/continue/return handling."""
         result = None
 
         if self.variable and self.iterable:
             # For-each style
             iterable_val = self.iterable.evaluate(context)
-            if isinstance(iterable_val, (list, tuple)):
-                if self.is_for_in:
-                    # for-in: iterate over indices
-                    for i in range(len(iterable_val)):
-                        context[self.variable] = i
-                        result = self.body.evaluate(context)
-                else:
-                    # for-of: iterate over values
-                    for item in iterable_val:
-                        context[self.variable] = item
-                        result = self.body.evaluate(context)
-            elif isinstance(iterable_val, dict):
-                # Both for-in and for-of iterate over keys for dicts
-                for key in iterable_val:
-                    context[self.variable] = key
+            items = self._get_iteration_items(iterable_val)
+            for item in items:
+                context[self.variable] = item
+                try:
                     result = self.body.evaluate(context)
-            elif isinstance(iterable_val, str):
-                if self.is_for_in:
-                    # for-in: iterate over indices
-                    for i in range(len(iterable_val)):
-                        context[self.variable] = i
-                        result = self.body.evaluate(context)
-                else:
-                    # for-of: iterate over characters
-                    for char in iterable_val:
-                        context[self.variable] = char
-                        result = self.body.evaluate(context)
+                except BreakException:
+                    break
+                except ContinueException:
+                    continue
 
         elif self.init and self.condition:
-            # C-style for loop
-            local_context = context.copy()
-            self.init.evaluate(local_context)
+            # C-style for loop — init runs in the same context
+            self.init.evaluate(context)
 
-            while self._to_bool(self.condition.evaluate(local_context)):
-                result = self.body.evaluate(local_context)
+            while self._to_bool(self.condition.evaluate(context)):
+                try:
+                    result = self.body.evaluate(context)
+                except BreakException:
+                    break
+                except ContinueException:
+                    pass  # skip to update
                 if self.update:
-                    self.update.evaluate(local_context)
+                    self.update.evaluate(context)
 
         return result
+
+    def _get_iteration_items(self, iterable_val):
+        """Get the items to iterate over based on for-in/for-of semantics."""
+        if isinstance(iterable_val, (list, tuple)):
+            if self.is_for_in:
+                return list(range(len(iterable_val)))
+            return list(iterable_val)
+        elif isinstance(iterable_val, dict):
+            return list(iterable_val.keys())
+        elif isinstance(iterable_val, str):
+            if self.is_for_in:
+                return list(range(len(iterable_val)))
+            return list(iterable_val)
+        return []
 
     def accept(self, visitor: ExpressionVisitor) -> Any:
         """Accept visitor."""

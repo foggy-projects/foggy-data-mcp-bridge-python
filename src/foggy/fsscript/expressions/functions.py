@@ -32,6 +32,10 @@ class FunctionCallExpression(Expression):
             elif isinstance(obj_val, list):
                 return self._call_list_method(obj_val, method_name, args)
             elif isinstance(obj_val, dict):
+                # First check if dict has a callable value at this key
+                member_val = obj_val.get(method_name)
+                if callable(member_val):
+                    return member_val(*args)
                 return self._call_dict_method(obj_val, method_name, args)
 
             # Try to get method from object
@@ -183,6 +187,13 @@ class FunctionCallExpression(Expression):
             if callback is None:
                 return False
             return any(callback(item) for item in obj)
+        elif method == "foreach":
+            # forEach with callback function
+            callback = args[0] if args else None
+            if callback:
+                for item in obj:
+                    callback(item)
+            return None
         elif method == "add":
             # Add item to array (alias for push, but returns array for chaining)
             obj.append(args[0] if args else None)
@@ -207,6 +218,14 @@ class FunctionCallExpression(Expression):
             return len(obj)
         elif method == "remove":
             return obj.pop(args[0], None) if args else None
+        elif method == "set":
+            if len(args) >= 2:
+                obj[args[0]] = args[1]
+            return obj
+        elif method == "delete":
+            if args:
+                obj.pop(args[0], None)
+            return True
         else:
             raise RuntimeError(f"Unknown dict method '{method}'")
 
@@ -421,23 +440,40 @@ class FunctionDefinitionExpression(Expression):
     name: Optional[str] = Field(default=None, description="Function name for named declarations")
 
     def evaluate(self, context: Dict[str, Any]) -> Callable:
-        """Return a callable function."""
-        # For closures: we need to share the same context reference
-        # so modifications to variables are visible across calls
+        """Return a callable function with proper lexical closure.
+
+        Captures the scope chain at definition time.  Each call gets the
+        captured chain + a fresh local scope, matching JS/Java semantics.
+        """
+        from foggy.fsscript.scope import ScopeChain
+
+        # 1. Capture scope chain at definition time
+        if isinstance(context, ScopeChain):
+            captured_scopes = context.snapshot_scopes()
+        else:
+            # Legacy path: wrap plain dict
+            captured_scopes = [dict(context)]
+
+        body_expr = self.body
 
         def func(*args):
-            # Create new scope with parameters
-            # Use the same context reference for closure support
+            from foggy.fsscript.expressions.control_flow import ReturnException
+
+            # 2. Create new scope chain: definition-time scopes + fresh local
+            call_context = ScopeChain(captured_scopes)
+
+            # 3. Bind parameters in local scope (shadowing, not polluting parent)
             for i, param in enumerate(self.parameters):
-                context[param] = args[i] if i < len(args) else None
+                call_context.declare(param, args[i] if i < len(args) else None)
+
             try:
-                return self.body.evaluate(context)
-            except Exception as e:
-                # Let ReturnException propagate to the caller
-                from foggy.fsscript.expressions.control_flow import ReturnException
-                if isinstance(e, ReturnException):
-                    return e.value
-                raise
+                result = body_expr.evaluate(call_context)
+            except ReturnException as e:
+                result = e.value
+
+            # 4. Propagate __exports__ back to the defining context
+            _propagate_exports(call_context, context)
+            return result
 
         # If named function, bind it to the context
         if self.name:
@@ -454,6 +490,17 @@ class FunctionDefinitionExpression(Expression):
         if self.name:
             return f"function {self.name}({params_str}) => {self.body}"
         return f"({params_str}) => {self.body}"
+
+
+def _propagate_exports(child_ctx, parent_ctx) -> None:
+    """Copy __exports__ from child to parent context."""
+    child_exports = child_ctx.get("__exports__")
+    if child_exports:
+        if "__exports__" not in parent_ctx:
+            parent_ctx["__exports__"] = {}
+        parent_exports = parent_ctx.get("__exports__")
+        if isinstance(parent_exports, dict):
+            parent_exports.update(child_exports)
 
 
 __all__ = [

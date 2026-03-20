@@ -34,6 +34,7 @@ from foggy.fsscript.expressions.variables import (
     MemberAccessExpression,
     IndexAccessExpression,
     AssignmentExpression,
+    DestructuringExpression,
 )
 from foggy.fsscript.expressions.functions import (
     FunctionCallExpression,
@@ -142,6 +143,32 @@ class FsscriptParser:
         self._current_token: Optional[Token] = None
         self._previous_token: Optional[Token] = None
         self._advance()
+
+    def _save_state(self) -> dict:
+        """Save parser+lexer state for lookahead."""
+        return {
+            "current_token": self._current_token,
+            "previous_token": self._previous_token,
+            "lexer_pos": self._lexer._pos,
+            "lexer_line": self._lexer._line,
+            "lexer_column": self._lexer._column,
+            "lexer_char": self._lexer._current_char,
+            "lexer_prev_type": self._lexer._previous_token_type,
+            "lexer_newline": self._lexer._newline_encountered,
+            "lexer_pending": self._lexer._pending_token,
+        }
+
+    def _restore_state(self, state: dict) -> None:
+        """Restore parser+lexer state after lookahead."""
+        self._current_token = state["current_token"]
+        self._previous_token = state["previous_token"]
+        self._lexer._pos = state["lexer_pos"]
+        self._lexer._line = state["lexer_line"]
+        self._lexer._column = state["lexer_column"]
+        self._lexer._current_char = state["lexer_char"]
+        self._lexer._previous_token_type = state["lexer_prev_type"]
+        self._lexer._newline_encountered = state["lexer_newline"]
+        self._lexer._pending_token = state["lexer_pending"]
 
     def _advance(self) -> Token:
         """Advance to next token, return the consumed token."""
@@ -288,6 +315,7 @@ class FsscriptParser:
         """Parse var/let/const declaration."""
         keyword = self._advance()  # var/let/const
         is_const = keyword.type == TokenType.CONST
+        is_block_scoped = keyword.type in (TokenType.LET, TokenType.CONST)
 
         # Check for destructuring
         if self._check(TokenType.LBRACE_DESTR, TokenType.LBRACE):
@@ -308,13 +336,19 @@ class FsscriptParser:
         return AssignmentExpression(
             target=VariableExpression(name=name),
             value=init or NullExpression(),
+            is_declaration=True,
+            is_block_scoped=is_block_scoped,
             line=keyword.line,
             column=keyword.column,
         )
 
     def _parse_destructuring_declaration(self, keyword_type: TokenType) -> Expression:
-        """Parse destructuring declaration like const {a, b} = obj."""
+        """Parse destructuring declaration like const {a = 1, b} = obj.
+
+        Mirrors Java's DestructurePatternExp / DestructureItemExp.
+        """
         self._expect(TokenType.LBRACE_DESTR) if self._check(TokenType.LBRACE_DESTR) else self._expect(TokenType.LBRACE)
+        is_block_scoped = keyword_type in (TokenType.LET, TokenType.CONST)
 
         properties = []
         while not self._check(TokenType.RBRACE):
@@ -328,7 +362,7 @@ class FsscriptParser:
                 properties.append({
                     'name': prop_name,
                     'alias': None,
-                    'default': default_value
+                    'default': default_value,
                 })
             else:
                 raise InvalidSyntaxError("Expected property name in destructuring pattern")
@@ -339,13 +373,14 @@ class FsscriptParser:
         self._expect(TokenType.RBRACE)
         self._expect(TokenType.EQ)
 
-        init = self.parse_expression()
+        source = self.parse_expression()
         self._match(TokenType.SEMICOLON)
 
-        # Create a destructuring expression (simplified - creates multiple assignments)
-        return AssignmentExpression(
-            target=VariableExpression(name='__destr__'),
-            value=init,
+        return DestructuringExpression(
+            properties=properties,
+            source=source,
+            is_declaration=True,
+            is_block_scoped=is_block_scoped,
         )
 
     def _parse_function_declaration(self) -> FunctionDefinitionExpression:
@@ -442,7 +477,8 @@ class FsscriptParser:
 
         # Check for for-in or for-of
         if self._check(TokenType.VAR, TokenType.LET, TokenType.CONST):
-            self._advance()
+            var_keyword = self._advance()
+            var_is_block_scoped = var_keyword.type in (TokenType.LET, TokenType.CONST)
             var_name = self._expect(TokenType.IDENTIFIER).value
 
             if self._match(TokenType.IN):
@@ -476,10 +512,12 @@ class FsscriptParser:
                 )
 
             else:
-                # C-style for with var declaration
+                # C-style for with var/let/const declaration
                 init = AssignmentExpression(
                     target=VariableExpression(name=var_name),
                     value=self.parse_expression() if self._match(TokenType.EQ) else NullExpression(),
+                    is_declaration=True,
+                    is_block_scoped=var_is_block_scoped,
                 )
                 return self._parse_c_style_for_rest(init, keyword)
 
@@ -661,24 +699,46 @@ class FsscriptParser:
 
         # export { ... }
         if self._check(TokenType.LBRACE):
-            self._advance()
-            names = []
-            while not self._check(TokenType.RBRACE):
-                name = self._expect(TokenType.IDENTIFIER).value
-                if self._match(TokenType.AS):
-                    alias = self._expect(TokenType.IDENTIFIER).value
-                    names.append(alias)  # Use alias as export name
-                else:
-                    names.append(name)
-                if not self._match(TokenType.COMMA):
-                    break
-            self._expect(TokenType.RBRACE)
-            self._match(TokenType.SEMICOLON)
-            return ExportExpression(
-                names=names,
-                line=keyword.line,
-                column=keyword.column,
-            )
+            # Lookahead: is this export { name: value } (object) or export { name, name } (list)?
+            saved_state = self._save_state()
+            self._advance()  # consume {
+            is_object_export = False
+            if self._check(TokenType.IDENTIFIER):
+                self._advance()  # consume first identifier
+                if self._check(TokenType.COLON):
+                    is_object_export = True
+            self._restore_state(saved_state)  # rewind
+
+            if is_object_export:
+                # export { XX: 1231, BB: 22 } → treat as export default { ... }
+                obj_expr = self._parse_object_literal()
+                self._match(TokenType.SEMICOLON)
+                return ExportExpression(
+                    value=obj_expr,
+                    is_default=True,
+                    line=keyword.line,
+                    column=keyword.column,
+                )
+            else:
+                # export { name1, name2 }
+                self._advance()  # consume {
+                names = []
+                while not self._check(TokenType.RBRACE):
+                    name = self._expect(TokenType.IDENTIFIER).value
+                    if self._match(TokenType.AS):
+                        alias = self._expect(TokenType.IDENTIFIER).value
+                        names.append(alias)
+                    else:
+                        names.append(name)
+                    if not self._match(TokenType.COMMA):
+                        break
+                self._expect(TokenType.RBRACE)
+                self._match(TokenType.SEMICOLON)
+                return ExportExpression(
+                    names=names,
+                    line=keyword.line,
+                    column=keyword.column,
+                )
 
         # export var/function/class
         if self._check(TokenType.VAR, TokenType.LET, TokenType.CONST):
@@ -1467,7 +1527,8 @@ class FsscriptParser:
         """Parse member access expression."""
         token = self._advance()  # consume .
 
-        member_token = self._expect(TokenType.IDENTIFIER)
+        # Allow keywords as property names (e.g., obj.default, obj.delete)
+        member_token = self._expect_identifier_or_keyword()
         member = member_token.value
 
         return MemberAccessExpression(
@@ -1481,7 +1542,8 @@ class FsscriptParser:
         """Parse optional member access expression (?.)."""
         token = self._advance()  # consume ?.
 
-        member_token = self._expect(TokenType.IDENTIFIER)
+        # Allow keywords as property names
+        member_token = self._expect_identifier_or_keyword()
         member = member_token.value
 
         return MemberAccessExpression(
@@ -1490,6 +1552,33 @@ class FsscriptParser:
             line=token.line,
             column=token.column,
         )
+
+    def _expect_identifier_or_keyword(self) -> Token:
+        """Expect an identifier or keyword token (for property names).
+
+        In JavaScript, keywords like ``default``, ``delete``, ``new`` etc.
+        are valid property names after ``.``.
+        """
+        current = self._current()
+        if current.type == TokenType.IDENTIFIER:
+            return self._advance()
+        # Accept reserved words as property names
+        _keyword_types = {
+            TokenType.DEFAULT, TokenType.DELETE, TokenType.NEW,
+            TokenType.RETURN, TokenType.IF, TokenType.ELSE,
+            TokenType.FOR, TokenType.WHILE, TokenType.SWITCH,
+            TokenType.CASE, TokenType.BREAK, TokenType.CONTINUE,
+            TokenType.FUNCTION, TokenType.VAR, TokenType.LET,
+            TokenType.CONST, TokenType.EXPORT, TokenType.IMPORT,
+            TokenType.FROM, TokenType.AS, TokenType.IN, TokenType.OF,
+            TokenType.NULL, TokenType.TRUE, TokenType.FALSE,
+            TokenType.TRY, TokenType.CATCH, TokenType.FINALLY,
+            TokenType.THROW,
+        }
+        if current.type in _keyword_types:
+            return self._advance()
+        # Fallback: expect identifier (will raise UnexpectedTokenError)
+        return self._expect(TokenType.IDENTIFIER)
 
 
 __all__ = [

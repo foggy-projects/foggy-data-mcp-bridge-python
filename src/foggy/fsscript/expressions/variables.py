@@ -115,13 +115,25 @@ class AssignmentExpression(Expression):
 
     target: Expression = Field(..., description="Target (variable or member)")
     value: Expression = Field(..., description="Value to assign")
+    is_declaration: bool = Field(default=False, description="True for var/let/const declarations")
+    is_block_scoped: bool = Field(default=False, description="True for let/const (not var)")
+
 
     def evaluate(self, context: Dict[str, Any]) -> Any:
         """Assign value and return it."""
         val = self.value.evaluate(context)
 
         if isinstance(self.target, VariableExpression):
-            context[self.target.name] = val
+            if self.is_declaration:
+                # var/let/const: declare in local scope (shadow outer vars)
+                from foggy.fsscript.scope import ScopeChain
+                if isinstance(context, ScopeChain):
+                    context.declare(self.target.name, val)
+                else:
+                    context[self.target.name] = val
+            else:
+                # Plain assignment: update existing or create in local
+                context[self.target.name] = val
         elif isinstance(self.target, MemberAccessExpression):
             obj_val = self.target.obj.evaluate(context)
             if isinstance(obj_val, dict):
@@ -146,9 +158,78 @@ class AssignmentExpression(Expression):
         return f"({self.target} = {self.value})"
 
 
+class DestructuringExpression(Expression):
+    """Destructuring assignment with defaults.
+
+    Mirrors Java's ``DestructurePatternExp``.  Evaluates the source
+    expression, then for each item extracts the named property from the
+    resulting dict (or uses the default value when the property is
+    ``None`` / missing).
+
+    Example::
+
+        const { name = 'date', foreignKey = 'date_key' } = options;
+
+    AST::
+
+        DestructuringExpression(
+            properties=[
+                {"name": "name",       "alias": None, "default": StringExpression("date")},
+                {"name": "foreignKey", "alias": None, "default": StringExpression("date_key")},
+            ],
+            source=VariableExpression("options"),
+        )
+    """
+
+    properties: List[dict] = Field(
+        ...,
+        description=(
+            'List of {"name": str, "alias": str|None, "default": Expression|None}'
+        ),
+    )
+    source: Expression = Field(..., description="Source expression to destructure")
+    is_declaration: bool = Field(default=True)
+    is_block_scoped: bool = Field(default=False)
+
+    def evaluate(self, context: Dict[str, Any]) -> Any:
+        """Extract properties from source into context."""
+        src_val = self.source.evaluate(context)
+        if not isinstance(src_val, dict):
+            src_val = {}
+
+        from foggy.fsscript.scope import ScopeChain
+
+        for prop in self.properties:
+            prop_name: str = prop["name"]
+            alias: str = prop.get("alias") or prop_name
+            default_expr: Optional[Expression] = prop.get("default")
+
+            value = src_val.get(prop_name)
+
+            # Apply default when value is None / missing (Java semantics)
+            if value is None and default_expr is not None:
+                value = default_expr.evaluate(context)
+
+            if self.is_declaration and isinstance(context, ScopeChain):
+                context.declare(alias, value)
+            else:
+                context[alias] = value
+
+        return src_val
+
+    def accept(self, visitor: ExpressionVisitor) -> Any:
+        """Accept visitor — reuse assignment visitor."""
+        return visitor.visit_assignment(self)
+
+    def __repr__(self) -> str:
+        names = ", ".join(p["name"] for p in self.properties)
+        return f"const {{{names}}} = {self.source}"
+
+
 __all__ = [
     "VariableExpression",
     "MemberAccessExpression",
     "IndexAccessExpression",
     "AssignmentExpression",
+    "DestructuringExpression",
 ]
