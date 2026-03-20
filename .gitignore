@@ -65,4 +65,4 @@ Thumbs.db
 
 # Project specific
 *.pyc
-.cache/
+.cache/charts/

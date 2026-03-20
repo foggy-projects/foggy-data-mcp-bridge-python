@@ -1,0 +1,92 @@
+/**
+ * 订单查询模型 
+ *
+ * @caption 订单查询
+ * @description 订单事实表查询模型，支持按日期、客户、门店、渠道、促销等维度查询
+ */
+const fo = loadTableModel('FactOrderModel');
+
+export const queryModel = {
+    name: 'FactOrderQueryModel',
+    caption: '订单查询',
+    description: '订单事实表查询模型，支持按日期、客户、门店、渠道、促销等维度查询',
+    loader: 'v2',
+
+    model: fo,
+
+    columnGroups: [
+        {
+            caption: '订单信息',
+            items: [
+                { ref: fo.orderId },
+                { ref: fo.orderStatus },
+                { ref: fo.paymentStatus },
+                { ref: fo.orderTime }
+            ]
+        },
+        {
+            caption: '日期维度',
+            items: [
+                { ref: fo.orderDate },
+                { ref: fo.orderDate$year },
+                { ref: fo.orderDate$quarter },
+                { ref: fo.orderDate$month },
+                { ref: fo.orderDate$monthName },
+                { ref: fo.orderDate$dayOfWeek },
+                { ref: fo.orderDate$dayName },
+                { ref: fo.orderDate$isWeekend }
+            ]
+        },
+        {
+            caption: '客户维度',
+            items: [
+                { ref: fo.customer },
+                { ref: fo.customer$customerType },
+                { ref: fo.customer$gender },
+                { ref: fo.customer$ageGroup },
+                { ref: fo.customer$province },
+                { ref: fo.customer$city },
+                { ref: fo.customer$memberLevel }
+            ]
+        },
+        {
+            caption: '门店维度',
+            items: [
+                { ref: fo.store },
+                { ref: fo.store$storeType },
+                { ref: fo.store$province },
+                { ref: fo.store$city },
+                { ref: fo.store$managerName }
+            ]
+        },
+        {
+            caption: '渠道维度',
+            items: [
+                { ref: fo.channel },
+                { ref: fo.channel$channelType },
+                { ref: fo.channel$platform }
+            ]
+        },
+        {
+            caption: '促销维度',
+            items: [
+                { ref: fo.promotion },
+                { ref: fo.promotion$promotionType },
+                { ref: fo.promotion$discountRate }
+            ]
+        },
+        {
+            caption: '度量',
+            items: [
+                { ref: fo.quantity },
+                { ref: fo.amount },
+                { ref: fo.discountAmount },
+                { ref: fo.freightAmount },
+                { ref: fo.payAmount }
+            ]
+        }
+    ],
+
+
+    accesses: []
+};

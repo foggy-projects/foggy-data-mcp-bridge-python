@@ -1,0 +1,54 @@
+/**
+ * 门店维度查询模型 
+ *
+ * @caption 门店维度查询
+ * @description 查询门店基础信息，包括门店类型、地区、店长、面积等属性
+ */
+const ds = loadTableModel('DimStoreModel');
+
+export const queryModel = {
+    name: 'DimStoreQueryModel',
+    caption: '门店维度查询',
+    description: '查询门店基础信息，包括门店类型、地区、店长、面积等属性',
+    loader: 'v2',
+
+    model: ds,
+
+    columnGroups: [
+        {
+            caption: '门店基本信息',
+            items: [
+                { ref: ds.storeName },
+                { ref: ds.storeId },
+                { ref: ds.storeType },
+                { ref: ds.status }
+            ]
+        },
+        {
+            caption: '地区信息',
+            items: [
+                { ref: ds.province },
+                { ref: ds.city },
+                { ref: ds.district },
+                { ref: ds.address }
+            ]
+        },
+        {
+            caption: '运营信息',
+            items: [
+                { ref: ds.managerName },
+                { ref: ds.openDate },
+                { ref: ds.areaSqm }
+            ]
+        },
+        {
+            caption: '时间信息',
+            items: [
+                { ref: ds.createdAt }
+            ]
+        }
+    ],
+
+
+    accesses: []
+};

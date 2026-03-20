@@ -1,0 +1,64 @@
+/**
+ * MCP 审计日志查询模型
+ *
+ * @caption MCP工具调用日志查询
+ * @description 查询和分析MCP工具调用记录，支持按工具、角色、时间等维度分析
+ */
+const mal = loadTableModel('McpAuditLogModel');
+
+export const queryModel = {
+    name: 'McpAuditLogQueryModel',
+    caption: 'MCP工具调用日志查询',
+    description: '查询和分析MCP工具调用记录，支持按工具、角色、时间等维度统计分析',
+    loader: 'v2',
+
+    model: mal,
+
+    columnGroups: [
+        {
+            caption: '追踪信息',
+            items: [
+                { ref: mal.id },
+                { ref: mal.traceId },
+                { ref: mal.requestId }
+            ]
+        },
+        {
+            caption: '调用信息',
+            items: [
+                { ref: mal.toolName },
+                { ref: mal.userRole },
+                { ref: mal.timestamp },
+                { ref: mal.requestPath },
+                { ref: mal.clientIp }
+            ]
+        },
+        {
+            caption: '执行结果',
+            items: [
+                { ref: mal.success },
+                { ref: mal.durationMs },
+                { ref: mal.resultSummary }
+            ]
+        },
+        {
+            caption: '错误信息',
+            items: [
+                { ref: mal.errorType },
+                { ref: mal.errorMessage }
+            ]
+        },
+        {
+            caption: '统计度量',
+            items: [
+                { ref: mal.avgDuration },
+                { ref: mal.maxDuration },
+                { ref: mal.minDuration }
+            ]
+        }
+    ],
+
+    orders: [],
+
+    accesses: []
+};

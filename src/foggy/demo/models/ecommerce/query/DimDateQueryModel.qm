@@ -1,0 +1,55 @@
+/**
+ * 日期维度查询模型 
+ *
+ * @caption 日期维度查询
+ * @description 查询日期维度信息，包括年、季度、月、周、日等时间层级属性
+ */
+const dd = loadTableModel('DimDateModel');
+
+export const queryModel = {
+    name: 'DimDateQueryModel',
+    caption: '日期维度查询',
+    description: '查询日期维度信息，包括年、季度、月、周、日等时间层级属性',
+    loader: 'v2',
+
+    model: dd,
+
+    columnGroups: [
+        {
+            caption: '日期基本信息',
+            items: [
+                { ref: dd.dateKey },
+                { ref: dd.fullDate }
+            ]
+        },
+        {
+            caption: '时间层级',
+            items: [
+                { ref: dd.year },
+                { ref: dd.quarter },
+                { ref: dd.month },
+                { ref: dd.monthName },
+                { ref: dd.weekOfYear }
+            ]
+        },
+        {
+            caption: '日期详情',
+            items: [
+                { ref: dd.dayOfMonth },
+                { ref: dd.dayOfWeek },
+                { ref: dd.dayName },
+                { ref: dd.isWeekend },
+                { ref: dd.isHoliday }
+            ]
+        },
+        {
+            caption: '财务日期',
+            items: [
+                { ref: dd.fiscalYear },
+                { ref: dd.fiscalQuarter }
+            ]
+        }
+    ],
+
+    accesses: []
+};

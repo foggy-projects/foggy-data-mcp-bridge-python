@@ -109,6 +109,9 @@ class DbModelDimensionImpl(BaseModel):
     parent_column: Optional[str] = Field(default=None, description="Parent column for hierarchy")
     level_column: Optional[str] = Field(default=None, description="Level column for hierarchy")
 
+    # Description
+    description: Optional[str] = Field(default=None, description="Human-readable description")
+
     # Display
     visible: bool = Field(default=True, description="Visible in UI")
     sortable: bool = Field(default=True, description="Can be sorted")
@@ -154,6 +157,7 @@ class DbModelMeasureImpl(BaseModel):
     # Identity
     name: str = Field(..., description="Measure name")
     alias: Optional[str] = Field(default=None, description="Display alias")
+    description: Optional[str] = Field(default=None, description="Human-readable description")
 
     # Column reference (for basic measures)
     column: Optional[str] = Field(default=None, description="Source column name")

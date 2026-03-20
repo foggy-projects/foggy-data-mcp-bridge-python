@@ -1,0 +1,83 @@
+/**
+ * 嵌套维度销售查询模型
+ *
+ * @caption 嵌套维度销售查询
+ * @description 演示嵌套维度（雪花模型）的查询模型，支持使用路径语法访问嵌套维度
+ */
+const fs = loadTableModel('FactSalesNestedDimModel');
+
+export const queryModel = {
+    name: 'FactSalesNestedDimQueryModel',
+    caption: '嵌套维度销售查询',
+    description: '演示嵌套维度（雪花模型）的查询模型，支持使用路径语法访问嵌套维度',
+    loader: 'v2',
+
+    model: fs,
+
+    columnGroups: [
+        {
+            caption: '日期维度',
+            items: [
+                { ref: fs.salesDate },
+                { ref: fs.salesDate$year },
+                { ref: fs.salesDate$quarter },
+                { ref: fs.salesDate$month }
+            ]
+        },
+        {
+            caption: '商品维度（一级）',
+            items: [
+                { ref: fs.product },
+                { ref: fs.product$brand },
+                { ref: fs.product$unitPrice }
+            ]
+        },
+        {
+            caption: '品类维度（二级，通过路径访问）',
+            items: [
+                // 使用路径 product.category 访问嵌套维度
+                { ref: fs.product.category },
+                { ref: fs.product.category$categoryId },
+                { ref: fs.product.category$categoryLevel }
+            ]
+        },
+        {
+            caption: '品类组维度（三级，通过路径访问）',
+            items: [
+                // 使用路径 product.category.group 访问嵌套维度
+                { ref: fs.product.category.group },
+                { ref: fs.product.category.group$groupId },
+                { ref: fs.product.category.group$groupType }
+            ]
+        },
+        {
+            caption: '门店维度（一级）',
+            items: [
+                { ref: fs.store },
+                { ref: fs.store$storeType }
+            ]
+        },
+        {
+            caption: '区域维度（二级，通过路径访问）',
+            items: [
+                // 使用路径 store.region 访问嵌套维度
+                { ref: fs.store.region },
+                { ref: fs.store.region$regionId },
+                { ref: fs.store.region$province },
+                { ref: fs.store.region$city }
+            ]
+        },
+        {
+            caption: '度量',
+            items: [
+                { ref: fs.quantity },
+                { ref: fs.salesAmount },
+                { ref: fs.costAmount }
+            ]
+        }
+    ],
+
+
+
+    accesses: []
+};
