@@ -61,6 +61,30 @@ class DataSourceConfig(BaseModel):
 
         raise ValueError(f"Unsupported data source type: {self.source_type}")
 
+    def get_executor_url(self) -> str:
+        """Build a plain connection URL for create_executor_from_url().
+
+        Unlike get_connection_url() which produces SQLAlchemy-style URLs,
+        this returns a simple scheme://user:pass@host:port/db URL.
+        """
+        if self.connection_url:
+            # Strip SQLAlchemy driver suffixes
+            url = self.connection_url
+            for suffix in ["+aiomysql", "+asyncpg", "+aiosqlite", "+aiodbc"]:
+                url = url.replace(suffix, "")
+            return url
+
+        if self.source_type == DataSourceType.MYSQL:
+            return f"mysql://{self.username}:{self.password}@{self.host}:{self.port}/{self.database}"
+        elif self.source_type == DataSourceType.POSTGRESQL:
+            return f"postgresql://{self.username}:{self.password}@{self.host}:{self.port}/{self.database}"
+        elif self.source_type == DataSourceType.SQLITE:
+            return f"sqlite:///{self.database}"
+        elif self.source_type == DataSourceType.SQLSERVER:
+            return f"sqlserver://{self.username}:{self.password}@{self.host}:{self.port}/{self.database}"
+
+        raise ValueError(f"Unsupported data source type: {self.source_type}")
+
 
 class DataSourceManager(BaseModel):
     """Manager for multiple data sources."""

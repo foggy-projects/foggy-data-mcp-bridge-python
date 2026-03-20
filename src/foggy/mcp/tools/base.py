@@ -15,7 +15,7 @@ class BaseMcpTool(McpTool, ABC):
     # Class-level metadata (override in subclasses)
     tool_name: ClassVar[str] = "base_tool"
     tool_description: ClassVar[str] = "Base tool class"
-    tool_category: ClassVar[ToolCategory] = ToolCategory.GENERAL
+    tool_category: ClassVar[ToolCategory] = ToolCategory.SYSTEM
     tool_tags: ClassVar[List[str]] = []
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):

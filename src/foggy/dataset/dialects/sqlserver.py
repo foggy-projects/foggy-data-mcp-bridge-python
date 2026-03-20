@@ -72,9 +72,12 @@ class SqlServerDialect(FDialect):
     def get_table_exists_sql(self, table_name: str, schema: Optional[str] = None) -> str:
         """Get SQL to check if table exists."""
         schema = schema or "dbo"
+        # Escape single quotes to prevent SQL injection
+        safe_schema = schema.replace("'", "''")
+        safe_name = table_name.replace("'", "''")
         return (
             f"SELECT 1 FROM information_schema.tables "
-            f"WHERE table_schema = '{schema}' AND table_name = '{table_name}'"
+            f"WHERE table_schema = '{safe_schema}' AND table_name = '{safe_name}'"
         )
 
     def get_current_timestamp_sql(self) -> str:

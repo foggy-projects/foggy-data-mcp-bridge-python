@@ -1,0 +1,139 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "description": "对指定模型执行数据查询（V3版本：支持内联聚合表达式，系统自动处理 groupBy）",
+  "properties": {
+    "model": {
+      "type": "string",
+      "description": "模型名称，如 TmsCustomerModel"
+    },
+    "payload": {
+      "type": "object",
+      "description": "查询参数",
+      "properties": {
+        "calculatedFields": {
+          "type": "array",
+          "description": "计算字段定义（复杂表达式、窗口函数或需指定 agg 时使用）",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string", "description": "字段名称，在 columns 中引用" },
+              "expression": { "type": "string", "description": "表达式，支持算术运算、函数、窗口函数(RANK/ROW_NUMBER/LAG等)" },
+              "agg": { "type": "string", "enum": ["SUM", "AVG", "MAX", "MIN", "COUNT", "COUNT_DISTINCT", "STDDEV_POP", "STDDEV_SAMP", "VAR_POP", "VAR_SAMP"], "description": "聚合类型，groupBy 场景使用" },
+              "partitionBy": { "type": "array", "items": { "type": "string" }, "description": "窗口函数 PARTITION BY 字段列表" },
+              "windowOrderBy": { "type": "array", "items": { "type": "object", "properties": { "field": { "type": "string" }, "dir": { "type": "string", "enum": ["asc", "desc"] } } }, "description": "窗口函数 ORDER BY" },
+              "windowFrame": { "type": "string", "description": "窗口帧，如 ROWS BETWEEN 6 PRECEDING AND CURRENT ROW" }
+            },
+            "required": ["name", "expression"]
+          }
+        },
+        "columns": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "查询字段列表。\uD83D\uDCA1 提示：支持内联聚合，例如 'sum(amount)' 或 'count(orderId) as cnt'，无需单独写 groupBy。"
+        },
+        "slice": {
+          "type": "array",
+          "description": "过滤条件（数组内条件默认 AND 连接，用 $or/$and 显式组合）。简写：{ \"field\": \"value\" } 等价于 { \"field\": \"field\", \"op\": \"=\", \"value\": \"value\" }",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "description": "单个过滤条件",
+                "properties": {
+                  "field": { "type": "string", "description": "字段名" },
+                  "op": { "type": "string", "description": "操作符：=, !=, >, <, like, in, [], [), is null 等" },
+                  "value": { "description": "过滤值，is null/is not null 时不需要；字段引用用 {\"$field\": \"fieldName\"}" }
+                },
+                "required": ["field", "op"]
+              },
+              {
+                "type": "object",
+                "description": "$expr 表达式条件：字段间比较，支持算术运算",
+                "properties": {
+                  "$expr": { "type": "string", "description": "表达式如 \"salesAmount > costAmount * 1.2\"" }
+                },
+                "required": ["$expr"]
+              },
+              {
+                "type": "object",
+                "description": "OR 条件组",
+                "properties": {
+                  "$or": { "type": "array", "description": "子条件用 OR 连接", "items": { "$ref": "#/properties/payload/properties/slice/items" } }
+                },
+                "required": ["$or"]
+              },
+              {
+                "type": "object",
+                "description": "AND 条件组",
+                "properties": {
+                  "$and": { "type": "array", "description": "子条件用 AND 连接", "items": { "$ref": "#/properties/payload/properties/slice/items" } }
+                },
+                "required": ["$and"]
+              },
+              {
+                "type": "object",
+                "description": "等值条件简写：{ \"fieldName\": value }，运行时自动转换为 { \"field\": \"fieldName\", \"op\": \"=\", \"value\": value }",
+                "additionalProperties": true
+              }
+            ]
+          }
+        },
+        "orderBy": {
+          "type": "array",
+          "description": "排序规则。支持简写：\"field\"(升序)、\"field desc\"(降序)、\"-field\"(降序)",
+          "items": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "简写格式：\"field\"=升序，\"field desc\"=降序，\"-field\"=降序"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "field": { "type": "string", "description": "排序字段" },
+                  "dir": { "type": "string", "enum": ["asc", "desc", "ASC", "DESC"], "default": "asc" },
+                  "nullFirst": { "type": "boolean" },
+                  "nullLast": { "type": "boolean" }
+                },
+                "required": ["field"]
+              }
+            ]
+          }
+        },
+        "groupBy": {
+          "type": "array",
+          "description": "分组配置。支持简写：\"field\" 等价于 { \"field\": \"field\" }",
+          "items": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "简写格式：字段名"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "field": { "type": "string" },
+                  "agg": { "type": "string", "enum": ["MAX", "MIN", "SUM", "AVG", "COUNT", "COUNT_DISTINCT", "STDDEV_POP", "STDDEV_SAMP", "VAR_POP", "VAR_SAMP", "PK"] }
+                },
+                "required": ["field"]
+              }
+            ]
+          }
+        },
+        "start": { "type": "integer", "default": 0, "description": "起始行号" },
+        "limit": { "type": "integer", "default": 1000, "description": "每页记录数" },
+        "returnTotal": { "type": "boolean", "default": false, "description": "是否返回总记录数" },
+        "distinct": { "type": "boolean", "default": false, "description": "是否去重（SELECT DISTINCT）。适用于'列出所有…'类查询，与 groupBy 互斥" },
+        "withSubtotals": { "type": "boolean", "default": false, "description": "是否追加小计/总计行。对 groupBy 聚合结果追加分组小计和总计行，通过 _rowType 字段标记（data/subtotal/grandTotal）" }
+      }
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["execute", "validate"],
+      "default": "execute",
+      "description": "execute(执行), validate(仅验证)"
+    }
+  },
+  "required": ["model", "payload"]
+}

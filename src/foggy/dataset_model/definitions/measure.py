@@ -137,6 +137,8 @@ class DbFormulaDef(AiDef):
     def evaluate(self, values: Dict[str, Any]) -> Optional[float]:
         """Evaluate the formula with given values.
 
+        Uses ast.literal_eval-based safe expression evaluation instead of eval().
+
         Args:
             values: Dictionary of measure/column values
 
@@ -144,12 +146,62 @@ class DbFormulaDef(AiDef):
             Calculated result or None if evaluation fails
         """
         try:
-            # Create a safe evaluation context
+            import ast
+            import operator
+
+            # Only allow numeric values
             safe_dict = {k: v for k, v in values.items() if isinstance(v, (int, float))}
-            result = eval(self.expression, {"__builtins__": {}}, safe_dict)
+
+            # Parse the expression into an AST and evaluate safely
+            tree = ast.parse(self.expression, mode='eval')
+            result = self._safe_eval_ast(tree.body, safe_dict)
             return float(result) if result is not None else None
         except Exception:
             return None
+
+    @staticmethod
+    def _safe_eval_ast(node, variables: Dict[str, float]) -> float:
+        """Safely evaluate an AST node with only arithmetic operations.
+
+        Supports: +, -, *, /, //, %, **, unary -, unary +, parentheses,
+        numeric literals, and variable references.
+        """
+        import ast
+        import operator
+
+        _ops = {
+            ast.Add: operator.add,
+            ast.Sub: operator.sub,
+            ast.Mult: operator.mul,
+            ast.Div: operator.truediv,
+            ast.FloorDiv: operator.floordiv,
+            ast.Mod: operator.mod,
+            ast.Pow: operator.pow,
+            ast.USub: operator.neg,
+            ast.UAdd: operator.pos,
+        }
+
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return node.value
+        elif isinstance(node, ast.Name):
+            if node.id in variables:
+                return variables[node.id]
+            raise ValueError(f"Unknown variable: {node.id}")
+        elif isinstance(node, ast.BinOp):
+            op_func = _ops.get(type(node.op))
+            if op_func is None:
+                raise ValueError(f"Unsupported operator: {type(node.op).__name__}")
+            left = DbFormulaDef._safe_eval_ast(node.left, variables)
+            right = DbFormulaDef._safe_eval_ast(node.right, variables)
+            return op_func(left, right)
+        elif isinstance(node, ast.UnaryOp):
+            op_func = _ops.get(type(node.op))
+            if op_func is None:
+                raise ValueError(f"Unsupported unary operator: {type(node.op).__name__}")
+            operand = DbFormulaDef._safe_eval_ast(node.operand, variables)
+            return op_func(operand)
+        else:
+            raise ValueError(f"Unsupported AST node: {type(node).__name__}")
 
     def validate_definition(self) -> List[str]:
         """Validate the formula definition."""

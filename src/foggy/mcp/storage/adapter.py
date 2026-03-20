@@ -70,9 +70,13 @@ class ChartStorageAdapter(ABC):
 class LocalChartStorageAdapter(ChartStorageAdapter):
     """Local filesystem storage adapter."""
 
-    def __init__(self, properties: ChartStorageProperties):
-        """Initialize with storage properties."""
-        self._properties = properties
+    def __init__(self, properties: Optional[ChartStorageProperties] = None):
+        """Initialize with storage properties.
+
+        Args:
+            properties: Storage properties. If None, uses default settings.
+        """
+        self._properties = properties or ChartStorageProperties()
         self._ensure_directory()
 
     def _ensure_directory(self) -> None:

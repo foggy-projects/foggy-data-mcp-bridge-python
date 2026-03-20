@@ -193,3 +193,99 @@ class FDialect(ABC):
         if where_clause:
             sql += f" WHERE {where_clause}"
         return sql
+
+    def quote(self, identifier: str) -> str:
+        """Quote an identifier (alias for quote_identifier)."""
+        return self.quote_identifier(identifier)
+
+    def needs_quote(self, identifier: str) -> bool:
+        """Check if an identifier needs to be quoted.
+
+        Args:
+            identifier: Identifier to check
+
+        Returns:
+            True if identifier should be quoted
+        """
+        # Reserved words or special characters require quoting
+        reserved_words = {
+            "select", "from", "where", "join", "left", "right", "inner", "outer",
+            "on", "and", "or", "not", "null", "true", "false", "in", "like",
+            "order", "by", "group", "having", "limit", "offset", "insert", "into",
+            "values", "update", "set", "delete", "create", "table", "drop", "alter",
+            "index", "key", "primary", "foreign", "references", "unique", "default",
+            "asc", "desc", "union", "all", "distinct", "count", "sum", "avg", "max",
+            "min", "case", "when", "then", "else", "end", "as", "exists", "between",
+        }
+        lower_id = identifier.lower()
+        return lower_id in reserved_words or not identifier.isidentifier()
+
+    def get_placeholder(self, index: int) -> str:
+        """Get placeholder for parameterized query.
+
+        Args:
+            index: Parameter index (0-based)
+
+        Returns:
+            Placeholder string (default: '?')
+        """
+        return "?"
+
+    def get_type_name(
+        self,
+        jdbc_type: int,
+        length: int = 0,
+        precision: int = 19,
+        scale: int = 2,
+    ) -> str:
+        """Get SQL type name for a JDBC type.
+
+        Args:
+            jdbc_type: JDBC type constant
+            length: Column length
+            precision: Numeric precision
+            scale: Numeric scale
+
+        Returns:
+            SQL type name string
+        """
+        from foggy.dataset.table.sql_column import JdbcType
+
+        type_map = {
+            JdbcType.VARCHAR: f"VARCHAR({length})" if length > 0 else "VARCHAR",
+            JdbcType.CHAR: f"CHAR({length})" if length > 0 else "CHAR",
+            JdbcType.LONGVARCHAR: "TEXT",
+            JdbcType.NVARCHAR: f"NVARCHAR({length})" if length > 0 else "NVARCHAR",
+            JdbcType.NCHAR: f"NCHAR({length})" if length > 0 else "NCHAR",
+            JdbcType.CLOB: "CLOB",
+            JdbcType.NCLOB: "NCLOB",
+            JdbcType.BIT: "BIT",
+            JdbcType.BOOLEAN: "BOOLEAN",
+            JdbcType.TINYINT: "TINYINT",
+            JdbcType.SMALLINT: "SMALLINT",
+            JdbcType.INTEGER: "INTEGER",
+            JdbcType.BIGINT: "BIGINT",
+            JdbcType.FLOAT: "FLOAT",
+            JdbcType.REAL: "REAL",
+            JdbcType.DOUBLE: "DOUBLE",
+            JdbcType.NUMERIC: f"NUMERIC({precision}, {scale})",
+            JdbcType.DECIMAL: f"DECIMAL({precision}, {scale})",
+            JdbcType.DATE: "DATE",
+            JdbcType.TIME: "TIME",
+            JdbcType.TIMESTAMP: "TIMESTAMP",
+            JdbcType.BINARY: f"BINARY({length})" if length > 0 else "BINARY",
+            JdbcType.VARBINARY: f"VARBINARY({length})" if length > 0 else "VARBINARY",
+            JdbcType.BLOB: "BLOB",
+            JdbcType.OTHER: "JSON",
+            JdbcType.JAVA_OBJECT: "OBJECT",
+        }
+
+        return type_map.get(jdbc_type, "VARCHAR")
+
+    def get_on_duplicate_key_ignore_sql(self) -> str:
+        """Get SQL for ignoring duplicates (do nothing).
+
+        Returns:
+            SQL clause for ignoring duplicates
+        """
+        return ""  # Default: no special handling

@@ -1,6 +1,8 @@
-"""Semantic query service package (placeholder)."""
+"""Semantic query service package."""
 
-# SemanticQueryServiceV3Impl will be implemented in a future phase
-# This is the main service for executing semantic layer queries
+from foggy.dataset_model.semantic.service import SemanticQueryService, QueryBuildResult
 
-__all__ = []
+__all__ = [
+    "SemanticQueryService",
+    "QueryBuildResult",
+]

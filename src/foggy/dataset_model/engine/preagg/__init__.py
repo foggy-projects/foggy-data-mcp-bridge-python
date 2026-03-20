@@ -1,6 +1,33 @@
-"""Pre-aggregation engine package (placeholder)."""
+"""
+PreAggregation Engine - 预聚合引擎
+"""
 
-# Pre-aggregation engine will be fully implemented in a future phase
-# This includes PreAggQueryRequirementBuilder, PreAggregationMatcher, etc.
+from foggy.dataset_model.engine.preagg.matcher import (
+    TimeGranularity,
+    PreAggregation,
+    PreAggQueryRequirement,
+    PreAggregationMatchResult,
+    PreAggregationMatcher
+)
+from foggy.dataset_model.engine.preagg.interceptor import (
+    PreAggRewriteResult,
+    PreAggQueryRequirementBuilder,
+    PreAggQueryRewriter,
+    PreAggAggregateSqlResult,
+    PreAggregationInterceptor,
+)
 
-__all__ = []
+__all__ = [
+    # Matcher
+    "TimeGranularity",
+    "PreAggregation",
+    "PreAggQueryRequirement",
+    "PreAggregationMatchResult",
+    "PreAggregationMatcher",
+    # Interceptor
+    "PreAggRewriteResult",
+    "PreAggQueryRequirementBuilder",
+    "PreAggQueryRewriter",
+    "PreAggAggregateSqlResult",
+    "PreAggregationInterceptor",
+]

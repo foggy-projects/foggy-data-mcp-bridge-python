@@ -62,7 +62,7 @@ class TestRX:
         assert response.code == RX.FAIL
         assert response.msg == OPER_ERROR.msg
         assert response.ex_code == OPER_ERROR.ex_code
-        assert response.ex_code == "A001"
+        assert response.ex_code == "A1100"  # OPER_ERROR is defined with ex_code A1100
 
     def test_fail_b_alias(self):
         """Test fail_b is alias for fail."""

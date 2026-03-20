@@ -32,7 +32,8 @@ def create_sample_table_model() -> DbTableModelImpl:
     model = DbTableModelImpl(
         name="sales_tm",
         source_table="sales",
-        source_schema="public",
+        # Note: source_schema is None for SQLite compatibility
+        source_schema=None,
         dimensions={
             "date": DbModelDimensionImpl(
                 name="date",
@@ -161,7 +162,8 @@ def create_sample_query_model() -> DbQueryModelDef:
         description="Query model for sales analysis and reporting",
         model_type=QueryModelType.TABLE,
         source_table="sales",
-        source_schema="public",
+        # Note: source_schema is None for SQLite compatibility
+        source_schema=None,
         ai_description="A query model for analyzing sales data. Supports filtering by date, product, region, and customer segment. Provides metrics like sales amount, quantity, order count, and profit.",
         ai_examples=[
             "Show total sales by region for this month",
@@ -180,7 +182,8 @@ def create_inventory_table_model() -> DbTableModelImpl:
     model = DbTableModelImpl(
         name="inventory_tm",
         source_table="inventory",
-        source_schema="public",
+        # Note: source_schema is None for SQLite compatibility
+        source_schema=None,
         dimensions={
             "product": DbModelDimensionImpl(
                 name="product",

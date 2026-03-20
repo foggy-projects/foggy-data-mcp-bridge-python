@@ -1,6 +1,6 @@
 """MCP Response schema definitions."""
 
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, ClassVar, Dict, List, Optional, Union
 from pydantic import BaseModel, Field
 from datetime import datetime
 from enum import Enum
@@ -17,24 +17,25 @@ class ResponseStatus(str, Enum):
 class McpError(BaseModel):
     """MCP error object."""
 
+    # Standard JSON-RPC error codes (class constants)
+    PARSE_ERROR: ClassVar[int] = -32700
+    INVALID_REQUEST: ClassVar[int] = -32600
+    METHOD_NOT_FOUND: ClassVar[int] = -32601
+    INVALID_PARAMS: ClassVar[int] = -32602
+    INTERNAL_ERROR: ClassVar[int] = -32603
+
+    # Custom error codes (class constants)
+    QUERY_ERROR: ClassVar[int] = -32001
+    AUTHENTICATION_ERROR: ClassVar[int] = -32002
+    AUTHORIZATION_ERROR: ClassVar[int] = -32003
+    RESOURCE_NOT_FOUND: ClassVar[int] = -32004
+    VALIDATION_ERROR: ClassVar[int] = -32005
+    TIMEOUT_ERROR: ClassVar[int] = -32006
+
+    # Instance fields
     code: int = Field(..., description="Error code")
     message: str = Field(..., description="Error message")
     data: Optional[Dict[str, Any]] = Field(default=None, description="Additional error data")
-
-    # Standard JSON-RPC error codes
-    PARSE_ERROR = -32700
-    INVALID_REQUEST = -32600
-    METHOD_NOT_FOUND = -32601
-    INVALID_PARAMS = -32602
-    INTERNAL_ERROR = -32603
-
-    # Custom error codes
-    QUERY_ERROR = -32001
-    AUTHENTICATION_ERROR = -32002
-    AUTHORIZATION_ERROR = -32003
-    RESOURCE_NOT_FOUND = -32004
-    VALIDATION_ERROR = -32005
-    TIMEOUT_ERROR = -32006
 
     @classmethod
     def parse_error(cls, message: str = "Parse error") -> "McpError":

@@ -59,6 +59,8 @@ class ToolResult:
     error: Optional[str] = None
     error_code: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    tool_name: Optional[str] = None
+    message: Optional[str] = None
 
     @classmethod
     def ok(cls, data: Any = None, metadata: Optional[Dict[str, Any]] = None) -> "ToolResult":
@@ -84,13 +86,53 @@ class ToolResult:
             metadata=metadata or {},
         )
 
+    @classmethod
+    def success_result(
+        cls,
+        tool_name: str,
+        data: Any = None,
+        message: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> "ToolResult":
+        """Create successful result with tool name."""
+        return cls(
+            success=True,
+            tool_name=tool_name,
+            data=data,
+            message=message,
+            metadata=metadata or {},
+        )
+
+    @classmethod
+    def failure_result(
+        cls,
+        tool_name: str,
+        error_message: str,
+        error_code: Optional[int] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> "ToolResult":
+        """Create failure result with tool name."""
+        return cls(
+            success=False,
+            tool_name=tool_name,
+            error=error_message,
+            error_code=str(error_code) if error_code else None,
+            metadata=metadata or {},
+        )
+
+    def is_success(self) -> bool:
+        """Check if result is successful."""
+        return self.success
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         return {
             "success": self.success,
+            "toolName": self.tool_name,
             "data": self.data,
             "error": self.error,
             "errorCode": self.error_code,
+            "message": self.message,
             "metadata": self.metadata,
         }
 

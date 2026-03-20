@@ -61,7 +61,9 @@ class SqliteDialect(FDialect):
     def get_table_exists_sql(self, table_name: str, schema: Optional[str] = None) -> str:
         """Get SQL to check if table exists."""
         # SQLite doesn't have schemas, but has sqlite_master
-        return f"SELECT 1 FROM sqlite_master WHERE type='table' AND name='{table_name}'"
+        # Use quote_identifier to prevent SQL injection via table names
+        safe_name = table_name.replace("'", "''")
+        return f"SELECT 1 FROM sqlite_master WHERE type='table' AND name='{safe_name}'"
 
     def get_current_timestamp_sql(self) -> str:
         """Get SQL for current timestamp."""

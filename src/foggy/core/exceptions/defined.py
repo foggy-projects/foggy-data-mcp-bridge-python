@@ -95,16 +95,16 @@ class ExDefined(ABC):
 class ExDefinedSupport(ExDefined):
     """Default implementation of ExDefined."""
 
-    code: int
-    ex_code: str
+    _code: int
+    _ex_code: str
     err_msg: Optional[str] = None
     user_tip: Optional[str] = None
 
     def get_code(self) -> int:
-        return self.code
+        return self._code
 
     def get_ex_code(self) -> str:
-        return self.ex_code
+        return self._ex_code
 
     def get_err_msg(self) -> Optional[str]:
         return self.err_msg

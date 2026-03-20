@@ -15,6 +15,73 @@ from foggy.dataset_model.definitions.measure import DbMeasureDef, MeasureType
 from foggy.dataset_model.definitions.access import DbAccessDef
 
 
+class DimensionPropertyDef(BaseModel):
+    """A property column on a dimension table.
+
+    Example: dim_product has properties like category_name, brand, unit_price.
+    These are accessed as product$categoryName, product$brand, etc.
+    """
+    column: str = Field(..., description="Column name in the dimension table")
+    name: Optional[str] = Field(default=None, description="Property name (defaults to camelCase of column)")
+    caption: Optional[str] = Field(default=None, description="Display name")
+    description: Optional[str] = Field(default=None, description="Description")
+    data_type: str = Field(default="STRING", description="Data type: STRING, INTEGER, MONEY, etc.")
+
+    model_config = {"extra": "allow"}
+
+    def get_name(self) -> str:
+        """Get property name (camelCase of column if not specified)."""
+        if self.name:
+            return self.name
+        # Convert snake_case to camelCase
+        parts = self.column.split("_")
+        return parts[0] + "".join(p.capitalize() for p in parts[1:])
+
+
+class DimensionJoinDef(BaseModel):
+    """Defines a star-schema dimension JOIN.
+
+    Aligned with Java TM dimension definition:
+    {
+        name: 'product',
+        tableName: 'dim_product',
+        foreignKey: 'product_key',
+        primaryKey: 'product_key',
+        captionColumn: 'product_name',
+        properties: [{column: 'category_name', caption: '品类'}]
+    }
+    """
+    name: str = Field(..., description="Dimension name (e.g., 'product')")
+    table_name: str = Field(..., description="Dimension table (e.g., 'dim_product')")
+    foreign_key: str = Field(..., description="FK column on fact table")
+    primary_key: str = Field(..., description="PK column on dimension table")
+    caption_column: Optional[str] = Field(default=None, description="Display column (e.g., 'product_name')")
+    caption: Optional[str] = Field(default=None, description="Dimension display name")
+    description: Optional[str] = Field(default=None, description="Dimension description")
+    key_description: Optional[str] = Field(default=None, description="Key format description")
+    alias: Optional[str] = Field(default=None, description="Table alias in SQL (auto-generated if None)")
+    properties: List[DimensionPropertyDef] = Field(default_factory=list, description="Dimension properties")
+
+    model_config = {"extra": "allow"}
+
+    def get_alias(self) -> str:
+        """Get SQL table alias (e.g., 'dp' for dim_product)."""
+        if self.alias:
+            return self.alias
+        # Generate from table name: dim_product → dp, dim_date → dd
+        parts = self.table_name.split("_")
+        if len(parts) >= 2:
+            return parts[0][0] + parts[1][0]  # d + p = dp
+        return self.table_name[:2]
+
+    def get_property(self, prop_name: str) -> Optional[DimensionPropertyDef]:
+        """Find property by name (camelCase or column name)."""
+        for p in self.properties:
+            if p.get_name() == prop_name or p.column == prop_name:
+                return p
+        return None
+
+
 class DbModelDimensionImpl(BaseModel):
     """Dimension implementation for semantic models.
 
@@ -185,6 +252,12 @@ class DbTableModelImpl(BaseModel):
         default_factory=dict, description="All columns by name"
     )
 
+    # Dimension JOINs (star schema)
+    dimension_joins: List[DimensionJoinDef] = Field(
+        default_factory=list,
+        description="Dimension table JOIN definitions (star schema)",
+    )
+
     # Primary key
     primary_key: List[str] = Field(default_factory=list, description="Primary key columns")
 
@@ -276,6 +349,109 @@ class DbTableModelImpl(BaseModel):
         """
         self.measures[measure.name] = measure
         return self
+
+    def get_dimension_join(self, dim_name: str) -> Optional[DimensionJoinDef]:
+        """Get dimension JOIN definition by dimension name."""
+        for dj in self.dimension_joins:
+            if dj.name == dim_name:
+                return dj
+        return None
+
+    def resolve_field(self, field_name: str) -> Optional[Dict[str, Any]]:
+        """Resolve a V3 field name to SQL column expression.
+
+        Handles:
+          - dim$id         → alias.FK_column (or alias.PK_column on dim table)
+          - dim$caption    → alias.caption_column
+          - dim$propName   → alias.prop_column
+          - measureName    → t.column (with aggregation)
+          - propertyName   → t.column (fact table own column)
+
+        Returns:
+            Dict with {sql_expr, alias_label, table_alias, is_measure, aggregation, join_def}
+            or None if not found.
+        """
+        # Check for $ separator → dimension field
+        if "$" in field_name:
+            parts = field_name.split("$", 1)
+            dim_name, suffix = parts[0], parts[1]
+
+            join_def = self.get_dimension_join(dim_name)
+            if not join_def:
+                # Fallback: try as a simple dimension on fact table
+                dim = self.get_dimension(dim_name)
+                if dim:
+                    return {
+                        "sql_expr": f"t.{dim.column}",
+                        "alias_label": dim.alias or dim_name,
+                        "table_alias": "t",
+                        "is_measure": False,
+                        "aggregation": None,
+                        "join_def": None,
+                    }
+                return None
+
+            ta = join_def.get_alias()
+
+            if suffix == "id":
+                return {
+                    "sql_expr": f"{ta}.{join_def.primary_key}",
+                    "alias_label": f"{join_def.caption or dim_name}(ID)",
+                    "table_alias": ta,
+                    "is_measure": False,
+                    "aggregation": None,
+                    "join_def": join_def,
+                }
+            elif suffix == "caption":
+                cap_col = join_def.caption_column or join_def.primary_key
+                return {
+                    "sql_expr": f"{ta}.{cap_col}",
+                    "alias_label": f"{join_def.caption or dim_name}",
+                    "table_alias": ta,
+                    "is_measure": False,
+                    "aggregation": None,
+                    "join_def": join_def,
+                }
+            else:
+                # Dimension property: product$categoryName
+                prop = join_def.get_property(suffix)
+                if prop:
+                    return {
+                        "sql_expr": f"{ta}.{prop.column}",
+                        "alias_label": prop.caption or prop.get_name(),
+                        "table_alias": ta,
+                        "is_measure": False,
+                        "aggregation": None,
+                        "join_def": join_def,
+                    }
+                return None
+
+        # Try measure
+        measure = self.get_measure(field_name)
+        if measure:
+            agg = measure.aggregation.value.upper() if measure.aggregation else None
+            return {
+                "sql_expr": f"t.{measure.column or measure.name}",
+                "alias_label": measure.alias or measure.name,
+                "table_alias": "t",
+                "is_measure": True,
+                "aggregation": agg,
+                "join_def": None,
+            }
+
+        # Try simple dimension (on fact table)
+        dim = self.get_dimension(field_name)
+        if dim:
+            return {
+                "sql_expr": f"t.{dim.column}",
+                "alias_label": dim.alias or dim.name,
+                "table_alias": "t",
+                "is_measure": False,
+                "aggregation": None,
+                "join_def": None,
+            }
+
+        return None
 
     def validate(self) -> List[str]:
         """Validate the model and return errors.
