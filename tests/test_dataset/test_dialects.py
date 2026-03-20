@@ -631,38 +631,31 @@ class TestFunctionTranslation:
     # -----------------------------------------------------------------------
 
     @pytest.mark.parametrize("dialect_cls", ALL_DIALECT_CLASSES)
-    @pytest.mark.xfail(reason="translate_function() not yet implemented", strict=True)
     def test_translate_function_not_implemented(self, dialect_cls):
         """translate_function() should raise NotImplementedError until implemented."""
         dialect = dialect_cls()
         dialect.translate_function("NVL", ["col", "0"])
 
-    @pytest.mark.xfail(reason="translate_function() not yet implemented", strict=True)
     def test_mysql_nvl_to_ifnull(self, mysql):
         result = mysql.translate_function("NVL", ["col", "0"])
         assert result == "IFNULL(col, 0)"
 
-    @pytest.mark.xfail(reason="translate_function() not yet implemented", strict=True)
     def test_postgres_ifnull_to_coalesce(self, postgres):
         result = postgres.translate_function("IFNULL", ["col", "0"])
         assert result == "COALESCE(col, 0)"
 
-    @pytest.mark.xfail(reason="translate_function() not yet implemented", strict=True)
     def test_sqlserver_ifnull_to_isnull(self, sqlserver):
         result = sqlserver.translate_function("IFNULL", ["col", "0"])
         assert result == "ISNULL(col, 0)"
 
-    @pytest.mark.xfail(reason="translate_function() not yet implemented", strict=True)
     def test_sqlserver_length_to_len(self, sqlserver):
         result = sqlserver.translate_function("LENGTH", ["col"])
         assert result == "LEN(col)"
 
-    @pytest.mark.xfail(reason="translate_function() not yet implemented", strict=True)
     def test_sqlite_nvl_to_ifnull(self, sqlite):
         result = sqlite.translate_function("NVL", ["col", "0"])
         assert result == "IFNULL(col, 0)"
 
-    @pytest.mark.xfail(reason="translate_function() not yet implemented", strict=True)
     def test_postgres_substr_stays(self, postgres):
         result = postgres.translate_function("SUBSTR", ["col", "1", "3"])
         assert result == "SUBSTR(col, 1, 3)"

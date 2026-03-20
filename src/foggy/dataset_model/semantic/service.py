@@ -7,6 +7,7 @@ integrating SqlQueryBuilder with table/query models.
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
 import time
+import re
 import logging
 
 from pydantic import BaseModel
@@ -261,6 +262,14 @@ class SemanticQueryService(SemanticServiceResolver):
                     has_aggregation = True
         else:
             for col_name in request.columns:
+                # Try inline expression: "sum(salesAmount) as totalSales"
+                inline = self._parse_inline_expression(col_name, model, ensure_join)
+                if inline:
+                    builder.select(inline["select_expr"])
+                    columns_info.append(inline)
+                    has_aggregation = True
+                    continue
+
                 resolved = model.resolve_field(col_name)
                 if resolved:
                     # Auto-JOIN if needed
@@ -375,6 +384,64 @@ class SemanticQueryService(SemanticServiceResolver):
             "name": alias,
             "fieldName": measure.name,
             "expression": f"t.{col}",
+            "aggregation": agg,
+            "select_expr": select_expr,
+        }
+
+    # Regex for inline aggregate: "sum(fieldName) as alias" or "count_distinct(field)"
+    _INLINE_AGG_RE = re.compile(
+        r'^(sum|avg|count|min|max|count_distinct|countd|group_concat|'
+        r'stddev_pop|stddev_samp|var_pop|var_samp)\s*\(\s*([^)]+)\s*\)'
+        r'(?:\s+as\s+(\w+))?$',
+        re.IGNORECASE,
+    )
+
+    def _parse_inline_expression(
+        self,
+        col_name: str,
+        model: DbTableModelImpl,
+        ensure_join=None,
+    ) -> Optional[Dict[str, Any]]:
+        """Parse inline aggregate expression like 'sum(salesAmount) as totalSales'.
+
+        Returns column info dict if parsed, None if not an inline expression.
+        """
+        m = self._INLINE_AGG_RE.match(col_name.strip())
+        if not m:
+            return None
+
+        func_name = m.group(1).upper()
+        field_name = m.group(2).strip()
+        alias = m.group(3)
+
+        # Map function names
+        AGG_MAP = {
+            "COUNTD": "COUNT_DISTINCT",
+            "COUNT_DISTINCT": "COUNT_DISTINCT",
+        }
+        agg = AGG_MAP.get(func_name, func_name)
+
+        # Resolve the inner field
+        resolved = model.resolve_field(field_name)
+        if resolved:
+            sql_col = resolved["sql_expr"]
+            if resolved["join_def"] and ensure_join:
+                ensure_join(resolved["join_def"])
+            default_alias = alias or f"{func_name.lower()}_{field_name}"
+        else:
+            # Unknown field — use as raw column on fact table
+            sql_col = f"t.{field_name}"
+            default_alias = alias or f"{func_name.lower()}_{field_name}"
+
+        if agg == "COUNT_DISTINCT":
+            select_expr = f"COUNT(DISTINCT {sql_col}) AS `{default_alias}`"
+        else:
+            select_expr = f"{agg}({sql_col}) AS `{default_alias}`"
+
+        return {
+            "name": default_alias,
+            "fieldName": col_name,
+            "expression": sql_col,
             "aggregation": agg,
             "select_expr": select_expr,
         }

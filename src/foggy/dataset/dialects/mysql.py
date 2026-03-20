@@ -95,6 +95,16 @@ class MySqlDialect(FDialect):
         """Get SQL to extract value from JSON."""
         return f"JSON_EXTRACT({json_expr}, '{path}')"
 
+    def _get_function_mappings(self) -> dict:
+        """MySQL function mappings: NVL→IFNULL, SUBSTR→SUBSTRING."""
+        return {
+            "NVL": "IFNULL",
+            "COALESCE": "COALESCE",
+            "SUBSTR": "SUBSTRING",
+            "LEN": "LENGTH",
+            "ISNULL": "IFNULL",
+        }
+
     def get_insert_on_duplicate_key_update_sql(
         self,
         table_name: str,

@@ -110,6 +110,37 @@ class FDialect(ABC):
         """Get SQL to extract value from JSON."""
         pass
 
+    def translate_function(self, func_name: str, args: List[str]) -> str:
+        """Translate a function call to the dialect-specific SQL.
+
+        Different databases use different names for equivalent functions.
+        E.g., NVL → IFNULL (MySQL/SQLite), NVL → COALESCE (PostgreSQL),
+              LENGTH → LEN (SQL Server).
+
+        Subclasses should override _get_function_mappings() to provide
+        their mapping table. The base implementation falls through to
+        the original function name if no mapping is found.
+
+        Args:
+            func_name: Function name (case-insensitive)
+            args: Function arguments as SQL expressions
+
+        Returns:
+            Translated SQL expression, e.g. "IFNULL(col, 0)"
+        """
+        upper_name = func_name.upper()
+        mappings = self._get_function_mappings()
+        translated = mappings.get(upper_name, upper_name)
+        return f"{translated}({', '.join(args)})"
+
+    def _get_function_mappings(self) -> dict:
+        """Return a dict of function name mappings for this dialect.
+
+        Override in subclasses. Keys and values are UPPER CASE.
+        E.g., {"NVL": "IFNULL", "LENGTH": "LEN"}
+        """
+        return {}
+
     def get_create_table_sql(
         self,
         table_name: str,

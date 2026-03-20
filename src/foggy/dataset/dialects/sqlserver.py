@@ -116,6 +116,16 @@ class SqlServerDialect(FDialect):
         """Get SQL to extract value from JSON using JSON_VALUE."""
         return f"JSON_VALUE({json_expr}, '{path}')"
 
+    def _get_function_mappings(self) -> dict:
+        """SQL Server function mappings: IFNULL→ISNULL, LENGTH→LEN, NVL→ISNULL."""
+        return {
+            "IFNULL": "ISNULL",
+            "NVL": "ISNULL",
+            "COALESCE": "COALESCE",
+            "LENGTH": "LEN",
+            "SUBSTR": "SUBSTRING",
+        }
+
     def get_insert_with_output_sql(
         self,
         table_name: str,

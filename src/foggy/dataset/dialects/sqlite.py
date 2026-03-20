@@ -93,6 +93,17 @@ class SqliteDialect(FDialect):
         """Get SQL to extract value from JSON using json_extract."""
         return f"json_extract({json_expr}, '{path}')"
 
+    def _get_function_mappings(self) -> dict:
+        """SQLite function mappings: NVL→IFNULL, LEN→LENGTH."""
+        return {
+            "NVL": "IFNULL",
+            "COALESCE": "COALESCE",
+            "ISNULL": "IFNULL",
+            "LEN": "LENGTH",
+            "SUBSTR": "SUBSTR",
+            "SUBSTRING": "SUBSTR",
+        }
+
     def get_create_table_sql(
         self,
         table_name: str,

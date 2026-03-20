@@ -33,7 +33,6 @@ def _build_sql(service: SemanticQueryService, request: SemanticQueryRequest) -> 
 class TestInlineExpression:
     """Test inline aggregate expression parsing in column names."""
 
-    @pytest.mark.xfail(reason="Inline expression parser not yet implemented")
     def test_parse_sum_expression(self, service):
         """'sum(salesAmount) as totalSales' should produce SUM(t.sales_amount) AS `totalSales`."""
         request = SemanticQueryRequest(
@@ -46,7 +45,6 @@ class TestInlineExpression:
         response = service.query_model("FactSalesModel", request, mode="validate")
         assert not any("sum(salesAmount)" in w for w in response.warnings)
 
-    @pytest.mark.xfail(reason="Inline expression parser not yet implemented")
     def test_parse_count_expression(self, service):
         """'count(orderId) as cnt' should produce COUNT(t.order_id) AS `cnt`."""
         request = SemanticQueryRequest(
@@ -56,7 +54,6 @@ class TestInlineExpression:
         select_part = sql.split("FROM")[0].upper()
         assert "COUNT(" in select_part
 
-    @pytest.mark.xfail(reason="Inline expression parser not yet implemented")
     def test_parse_avg_expression(self, service):
         """'avg(salesAmount) as avgSales' should produce AVG(t.sales_amount) AS `avgSales`."""
         request = SemanticQueryRequest(
@@ -83,7 +80,6 @@ class TestInlineExpression:
         response = service.query_model("FactSalesModel", request, mode="validate")
         assert len(response.warnings) == 0
 
-    @pytest.mark.xfail(reason="Inline expression parser not yet implemented")
     def test_parse_count_distinct_expression(self, service):
         """'count_distinct(orderId) as uniqueOrders' should produce COUNT(DISTINCT ...)."""
         request = SemanticQueryRequest(
@@ -93,7 +89,6 @@ class TestInlineExpression:
         select_part = sql.split("FROM")[0].upper()
         assert "COUNT(DISTINCT" in select_part
 
-    @pytest.mark.xfail(reason="Inline expression parser not yet implemented")
     def test_parse_max_expression(self, service):
         """'max(salesAmount) as maxSales' should produce MAX(t.sales_amount)."""
         request = SemanticQueryRequest(
@@ -103,7 +98,6 @@ class TestInlineExpression:
         select_part = sql.split("FROM")[0].upper()
         assert "MAX(" in select_part
 
-    @pytest.mark.xfail(reason="Inline expression parser not yet implemented")
     def test_parse_min_expression(self, service):
         """'min(salesAmount) as minSales' should produce MIN(t.sales_amount)."""
         request = SemanticQueryRequest(

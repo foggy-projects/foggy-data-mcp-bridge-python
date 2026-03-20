@@ -98,6 +98,17 @@ class PostgresDialect(FDialect):
             pg_path = pg_path[1:]
         return f"{json_expr}->>'{pg_path}'"
 
+    def _get_function_mappings(self) -> dict:
+        """PostgreSQL function mappings: IFNULL→COALESCE, NVL→COALESCE."""
+        return {
+            "IFNULL": "COALESCE",
+            "NVL": "COALESCE",
+            "ISNULL": "COALESCE",
+            "LEN": "LENGTH",
+            "SUBSTR": "SUBSTR",
+            "SUBSTRING": "SUBSTR",
+        }
+
     def get_insert_on_conflict_sql(
         self,
         table_name: str,
