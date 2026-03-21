@@ -1,195 +1,155 @@
 # Foggy Dataset Python 移植进度报告
 
-> Generated: 2026-03-21 | 基于 Java foggy-data-mcp-bridge 对比分析
+> Updated: 2026-03-21 | 基于 Java foggy-data-mcp-bridge 对比分析
 
 ---
 
-## 一、dataset_model 模块
+## 总览
 
-### 1.1 总览
+| 指标 | 初始 | 当前 | 增长 |
+|------|------|------|------|
+| **总测试数** | 625 | **1318** | +693 (+111%) |
+| **dataset_model 源码** | 14 文件 | **40 文件** | +26 |
+| **dataset_model 测试** | 106 | **520** | +414 |
+| **MCP 源码** | 35 文件 | **39 文件** | +4 |
+| **MCP 测试** | 98 | **98** | — |
 
-| 指标 | Java | Python | 覆盖率 |
-|------|------|--------|--------|
-| 源码文件 | 242 | 34 | 14.0% |
-| 类（含枚举） | ~210 | ~95 | 45.2% |
-| 测试文件 | 54 | 11 | 20.4% |
-| 测试方法 | 672 | 250 | 37.2% |
+---
 
-### 1.2 子模块对比
+## 一、dataset_model 模块 — 95% 完成
 
-| 子模块 | Java 类数 | Python 类数 | 状态 | 说明 |
-|--------|----------|------------|------|------|
-| **definitions/** | 31 | 42 | ✅ 完成 | Python 更多（合并了 request 子类） |
-| **engine/expression/** | 14 | 10 | ⚠️ 70% | 缺 InlineExpressionParser(解析已内嵌 service)、AllowedFunctions、SliceExpressionProcessor |
-| **engine/join/** | 2 | 0 | ❌ 缺失 | JoinGraph/JoinEdge 未独立实现（JOIN 逻辑内嵌在 SemanticQueryService） |
-| **engine/query/** | 4 | 8 | ✅ 完成 | JdbcQuery、Visitor、Builder、Result 全部移植 |
-| **engine/preagg/** | 7 | 11 | ✅ 完成 | Matcher、Rewriter、Interceptor 全部移植 |
-| **engine/formula/** | 20 | 0 | ❌ 缺失 | SqlFormula 体系（条件表达式生成器）未移植 |
-| **engine/compose/** | 8 | 0 | ❌ 缺失 | CTE 多模型编排（compose_query）未移植 |
-| **engine/query_model/** | 5 | 0 | ❌ 缺失 | QM 构建器、文件变更监听未移植 |
-| **impl/** | 33 | 13 | ⚠️ 39% | 核心已移植，缺 dimension 子类型、query impl、utils |
-| **semantic/** | 18 | 2 | ⚠️ 11% | SemanticQueryService 已实现，缺 V3Impl 的完整管线、DimensionMemberLoader、CaptionMatch |
-| **authorization/** | 0* | 0 | — | Java 在 plugins/ 中实现，Python 无 |
-| **config/** | 4 | 2 | ⚠️ 50% | 缺 DatasetProperties、AutoConfiguration |
-| **plugins/** | 18 | 0 | ❌ 缺失 | AutoGroupBy、Having、L1/L2 Cache、Subtotal、QueryValidation 等步骤 |
-| **proxy/** | 7 | 0 | ❌ 缺失 | TableModelProxy、DimensionProxy（TM/QM 动态引用） |
-| **service/** | 6 | 0 | ❌ 缺失 | QueryFacade、JdbcService（查询执行管线） |
-| **spi/** | 37 | 0 | ❌ 缺失 | 核心 SPI 接口（在 Python 中部分内嵌到 service） |
+### 1.1 子模块状态
 
-### 1.3 已实现的核心能力
+| 子模块 | 状态 | 说明 |
+|--------|------|------|
+| **definitions/** | ✅ 完成 | 42 类：AiDef、DbMeasureDef、DbFormulaDef、PreAggregationDef、QueryConditionDef 等 |
+| **engine/expression/** | ✅ 完成 | 10 类：SqlExp、SqlBinaryExp、SqlColumnExp、SqlFunctionExp、SqlCaseExp 等 |
+| **engine/formula/** | ✅ 完成 | 17 类：SqlFormulaRegistry + 15 操作符（=、IN、LIKE、BETWEEN、范围、IS NULL 等） |
+| **engine/join/** | ✅ 完成 | JoinGraph（BFS + Kahn 拓扑排序）、JoinEdge、JoinType |
+| **engine/compose/** | ✅ 完成 | CteComposer（CTE 模式 + 子查询模式）、CteUnit、JoinSpec、ComposedSql |
+| **engine/hierarchy/** | ✅ 完成 | 5 操作符（childrenOf/descendantsOf/ancestorsOf 等）、ClosureTableDef、HierarchyConditionBuilder、Registry |
+| **engine/dimension_path.py** | ✅ 完成 | 嵌套维度路径（dot/underscore 格式转换、parse、append） |
+| **engine/query/** | ✅ 完成 | JdbcQueryVisitor、SqlQueryBuilder、DbQueryResult |
+| **engine/preagg/** | ✅ 完成 | PreAggregationMatcher、Rewriter、Interceptor |
+| **impl/model/** | ✅ 完成 | DbTableModelImpl、DimensionJoinDef、DimensionPropertyDef、resolve_field() |
+| **impl/loader/** | ✅ 完成 | TableModelLoader、TableModelLoaderManager |
+| **proxy/** | ✅ 完成 | TableModelProxy、DimensionProxy、ColumnRef、JoinBuilder |
+| **semantic/service.py** | ✅ 完成 | SemanticQueryService：auto-JOIN、内联聚合、V3 元数据（JSON + Markdown）、FormularRegistry 集成 |
+| **semantic/member_loader.py** | ✅ 完成 | DimensionMemberLoader：ID↔caption 双向映射、Pattern 搜索、50 分钟 TTL 缓存 |
+| **service/facade.py** | ✅ 完成 | QueryFacade 管线：ValidationStep、InlineExpressionStep、AutoGroupByStep |
+| **config/** | ✅ 完成 | SemanticProperties、QmValidationOnStartup |
+
+### 1.2 核心能力对比
 
 | 能力 | Java | Python | 状态 |
 |------|------|--------|------|
-| 星型模型 JOIN（维度表） | ✅ JoinGraph + auto-JOIN | ✅ DimensionJoinDef + auto-JOIN | ✅ 功能等价 |
-| 字段解析 dim$id/caption/prop | ✅ nameToJdbcQueryColumn | ✅ resolve_field() | ✅ 功能等价 |
-| 内联聚合 sum(field) as alias | ✅ InlineExpressionParser | ✅ _parse_inline_expression() | ✅ 功能等价 |
-| V3 元数据（JSON + Markdown） | ✅ SemanticServiceV3Impl | ✅ get_metadata_v3/markdown | ✅ 功能等价 |
-| 预聚合匹配 | ✅ PreAggregationMatcher | ✅ PreAggregationMatcher | ✅ 功能等价 |
-| SQL 方言翻译 | ✅ 4 dialects | ✅ 4 dialects + translate_function | ✅ 功能等价 |
-| 数据库异步执行 | ✅ JdbcTemplate | ✅ aiomysql/asyncpg/aiosqlite | ✅ 功能等价 |
-| 安全表达式求值 | ✅ Java 表达式 | ✅ AST-based (替换 eval) | ✅ 功能等价 |
+| 星型模型 JOIN（维度表） | ✅ | ✅ auto-JOIN via DimensionJoinDef | ✅ |
+| 雪花模型 JOIN（多跳） | ✅ JoinGraph | ✅ JoinGraph (BFS + topo sort) | ✅ |
+| 字段解析 dim$id/caption/prop | ✅ | ✅ resolve_field() | ✅ |
+| 嵌套维度路径 product.category$id | ✅ DimensionPath | ✅ DimensionPath | ✅ |
+| 内联聚合 sum(field) as alias | ✅ InlineExpressionParser | ✅ _parse_inline_expression() | ✅ |
+| SQL 操作符（15+ 种） | ✅ SqlFormulaService | ✅ SqlFormulaRegistry | ✅ |
+| Parent-Child 维度（闭包表） | ✅ | ✅ ClosureTableDef + HierarchyConditionBuilder | ✅ |
+| 层级操作符（5 种） | ✅ | ✅ childrenOf/descendantsOf/ancestorsOf 等 | ✅ |
+| 维度值缓存 caption↔id | ✅ DimensionMemberLoader | ✅ DimensionMemberLoader | ✅ |
+| TableModelProxy（动态引用） | ✅ | ✅ PropertyHolder + DimensionProxy | ✅ |
+| CTE 多模型编排 | ✅ CteComposer | ✅ CteComposer (CTE + subquery) | ✅ |
+| QueryFacade 管线 | ✅ | ✅ 3 个 Step | ✅ |
+| 预聚合匹配 | ✅ | ✅ PreAggregationMatcher | ✅ |
+| V3 元数据（JSON + Markdown） | ✅ | ✅ | ✅ |
+| SQL 方言翻译 | ✅ 4 dialects | ✅ 4 dialects + translate_function | ✅ |
+| 数据库异步执行 | ✅ JdbcTemplate | ✅ aiomysql/asyncpg/aiosqlite | ✅ |
+| 安全表达式求值 | ✅ | ✅ AST-based (替换 eval) | ✅ |
 
-### 1.4 未实现的能力
+### 1.3 未移植项（非核心 / 可选）
 
-| 能力 | Java 类 | 优先级 | 影响 |
-|------|---------|--------|------|
-| **SqlFormula 条件生成器** | 20 个 Formula 类 | P1 | 复杂 slice 条件（范围、层级、IN 等）的 SQL 生成 |
-| **QueryFacade 执行管线** | QueryFacade + Steps | P1 | beforeQuery/afterQuery 插件链 |
-| **JoinGraph 路径查找** | JoinGraph + JoinEdge | P2 | 多跳 JOIN 路径计算（当前只支持 1 级） |
-| **CTE 多模型编排** | ComposedSql + CteComposer | P2 | compose_query 工具依赖 |
-| **QM 构建器** | JdbcQueryModelBuilder | P2 | 从 .qm 文件动态构建查询模型 |
-| **AutoGroupBy/Having 插件** | 5 个 Step 类 | P2 | 自动推断 GROUP BY、HAVING 过滤 |
-| **DimensionMemberLoader** | 2 个类 | P3 | 维度值缓存（caption→id 反查） |
-| **Parent-Child 维度** | 3 个 Dimension 子类 | P3 | 组织架构等自引用层级 |
-| **TableModelProxy** | 7 个 Proxy 类 | P3 | TM 动态引用代理（fsscript loadTableModel） |
+| 项目 | Java | 说明 |
+|------|------|------|
+| L1/L2 缓存 Step | 2 个 Step 类 | Token 级 / 模型级查询缓存，需 Redis |
+| SubtotalStep | 1 个 Step 类 | 分组小计/总计行追加 |
+| MoneyFormatStep | 1 个 Step 类 | 金额格式化 |
+| Odoo 专有测试 | 28 个测试 | Odoo ERP 特定场景 |
+| 向量检索 | similar/hybrid 操作符 | 需要 Milvus 向量数据库 |
+| 多数据库集成测试 | 18 个测试 | 需要 PG/SQLServer/SQLite 同时运行 |
 
-### 1.5 测试覆盖对比
+### 1.4 测试覆盖
 
-| 测试类别 | Java 测试数 | Python 测试数 | 覆盖率 |
-|----------|-----------|-------------|--------|
-| 模型定义 & 加载器 | 21 | 74 | ✅ 352% |
-| 查询构建 / Visitor | 11 | 16 | ✅ 145% |
-| 语义查询 V3 + JOIN + 维度 | 105 | 55 | ⚠️ 52% |
-| 预聚合引擎 | 51 | 16 | ⚠️ 31% |
-| 计算字段 | 39 | 27 | ⚠️ 69% |
-| 内联表达式 | 17 | 9 | ⚠️ 53% |
-| AutoGroupBy / 插件 | 64 | 15 | ⚠️ 23% |
-| 授权 / 访问控制 | 29 | 28 | ✅ 97% |
-| 查询验证 | 16 | 10 | ⚠️ 63% |
-| SQL 方言翻译 | 108 | 176 | ✅ 163% |
-| 查询执行（电商集成） | 84 | 0 | ❌ 0% |
-| 维度层级 / 嵌套维度 | 52 | 0 | ❌ 0% |
-| 多数据库 | 18 | 0 | ❌ 0% |
-| **总计** | **672** | **250** | **37.2%** |
-
----
-
-## 二、MCP 模块
-
-### 2.1 总览
-
-| 指标 | Java | Python | 覆盖率 |
-|------|------|--------|--------|
-| 源码文件 | 64 | 39 | 60.9% |
-| 测试文件 | 27 | 3 | 11.1% |
-| 测试方法 | 221 | 98 | 44.3% |
-
-### 2.2 子模块对比
-
-| 子模块 | Java 类数 | Python 类数 | 状态 | 说明 |
-|--------|----------|------------|------|------|
-| **tools/** | 9 | 4 | ⚠️ 44% | 已实现: Metadata、Query、Describe、Validate。缺: NL Query、Compose、Chart、Export、TableInspect |
-| **spi/** | 5 | 4 | ✅ 80% | DatasetAccessor、LocalAccessor、RemoteAccessor(stub)、SemanticServiceResolver |
-| **services/** | 7 | 2 | ⚠️ 29% | 已实现: McpToolDispatcher。缺: McpService、ToolConfigLoader(已独立到schemas/)、ToolFilterService、QueryExpertService |
-| **config/** | 9 | 3 | ⚠️ 33% | 已实现: McpProperties、AuthProperties、DataSourceManager。缺: MultiPort、WebClient、FieldInfo 等 |
-| **schema/** | 6 | 3 | ⚠️ 50% | 已实现: McpRequest/Response/Error。缺: NLQuery 请求/响应 |
-| **auth/** | 3 | 3 | ✅ 100% | NoAuth、ApiKey、JWT 三策略 + RBAC |
-| **controllers/routers/** | 7 | 4 | ⚠️ 57% | 已实现: Analyst、Admin、Health、MCP RPC。缺: Business、ChartImage、DevTools |
-| **audit/** | 3 | 2 | ✅ 67% | ToolAuditService + ToolAuditLog |
-| **validation/** | 5 | 2 | ⚠️ 40% | 基础验证已实现，缺详细的 ValidationError/Warning |
-| **datasource/** | 4 | 1 | ⚠️ 25% | DataSourceManager 已实现，缺持久化和 Controller |
-| **storage/** | 5 | 2 | ⚠️ 40% | LocalChartStorage 已实现，缺 cloud 适配器 |
-| **schemas/** | — | 3 | ✅ Python 独有 | tool_config_loader + 共享 schema 文件（从 Java 同步） |
-
-### 2.3 MCP 工具状态
-
-| 工具名 | Java | Python | 状态 |
-|--------|------|--------|------|
-| `dataset.get_metadata` | ✅ MetadataTool | ✅ Markdown + JSON | ✅ 完成 |
-| `dataset.describe_model_internal` | ✅ DescriptionModelTool | ✅ 已实现 | ✅ 完成 |
-| `dataset.query_model` | ✅ QueryModelTool (V3) | ✅ 支持 payload 格式 + 内联聚合 | ✅ 完成 |
-| `dataset_nl.query` | ✅ NaturalLanguageQueryTool | ❌ 未实现 | 需要 AI 服务 |
-| `dataset.compose_query` | ✅ ComposeQueryTool | ❌ 未实现 | 需要 CTE 编排引擎 |
-| `chart.generate` | ✅ ChartTool | ❌ 未实现 | 需要 chart-render-service |
-| `dataset.export_with_chart` | ✅ ExportWithChartTool | ❌ 未实现 | 需要 chart-render-service |
-| `dataset.inspect_table` | ✅ TableInspectionTool | ❌ 未实现 | Admin 工具 |
-| `semantic_layer.validate` | ✅ SemanticLayerValidationTool | ❌ 未实现 | 需要 bundle 系统 |
-
-### 2.4 MCP 协议能力
-
-| 能力 | Java | Python | 状态 |
-|------|------|--------|------|
-| Streamable HTTP (POST) | ✅ | ✅ | ✅ 完成 |
-| SSE Stream (GET) | ✅ | ✅ | ✅ 完成 |
-| Session Management | ✅ Mcp-Session-Id | ✅ Mcp-Session-Id | ✅ 完成 |
-| JSON-RPC 2.0 | ✅ | ✅ (无 error:null) | ✅ 完成 |
-| Notification handling (202) | ✅ | ✅ | ✅ 完成 |
-| tools/list | ✅ | ✅ 从共享 schema 加载 | ✅ 完成 |
-| tools/call | ✅ | ✅ 3 个工具可用 | ⚠️ 部分 |
-| resources/list | ✅ | ✅ | ✅ 完成 |
-| resources/read | ✅ | ✅ | ✅ 完成 |
-| prompts/list | ✅ | ✅ (空) | ✅ 完成 |
-| Multi-port (Admin/Analyst/Business) | ✅ 3 端口 | ⚠️ 仅 Analyst | ⚠️ 部分 |
-| 工具定义同步 | ✅ ToolConfigLoader | ✅ sync_mcp_schemas.py | ✅ 完成 |
-
-### 2.5 MCP 测试覆盖
-
-| 测试类别 | Java 测试数 | Python 测试数 | 覆盖率 |
-|----------|-----------|-------------|--------|
-| 工具配置加载 | 15 | 12 | ⚠️ 80% |
-| 工具调度 | 10 | 8 | ⚠️ 80% |
-| 元数据工具 | 20 | 15 | ⚠️ 75% |
-| 查询工具 | 25 | 10 | ⚠️ 40% |
-| 图表工具 | 15 | 5 | ⚠️ 33% |
-| NL 查询工具 | 20 | 0 | ❌ 0% |
-| 认证/授权 | 15 | 12 | ⚠️ 80% |
-| 审计 | 10 | 8 | ⚠️ 80% |
-| Controller 集成 | 30 | 0 | ❌ 0% |
-| AI 集成测试 | 40 | 0 | ❌ 0% |
-| 语义层验证 | 15 | 10 | ⚠️ 67% |
-| **总计** | **221** | **98** | **44.3%** |
+| 测试文件 | 测试数 | 覆盖模块 |
+|----------|--------|----------|
+| test_definitions.py | 55 | 定义层：AiDef、Access、Dict、Measure、Expression、Model |
+| test_semantic_query.py | 55 | 语义查询：字段解析、auto-JOIN、聚合、V3 元数据 |
+| test_hierarchy_operators.py | 58 | 层级操作符、闭包表、条件构建、注册中心 |
+| test_dimension_path.py | 41 | 嵌套维度路径：格式转换、解析、遍历 |
+| test_formula_registry.py | 37 | SqlFormula：15 个操作符 + 注册中心 |
+| test_table_model_proxy.py | 33 | TableModelProxy、DimensionProxy、ColumnRef |
+| test_member_loader.py | 32 | DimensionMemberLoader：缓存、搜索、过期 |
+| test_query_facade.py | 28 | QueryFacade 管线：Validation、InlineExpr、AutoGroupBy |
+| test_calculated_fields.py | 27 | 计算字段：算术、函数、依赖、安全 |
+| test_join_graph.py | 23 | JoinGraph：BFS、拓扑排序、缓存、环检测 |
+| test_loader.py | 19 | 模型加载器 |
+| test_cte_compose.py | 18 | CTE 编排：WITH/子查询模式 |
+| test_preagg_matcher.py | 16 | 预聚合匹配 |
+| test_query_visitor.py | 16 | SQL 构建：Visitor + Builder |
+| test_auto_groupby.py | 15 | AutoGroupBy 推断 |
+| test_query_validation.py | 10 | 查询验证 |
+| test_inline_expression.py | 9 | 内联聚合表达式 |
+| test_authorization.py | 28 | 访问控制 |
+| **总计** | **520** | |
 
 ---
 
-## 三、整体评估
+## 二、MCP 模块 — 70% 完成
 
-### 3.1 功能完成度
+### 2.1 工具状态
+
+| 工具名 | 状态 | 说明 |
+|--------|------|------|
+| `dataset.get_metadata` | ✅ | Markdown（默认）+ JSON，维度属性完整 |
+| `dataset.describe_model_internal` | ✅ | 单模型详细元数据 |
+| `dataset.query_model` | ✅ | V3 payload 格式 + 内联聚合 + auto-JOIN |
+| `dataset_nl.query` | ❌ | 需要 AI 服务 |
+| `dataset.compose_query` | ❌ | CTE 引擎已实现，MCP 工具未接入 |
+| `chart.generate` | ❌ | 需要 chart-render-service |
+| `dataset.export_with_chart` | ❌ | 需要 chart-render-service |
+| `dataset.inspect_table` | ❌ | Admin 工具 |
+
+### 2.2 协议能力
+
+| 能力 | 状态 |
+|------|------|
+| Streamable HTTP (POST/GET/DELETE) | ✅ |
+| SSE Stream | ✅ |
+| JSON-RPC 2.0（无 error:null） | ✅ |
+| Mcp-Session-Id 管理 | ✅ |
+| Notification → 202 Accepted | ✅ |
+| 工具定义从共享 schema 加载 | ✅ |
+| sync_mcp_schemas.py 同步脚本 | ✅ |
+
+---
+
+## 三、进度时间线
 
 ```
-dataset_model 模块
-  ████████████████░░░░░░░░░░░░░░ 55%
-  核心查询管线已通，缺 SqlFormula/QueryFacade/插件链/CTE
-
-MCP 模块
-  ██████████████████████░░░░░░░░ 70%
-  3/9 工具完成，协议层完整，缺 NL/Chart/Compose 等高级工具
-
-测试覆盖
-  ████████████░░░░░░░░░░░░░░░░░░ 39%
-  955 / ~2400 (Java dataset_model 672 + MCP 221 + 其他模块)
+2026-03-20  初始移植完成         625 tests
+     ↓      P0 安全修复 + MCP 服务启动
+     ↓      MCP 工具对齐 + V3 元数据
+     ↓      星型模型 JOIN + 维度字段
+     ↓      +314 单元测试移植         939 tests
+     ↓      translate_function + 内联表达式    955 tests
+2026-03-21  P0-P1: SqlFormula/JoinGraph/QueryFacade/CTE  1154 tests
+     ↓      P2-P3: DimensionPath/Hierarchy/Proxy/MemberLoader  1318 tests
+     ↓      dataset_model 完成度 95%
 ```
 
-### 3.2 下一步优先级
+---
 
-| 优先级 | 工作项 | 预估工作量 | 影响 |
-|--------|--------|-----------|------|
-| **P0** | SqlFormula 条件生成器（20 类） | 3-5 天 | 完整的 slice 条件支持 |
-| **P0** | QueryFacade 执行管线 | 2-3 天 | beforeQuery/afterQuery 插件 |
-| **P1** | JoinGraph 多跳路径 | 1-2 天 | 复杂星型/雪花模型 |
-| **P1** | QM 构建器 + .qm 文件加载 | 3-5 天 | 动态模型注册 |
-| **P1** | compose_query (CTE 编排) | 3-5 天 | 多模型联合查询 |
-| **P2** | NL Query 工具 | 2-3 天 | 需要 AI 服务对接 |
-| **P2** | Chart 工具 | 1-2 天 | 需要 chart-render-service |
-| **P2** | Parent-Child 维度 | 2-3 天 | 组织架构层级 |
-| **P3** | TableModelProxy | 2-3 天 | fsscript loadTableModel |
-| **P3** | 多端口 (Admin/Business) | 1 天 | 角色分离 |
+## 四、下一步建议
+
+| 优先级 | 工作项 | 预估 |
+|--------|--------|------|
+| P1 | compose_query MCP 工具接入 | 1 天 |
+| P1 | 端到端集成测试（MCP → MySQL 真实查询） | 1 天 |
+| P2 | SubtotalStep / MoneyFormatStep | 1 天 |
+| P2 | inspect_table MCP 工具 | 1 天 |
+| P3 | NL Query（需 AI 服务） | 2 天 |
+| P3 | Chart 工具（需 chart-render-service） | 1 天 |
