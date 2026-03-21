@@ -102,8 +102,12 @@ class TestBundleSystem:
 
     def test_system_bundles_context(self):
         """Test SystemBundlesContext."""
+        import foggy.fsscript as _fsscript_pkg
+        from pathlib import Path
+        fsscript_dir = str(Path(_fsscript_pkg.__file__).parent)
+
         ctx = SystemBundlesContext()
-        bundle = ctx.install_bundle("D:/foggy-projects/foggy-dataset-py/foggy-python/src/foggy/fsscript")
+        bundle = ctx.install_bundle(fsscript_dir)
 
         assert bundle is not None
         assert bundle.bundle_id in ctx.bundles
