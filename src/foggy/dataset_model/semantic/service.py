@@ -14,6 +14,8 @@ from pydantic import BaseModel
 
 from foggy.dataset_model.impl.model import DbTableModelImpl, DbModelDimensionImpl, DbModelMeasureImpl
 from foggy.dataset_model.engine.query import SqlQueryBuilder
+from foggy.dataset_model.engine.formula import get_default_registry, SqlFormulaRegistry
+from foggy.dataset_model.engine.join import JoinGraph, JoinEdge, JoinType
 from foggy.mcp.spi import (
     SemanticServiceResolver,
     SemanticMetadataResponse,
@@ -78,6 +80,7 @@ class SemanticQueryService(SemanticServiceResolver):
         self._cache_ttl = cache_ttl_seconds
         self._cache: Dict[str, Tuple[SemanticQueryResponse, float]] = {}
         self._executor = executor
+        self._formula_registry: SqlFormulaRegistry = get_default_registry()
 
     def register_model(self, model: DbTableModelImpl) -> None:
         """Register a table model with the service."""
@@ -228,6 +231,18 @@ class SemanticQueryService(SemanticServiceResolver):
         if model.source_schema:
             table_name = f"{model.source_schema}.{model.source_table}"
         builder.from_table(table_name, alias="t")
+
+        # Build JoinGraph from model's dimension_joins (supports multi-hop in future)
+        join_graph = JoinGraph(root="t")
+        for dj in model.dimension_joins:
+            ta = dj.get_alias()
+            join_graph.add_edge(
+                from_alias="t", to_alias=ta,
+                to_table_name=dj.table_name,
+                foreign_key=dj.foreign_key,
+                primary_key=dj.primary_key,
+                join_type=JoinType.LEFT,
+            )
 
         # Track JOINs to add (deduplicated by dimension name)
         joined_dims: Dict[str, DimensionJoinDef] = {}
@@ -481,41 +496,23 @@ class SemanticQueryService(SemanticServiceResolver):
             dim = model.get_dimension(column)
             col_expr = f"t.{dim.column}" if dim else f"t.{column}"
 
-        op_upper = operator.upper()
-
-        if op_upper == "IN":
-            values = filter_item.get("values", [value] if value else [])
-            if values:
-                placeholders = ", ".join(["?"] * len(values))
-                builder.where(f"{col_expr} IN ({placeholders})", params=values)
-        elif op_upper in ("LIKE", "LEFT_LIKE", "RIGHT_LIKE"):
-            pattern = filter_item.get("pattern", value)
-            if pattern:
-                if op_upper == "LEFT_LIKE":
-                    pattern = f"{pattern}%"
-                elif op_upper == "RIGHT_LIKE":
-                    pattern = f"%{pattern}"
-                builder.where(f"{col_expr} LIKE ?", params=[pattern])
-        elif op_upper == "BETWEEN":
+        # Resolve value: support "values" key for IN, or range from filter_item
+        effective_value = value
+        if operator.upper() in ("IN", "NOT IN", "NIN"):
+            effective_value = filter_item.get("values", [value] if value else [])
+        elif operator.upper() == "BETWEEN":
             from_val = filter_item.get("from")
             to_val = filter_item.get("to")
             if from_val is not None and to_val is not None:
-                builder.where(f"{col_expr} BETWEEN ? AND ?", params=[from_val, to_val])
-        elif op_upper in ("[]", "[)", "(]", "()"):
-            # Range operators from Java: value is [start, end]
-            vals = value if isinstance(value, list) else [value]
-            if len(vals) >= 2:
-                lo, hi = vals[0], vals[1]
-                l_bracket = ">=" if op_upper[0] == "[" else ">"
-                r_bracket = "<=" if op_upper[-1] == "]" else "<"
-                builder.where(f"{col_expr} {l_bracket} ? AND {col_expr} {r_bracket} ?", params=[lo, hi])
-        elif op_upper == "IS NULL":
-            builder.where(f"{col_expr} IS NULL")
-        elif op_upper == "IS NOT NULL":
-            builder.where(f"{col_expr} IS NOT NULL")
-        else:
-            if value is not None:
-                builder.where(f"{col_expr} {operator} ?", params=[value])
+                effective_value = [from_val, to_val]
+
+        # Use SqlFormulaRegistry for all operators
+        params: List[Any] = []
+        condition = self._formula_registry.build_condition(
+            col_expr, operator, effective_value, params
+        )
+        if condition:
+            builder.where(condition, params=params if params else None)
 
     # ==================== Query Execution ====================
 
