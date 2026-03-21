@@ -1081,6 +1081,7 @@ class FsscriptParser:
             TokenType.GE: BinaryOperator.GREATER_EQUAL,
             TokenType.AND_AND: BinaryOperator.AND,
             TokenType.OR_OR: BinaryOperator.OR,
+            TokenType.INSTANCEOF: BinaryOperator.INSTANCEOF,
         }
 
         if token.type in op_map:
@@ -1474,11 +1475,15 @@ class FsscriptParser:
         )
 
     def _parse_typeof(self) -> Expression:
-        """Parse typeof expression."""
-        self._advance()
-        operand = self.parse_expression()
-        # Simplified: return string type
-        return StringExpression(value='object')
+        """Parse ``typeof expr`` — returns a UnaryExpression with TYPEOF."""
+        token = self._advance()  # consume 'typeof'
+        operand = self._parse_expression_with_precedence(14)  # just below unary
+        return UnaryExpression(
+            operator=UnaryOperator.TYPEOF,
+            operand=operand,
+            line=token.line,
+            column=token.column,
+        )
 
     def _parse_spread(self) -> Expression:
         """Parse spread expression."""
@@ -1574,7 +1579,7 @@ class FsscriptParser:
             TokenType.FROM, TokenType.AS, TokenType.IN, TokenType.OF,
             TokenType.NULL, TokenType.TRUE, TokenType.FALSE,
             TokenType.TRY, TokenType.CATCH, TokenType.FINALLY,
-            TokenType.THROW,
+            TokenType.THROW, TokenType.TYPEOF, TokenType.INSTANCEOF,
         }
         if current.type in _keyword_types:
             return self._advance()

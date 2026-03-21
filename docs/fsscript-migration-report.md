@@ -314,11 +314,96 @@ ScopeChain
 
 ---
 
-## 8. 结论
+## 8. 新增能力：import '@beanName' / typeof / instanceof
+
+### 8.1 import '@beanName' — Bean 注册与导入
+
+**对标 Java**：`ImportBeanExp` + Spring `ApplicationContext.getBean()`
+
+Python 实现通过 `BeanRegistry` + `BeanModuleLoader`，利用现有 `ModuleLoader` 架构无缝集成：
+
+```python
+# 注册 Bean
+registry = BeanRegistry()
+registry.register("myService", my_service_instance)
+
+# ExpressionEvaluator 自动接入
+evaluator = ExpressionEvaluator(context={}, bean_registry=registry)
+```
+
+FSScript 中即可使用：
+```javascript
+import { doWork } from '@myService';    // 命名导入
+import svc from '@myService';            // 默认导入（整个 bean）
+import * as utils from '@myService';     // 命名空间导入
+```
+
+| 文件 | 说明 |
+|------|------|
+| `src/foggy/fsscript/bean_registry.py` (新建, 155 行) | `BeanRegistry` + `BeanModuleLoader` |
+| `src/foggy/fsscript/evaluator.py` (修改) | `bean_registry` 参数 → 自动链入 `ChainedModuleLoader` |
+
+### 8.2 typeof 运算符
+
+从 stub（硬编码返回 `'object'`）到完整实现，对齐 ECMAScript 语义：
+
+```javascript
+typeof 42         → "number"
+typeof "hello"    → "string"
+typeof true       → "boolean"
+typeof null       → "undefined"
+typeof (() => {}) → "function"
+typeof {}         → "object"
+typeof []         → "object"
+typeof undefined  → "undefined"
+```
+
+| 文件 | 说明 |
+|------|------|
+| `src/foggy/fsscript/parser/tokens.py` | 新增 `TYPEOF` token |
+| `src/foggy/fsscript/expressions/operators.py` | `UnaryOperator.TYPEOF` + `fsscript_typeof()` |
+| `src/foggy/fsscript/parser/parser.py` | `_parse_typeof()` 从 stub 改为真正实现 |
+
+### 8.3 instanceof 运算符
+
+新增二元运算符，支持类型检查：
+
+```javascript
+[1, 2] instanceof Array    → true
+{a: 1} instanceof Object   → true
+"hi" instanceof Array      → false
+42 instanceof Object        → false
+```
+
+内置类型映射：`Array` → `list`, `Object` → `dict`, `String` → `str`, `Number` → `int/float`, `Boolean` → `bool`
+
+| 文件 | 说明 |
+|------|------|
+| `src/foggy/fsscript/parser/tokens.py` | 新增 `INSTANCEOF` token |
+| `src/foggy/fsscript/expressions/operators.py` | `BinaryOperator.INSTANCEOF` + `_check_instanceof()` |
+| `src/foggy/fsscript/parser/parser.py` | PRECEDENCE + `_parse_infix` op_map |
+| `src/foggy/fsscript/evaluator.py` | 注册 `Array`/`Object`/`Function` 构造函数 |
+
+### 8.4 新增测试
+
+| 测试文件 | 测试类 | 测试数 |
+|----------|--------|--------|
+| `test_bean_registry.py` | `TestBeanRegistry` | 7 |
+| `test_bean_registry.py` | `TestBeanModuleLoader` | 3 |
+| `test_bean_registry.py` | `TestBeanImportE2E` | 7 |
+| `test_bean_registry.py` | `TestTypeofOperator` | 11 |
+| `test_bean_registry.py` | `TestInstanceofOperator` | 8 |
+| **合计** | | **36** |
+
+---
+
+## 9. 结论
 
 Python FSScript 引擎核心语言能力已与 Java 实现 **100% 对齐**（不含 Java 平台特有特性）。
 
 - **260 个 Java @Test 中**：160 个核心语言测试已全部在 Python 侧有对应覆盖，100 个 Java 平台特有测试无需同步
 - **Python 独有测试**：320+ 个额外测试覆盖词法分析、解析器、模板字符串、可选链、try/catch 等
-- **总测试数**：413 passed, 0 xfailed, 0 failed
+- **总测试数**：**449 passed, 0 failed**
 - **闭包机制**：从"完全不工作"到"与 Java/JS 语义一致"的完整修复
+- **Bean 导入**：`import '@beanName'` 通过 `BeanRegistry` + `BeanModuleLoader` 实现，对标 Java Spring `ApplicationContext`
+- **类型运算符**：`typeof` 和 `instanceof` 完整实现，对齐 ECMAScript 语义

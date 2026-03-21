@@ -57,12 +57,18 @@ class ExpressionEvaluator(ExpressionVisitor):
     Implements the Visitor pattern to evaluate each expression type.
     """
 
-    def __init__(self, context: Optional[Dict[str, Any]] = None, module_loader: Optional["ModuleLoader"] = None):
+    def __init__(
+        self,
+        context: Optional[Dict[str, Any]] = None,
+        module_loader: Optional["ModuleLoader"] = None,
+        bean_registry: Optional["BeanRegistry"] = None,
+    ):
         """Initialize evaluator.
 
         Args:
             context: Initial context with variables and functions
             module_loader: Module loader for import statements
+            bean_registry: Bean registry for ``import '@beanName'`` support
         """
         if isinstance(context, ScopeChain):
             self._context = context
@@ -71,9 +77,21 @@ class ExpressionEvaluator(ExpressionVisitor):
         self._module_loader = module_loader
         self._setup_builtins()
 
+        # Wire up bean registry as a BeanModuleLoader in the loader chain
+        if bean_registry:
+            from foggy.fsscript.bean_registry import BeanModuleLoader
+            from foggy.fsscript.module_loader import ChainedModuleLoader
+            bean_loader = BeanModuleLoader(bean_registry)
+            if module_loader:
+                module_loader = ChainedModuleLoader(bean_loader, module_loader)
+            else:
+                module_loader = bean_loader
+            self._module_loader = module_loader
+            self._context["__bean_registry__"] = bean_registry
+
         # Register module loader in context for ImportExpression
-        if module_loader:
-            self._context["__module_loader__"] = module_loader
+        if module_loader or self._module_loader:
+            self._context["__module_loader__"] = self._module_loader or module_loader
 
     def _setup_builtins(self) -> None:
         """Set up built-in globals."""
@@ -101,6 +119,15 @@ class ExpressionEvaluator(ExpressionVisitor):
         self._context["Boolean"] = lambda x: bool(x)
         self._context["isNaN"] = lambda x: x != x  # NaN != NaN is True
         self._context["isFinite"] = lambda x: x != float('inf') and x != float('-inf') and x == x
+
+        # Constructor types — used by `instanceof` operator
+        self._context["Array"] = list
+        self._context["Object"] = dict
+        self._context["Function"] = type(lambda: None)
+
+        # typeof built-in function (in addition to the operator)
+        from foggy.fsscript.expressions.operators import fsscript_typeof
+        self._context["typeof"] = fsscript_typeof
 
     @property
     def context(self) -> Dict[str, Any]:
