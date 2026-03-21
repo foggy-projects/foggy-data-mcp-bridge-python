@@ -275,6 +275,7 @@ def create_mcp_router(
                             "order_by": payload.get("orderBy", []),
                             "limit": payload.get("limit", 1000),
                             "offset": payload.get("start"),
+                            "calculated_fields": payload.get("calculatedFields", []),
                         }
                     else:
                         # Python flat format
@@ -285,6 +286,7 @@ def create_mcp_router(
                             "order_by": tool_args.get("order_by", tool_args.get("orderBy", [])),
                             "limit": tool_args.get("limit", 100),
                             "offset": tool_args.get("offset", tool_args.get("start")),
+                            "calculated_fields": tool_args.get("calculated_fields", tool_args.get("calculatedFields", [])),
                         }
 
                     _acc = _get_accessor()

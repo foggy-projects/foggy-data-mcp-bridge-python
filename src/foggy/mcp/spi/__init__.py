@@ -105,6 +105,7 @@ class SemanticQueryRequest(BaseModel):
     offset: Optional[int] = None
     slice: Optional[Dict[str, Any]] = None
     parameters: Dict[str, Any] = {}
+    calculated_fields: List[Dict[str, Any]] = []
 
 
 class DatasetAccessor(ABC):
@@ -313,6 +314,7 @@ class LocalDatasetAccessor(DatasetAccessor):
             offset=payload.get("offset"),
             slice=payload.get("slice"),
             parameters=payload.get("parameters", {}),
+            calculated_fields=payload.get("calculated_fields", payload.get("calculatedFields", [])),
         )
         return self._resolver.query_model(model, request, mode, context)
 
@@ -336,6 +338,7 @@ class LocalDatasetAccessor(DatasetAccessor):
             offset=payload.get("offset"),
             slice=payload.get("slice"),
             parameters=payload.get("parameters", {}),
+            calculated_fields=payload.get("calculated_fields", payload.get("calculatedFields", [])),
         )
         # Use async method if resolver supports it
         if hasattr(self._resolver, 'query_model_async'):

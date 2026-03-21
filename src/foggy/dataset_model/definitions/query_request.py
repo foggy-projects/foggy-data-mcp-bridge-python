@@ -73,7 +73,13 @@ class SelectColumnDef(BaseModel):
 
 
 class CalculatedFieldDef(BaseModel):
-    """Calculated field definition for computed columns."""
+    """Calculated field definition for computed columns.
+
+    Supports two modes:
+    1. Aggregated calculation: expression + agg → e.g. SUM(salesAmount - discountAmount)
+    2. Window function: expression + partitionBy/windowOrderBy/windowFrame
+       → e.g. RANK() OVER (PARTITION BY category ORDER BY amount DESC)
+    """
 
     # Identity
     name: str = Field(..., description="Field name")
@@ -88,9 +94,27 @@ class CalculatedFieldDef(BaseModel):
     # Dependencies
     depends_on: List[str] = Field(default_factory=list, description="Dependent columns")
 
+    # Aggregation (aligned with Java CalculatedFieldDef)
+    agg: Optional[str] = Field(default=None, description="Aggregation type: SUM, AVG, COUNT, MAX, MIN, etc.")
+
+    # Window function fields (aligned with Java CalculatedFieldDef)
+    partition_by: List[str] = Field(default_factory=list, description="PARTITION BY field list")
+    window_order_by: List[Dict[str, str]] = Field(
+        default_factory=list,
+        description='Window ORDER BY: [{"field": "x", "dir": "desc"}]',
+    )
+    window_frame: Optional[str] = Field(
+        default=None,
+        description="Window frame spec, e.g. ROWS BETWEEN 6 PRECEDING AND CURRENT ROW",
+    )
+
     model_config = {
         "extra": "allow",
     }
+
+    def is_window_function(self) -> bool:
+        """Check if this calculated field uses window function semantics."""
+        return bool(self.partition_by or self.window_order_by)
 
 
 class CondRequestDef(BaseModel):

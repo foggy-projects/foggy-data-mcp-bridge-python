@@ -16,6 +16,7 @@ from foggy.dataset_model.impl.model import DbTableModelImpl, DbModelDimensionImp
 from foggy.dataset_model.engine.query import SqlQueryBuilder
 from foggy.dataset_model.engine.formula import get_default_registry, SqlFormulaRegistry
 from foggy.dataset_model.engine.join import JoinGraph, JoinEdge, JoinType
+from foggy.dataset_model.definitions.query_request import CalculatedFieldDef
 from foggy.mcp.spi import (
     SemanticServiceResolver,
     SemanticMetadataResponse,
@@ -325,6 +326,20 @@ class SemanticQueryService(SemanticServiceResolver):
                     else:
                         warnings.append(f"Column not found: {col_name}")
 
+        # 2.5 Process calculatedFields (aggregated calculations + window functions)
+        for cf_dict in request.calculated_fields:
+            cf = CalculatedFieldDef(**cf_dict) if isinstance(cf_dict, dict) else cf_dict
+            select_sql = self._build_calculated_field_sql(cf, model, ensure_join)
+            alias = cf.alias or cf.name
+            builder.select(f"{select_sql} AS `{alias}`")
+            columns_info.append({
+                "name": alias, "fieldName": cf.name,
+                "expression": cf.expression, "aggregation": cf.agg,
+                "window": cf.is_window_function(),
+            })
+            if cf.agg or cf.is_window_function():
+                has_aggregation = True
+
         # 3. WHERE clause
         for filter_item in request.filters:
             self._add_filter(builder, model, filter_item, ensure_join)
@@ -460,6 +475,140 @@ class SemanticQueryService(SemanticServiceResolver):
             "aggregation": agg,
             "select_expr": select_expr,
         }
+
+    # ==================== Calculated Fields & Window Functions ====================
+
+    # SQL keywords and function names that should NOT be treated as field references
+    _SQL_KEYWORDS = frozenset({
+        'AND', 'OR', 'NOT', 'AS', 'BETWEEN', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END',
+        'NULL', 'TRUE', 'FALSE', 'IS', 'IN', 'LIKE', 'OVER', 'PARTITION', 'BY', 'ORDER',
+        'ASC', 'DESC', 'ROWS', 'RANGE', 'CURRENT', 'ROW', 'PRECEDING', 'FOLLOWING',
+        'UNBOUNDED', 'SUM', 'AVG', 'COUNT', 'MIN', 'MAX', 'LAG', 'LEAD',
+        'FIRST_VALUE', 'LAST_VALUE', 'RANK', 'ROW_NUMBER', 'DENSE_RANK', 'NTILE',
+        'COALESCE', 'IFNULL', 'NVL', 'NULLIF', 'IF', 'CAST', 'CONVERT',
+        'CONCAT', 'CONCAT_WS', 'SUBSTRING', 'LEFT', 'RIGHT', 'LPAD', 'RPAD',
+        'REPLACE', 'LOCATE', 'YEAR', 'MONTH', 'DAY', 'DATE_FORMAT', 'STR_TO_DATE',
+        'DATE_ADD', 'DATE_SUB', 'DATEDIFF', 'TIMESTAMPDIFF',
+        'ABS', 'ROUND', 'FLOOR', 'CEIL', 'CEILING', 'MOD', 'POWER', 'SQRT',
+        'DISTINCT', 'GROUP_CONCAT', 'STDDEV_POP', 'STDDEV_SAMP', 'VAR_POP', 'VAR_SAMP',
+        'CUME_DIST', 'PERCENT_RANK',
+    })
+
+    # Pure window functions with no arguments (or just ())
+    _PURE_WINDOW_RE = re.compile(
+        r'^(RANK|ROW_NUMBER|DENSE_RANK|NTILE|CUME_DIST|PERCENT_RANK)\s*\(\s*\)$',
+        re.IGNORECASE,
+    )
+
+    def _resolve_single_field(self, field_name: str, model: DbTableModelImpl, ensure_join=None) -> str:
+        """Resolve a semantic field name to SQL column expression.
+
+        Tries model.resolve_field() first, then dimension/measure lookup, then returns as-is.
+        """
+        resolved = model.resolve_field(field_name)
+        if resolved:
+            if resolved["join_def"] and ensure_join:
+                ensure_join(resolved["join_def"])
+            return resolved["sql_expr"]
+        dim = model.get_dimension(field_name)
+        if dim:
+            return f"t.{dim.column}"
+        measure = model.get_measure(field_name)
+        if measure:
+            return f"t.{measure.column or measure.name}"
+        return field_name
+
+    def _resolve_expression_fields(self, expression: str, model: DbTableModelImpl, ensure_join=None) -> str:
+        """Replace semantic field names in an expression with SQL column references.
+
+        Handles:
+        - Pure window functions: RANK(), ROW_NUMBER() → returned as-is
+        - Function calls: LAG(salesAmount, 1) → LAG(t.sales_amount, 1)
+        - Arithmetic: salesAmount - discountAmount → t.sales_amount - t.discount_amount
+        - Dimension refs: product$categoryName → dp.category_name (with auto-JOIN)
+        """
+        stripped = expression.strip()
+
+        # Pure window functions (no arguments): return as-is
+        if self._PURE_WINDOW_RE.match(stripped):
+            return stripped
+
+        keywords = self._SQL_KEYWORDS
+
+        def replace_field(match: re.Match) -> str:
+            token = match.group(0)
+            if token.upper() in keywords:
+                return token
+            # Try numeric literal (don't resolve)
+            if token.isdigit():
+                return token
+            resolved = model.resolve_field(token)
+            if resolved:
+                if resolved["join_def"] and ensure_join:
+                    ensure_join(resolved["join_def"])
+                return resolved["sql_expr"]
+            dim = model.get_dimension(token)
+            if dim:
+                return f"t.{dim.column}"
+            measure = model.get_measure(token)
+            if measure:
+                return f"t.{measure.column or measure.name}"
+            return token
+
+        return re.sub(r'\b(\w+\$\w+|\w+)\b', replace_field, expression)
+
+    def _build_calculated_field_sql(
+        self,
+        cf: CalculatedFieldDef,
+        model: DbTableModelImpl,
+        ensure_join=None,
+    ) -> str:
+        """Build SQL expression for a calculated field, including OVER() for window functions.
+
+        Flow:
+        1. Resolve semantic field names in expression → SQL column names
+        2. If agg specified (non-window): wrap as AGG(expr)
+        3. If window function: wrap as expr OVER (PARTITION BY ... ORDER BY ... frame)
+        """
+        base_sql = self._resolve_expression_fields(cf.expression, model, ensure_join)
+
+        if cf.is_window_function():
+            # Window function: optionally wrap with agg, then add OVER()
+            if cf.agg:
+                agg_upper = cf.agg.upper()
+                if agg_upper == "COUNT_DISTINCT":
+                    base_sql = f"COUNT(DISTINCT {base_sql})"
+                else:
+                    base_sql = f"{agg_upper}({base_sql})"
+
+            over_parts: List[str] = []
+            if cf.partition_by:
+                resolved_parts = [
+                    self._resolve_single_field(f, model, ensure_join) for f in cf.partition_by
+                ]
+                over_parts.append(f"PARTITION BY {', '.join(resolved_parts)}")
+            if cf.window_order_by:
+                order_clauses = []
+                for wo in cf.window_order_by:
+                    col_sql = self._resolve_single_field(wo["field"], model, ensure_join)
+                    direction = wo.get("dir", "asc").upper()
+                    order_clauses.append(f"{col_sql} {direction}")
+                over_parts.append(f"ORDER BY {', '.join(order_clauses)}")
+            if cf.window_frame:
+                over_parts.append(cf.window_frame)
+
+            base_sql = f"{base_sql} OVER ({' '.join(over_parts)})"
+        elif cf.agg:
+            # Non-window aggregation
+            agg_upper = cf.agg.upper()
+            if agg_upper == "COUNT_DISTINCT":
+                base_sql = f"COUNT(DISTINCT {base_sql})"
+            else:
+                base_sql = f"{agg_upper}({base_sql})"
+
+        return base_sql
+
+    # ==================== Filtering ====================
 
     def _add_filter(
         self,
