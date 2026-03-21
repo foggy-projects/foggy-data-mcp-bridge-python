@@ -17,7 +17,7 @@ import json
 import asyncio
 import uuid
 
-from foggy.mcp.spi import LocalDatasetAccessor, SemanticMetadataRequest
+from foggy.mcp_spi import LocalDatasetAccessor, SemanticMetadataRequest, MetadataFormat
 from foggy.dataset_model.semantic import SemanticQueryService
 
 
@@ -205,7 +205,7 @@ def create_mcp_router(
                     svc = _get_service()
                     fmt = tool_args.get("format", "markdown")
 
-                    if fmt == "json":
+                    if fmt == MetadataFormat.JSON:
                         v3_data = svc.get_metadata_v3()
                         text = json.dumps(v3_data, ensure_ascii=False, indent=2)
                     else:

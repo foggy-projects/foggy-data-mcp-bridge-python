@@ -15,11 +15,12 @@ from fastapi.responses import JSONResponse
 import json
 import logging
 
-from foggy.mcp.spi import (
+from foggy.mcp_spi import (
     LocalDatasetAccessor,
     SemanticQueryRequest,
     SemanticMetadataRequest,
     SemanticQueryResponse,
+    MetadataFormat,
 )
 from foggy.dataset_model.semantic import SemanticQueryService
 
@@ -144,18 +145,18 @@ def create_semantic_v3_router(
         if not svc:
             raise HTTPException(status_code=503, detail="Service not initialized")
 
-        if format == "json":
+        if format == MetadataFormat.JSON:
             v3_data = svc.get_metadata_v3(model_names=[model])
             return JSONResponse(content={
                 "content": json.dumps(v3_data, ensure_ascii=False),
                 "data": v3_data,
-                "format": "json",
+                "format": MetadataFormat.JSON,
             })
         else:
             md = svc.get_metadata_v3_markdown(model_names=[model])
             return JSONResponse(content={
                 "content": md,
-                "format": "markdown",
+                "format": MetadataFormat.MARKDOWN,
             })
 
     @router.get("/models")

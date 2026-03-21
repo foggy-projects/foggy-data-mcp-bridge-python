@@ -7,7 +7,7 @@ the generated SQL, column metadata, and any warnings.
 import pytest
 
 from foggy.dataset_model.semantic import SemanticQueryService
-from foggy.mcp.spi import SemanticQueryRequest
+from foggy.mcp_spi import SemanticQueryRequest
 from foggy.demo.models.ecommerce_models import create_fact_sales_model
 
 

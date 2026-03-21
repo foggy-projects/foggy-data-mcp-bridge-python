@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, ClassVar
 from foggy.mcp.tools.base import BaseMcpTool
 from foggy.mcp_spi.tool import ToolCategory, ToolResult
 from foggy.mcp_spi.context import ToolExecutionContext
+from foggy.mcp_spi.enums import MetadataFormat
 from foggy.mcp.services.query_service import QueryService
 
 
@@ -222,7 +223,7 @@ class DescriptionModelTool(BaseMcpTool):
         try:
             schema = await self._query_service.get_model_schema(model_name)
 
-            if format_type == "json":
+            if format_type == MetadataFormat.JSON:
                 return self._success_result(data=schema)
 
             # Generate description

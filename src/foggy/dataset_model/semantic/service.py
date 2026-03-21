@@ -17,7 +17,7 @@ from foggy.dataset_model.engine.query import SqlQueryBuilder
 from foggy.dataset_model.engine.formula import get_default_registry, SqlFormulaRegistry
 from foggy.dataset_model.engine.join import JoinGraph, JoinEdge, JoinType
 from foggy.dataset_model.definitions.query_request import CalculatedFieldDef
-from foggy.mcp.spi import (
+from foggy.mcp_spi import (
     SemanticServiceResolver,
     SemanticMetadataResponse,
     SemanticQueryResponse,
@@ -25,6 +25,7 @@ from foggy.mcp.spi import (
     SemanticQueryRequest,
     SemanticRequestContext,
     DebugInfo,
+    QueryMode,
 )
 
 
@@ -157,7 +158,7 @@ class SemanticQueryService(SemanticServiceResolver):
             return SemanticQueryResponse.from_error(f"Query build failed: {str(e)}")
 
         # Validate mode
-        if mode == "validate":
+        if mode == QueryMode.VALIDATE:
             return SemanticQueryResponse.from_legacy(
                 data=[],
                 columns_info=build_result.columns,
@@ -188,7 +189,7 @@ class SemanticQueryService(SemanticServiceResolver):
 
         # Add debug info with timing and SQL
         duration_ms = (time.time() - start_time) * 1000
-        from foggy.mcp.spi import DebugInfo
+        # DebugInfo already imported at module level from foggy.mcp_spi
         response.debug = DebugInfo(
             duration_ms=duration_ms,
             extra={"sql": build_result.sql, "from_cache": False},
@@ -752,7 +753,7 @@ class SemanticQueryService(SemanticServiceResolver):
             logger.exception(f"Failed to build query for model {model}")
             return SemanticQueryResponse.from_error(f"Query build failed: {str(e)}")
 
-        if mode == "validate":
+        if mode == QueryMode.VALIDATE:
             return SemanticQueryResponse.from_legacy(
                 data=[],
                 columns_info=build_result.columns,

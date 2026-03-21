@@ -18,7 +18,7 @@ from foggy.dataset_model.impl.model import (
     DimensionPropertyDef,
 )
 from foggy.demo.models.ecommerce_models import create_fact_sales_model, create_fact_order_model
-from foggy.mcp.spi import SemanticQueryRequest
+from foggy.mcp_spi import SemanticQueryRequest
 
 
 # ==================== Fixtures ====================

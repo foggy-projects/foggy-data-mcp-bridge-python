@@ -15,7 +15,7 @@ from foggy.dataset_model.semantic.service import SemanticQueryService, QueryBuil
 from foggy.dataset_model.impl.model import DbTableModelImpl
 from foggy.dataset_model.definitions.query_request import CalculatedFieldDef
 from foggy.demo.models.ecommerce_models import create_fact_sales_model
-from foggy.mcp.spi import SemanticQueryRequest
+from foggy.mcp_spi import SemanticQueryRequest
 
 
 # ==================== Fixtures ====================
@@ -370,7 +370,7 @@ class TestPayloadPassthrough:
 
     def test_v3_payload_to_accessor(self):
         """V3 payload with calculatedFields should be passed through LocalDatasetAccessor."""
-        from foggy.mcp.spi import LocalDatasetAccessor
+        from foggy.mcp_spi import LocalDatasetAccessor
 
         class MockResolver:
             def query_model(self, model, request, mode, context):

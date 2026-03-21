@@ -10,7 +10,7 @@ tests that require it are marked with xfail.
 import pytest
 
 from foggy.dataset_model.semantic import SemanticQueryService
-from foggy.mcp.spi import SemanticQueryRequest
+from foggy.mcp_spi import SemanticQueryRequest
 from foggy.demo.models.ecommerce_models import create_fact_sales_model
 
 

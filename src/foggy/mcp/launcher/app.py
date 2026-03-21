@@ -21,7 +21,7 @@ from foggy.mcp.routers.health import create_health_router
 from foggy.mcp.routers.mcp_rpc import create_mcp_router
 from foggy.mcp.routers.semantic_v3 import create_semantic_v3_router
 from foggy.mcp.audit.service import ToolAuditService
-from foggy.mcp.spi import LocalDatasetAccessor, SemanticRequestContext
+from foggy.mcp_spi import LocalDatasetAccessor, SemanticRequestContext
 from foggy.dataset_model.semantic import SemanticQueryService
 from foggy.dataset_model.impl.model import DbTableModelImpl
 from foggy.dataset.db.executor import create_executor_from_url
@@ -232,7 +232,7 @@ def create_app(
         if not state.semantic_service:
             return {"error": "Service not initialized"}
 
-        from foggy.mcp.spi import SemanticMetadataRequest
+        from foggy.mcp_spi import SemanticMetadataRequest
         request = SemanticMetadataRequest(model=model_name)
         response = state.semantic_service.get_metadata(request)
         return response.model_dump(by_alias=True, exclude_none=True)

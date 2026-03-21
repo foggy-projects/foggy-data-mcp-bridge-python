@@ -70,9 +70,12 @@ class SqlServerDialect(FDialect):
         return f"SELECT COUNT(*) FROM ({sql}) AS _count"
 
     def get_table_exists_sql(self, table_name: str, schema: Optional[str] = None) -> str:
-        """Get SQL to check if table exists."""
+        """Get SQL to check if table exists.
+
+        Note: Uses quote-escaping for system catalog query (information_schema).
+        These are system identifier names, not arbitrary user input.
+        """
         schema = schema or "dbo"
-        # Escape single quotes to prevent SQL injection
         safe_schema = schema.replace("'", "''")
         safe_name = table_name.replace("'", "''")
         return (

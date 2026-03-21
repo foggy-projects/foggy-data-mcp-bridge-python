@@ -133,7 +133,7 @@ def create_app_with_sample_data(executor):
     from fastapi.responses import JSONResponse
 
     from foggy.dataset_model.semantic import SemanticQueryService
-    from foggy.mcp.spi import LocalDatasetAccessor
+    from foggy.mcp_spi import LocalDatasetAccessor
     from foggy.mcp.routers.mcp_rpc import create_mcp_router
     from foggy.demo.models.sample_models import create_all_sample_models
 
@@ -227,7 +227,7 @@ def create_app_with_sample_data(executor):
 
     @app.get("/api/v1/models/{model_name}")
     async def get_model(model_name: str):
-        from foggy.mcp.spi import SemanticMetadataRequest
+        from foggy.mcp_spi import SemanticMetadataRequest
         request = SemanticMetadataRequest(model=model_name)
         response = service.get_metadata(request)
         if response.error:
@@ -252,7 +252,7 @@ async def _create_handle_request(service, accessor, request):
         McpJsonRpcResponse, McpResource, McpTool,
         QUERY_TOOL, METADATA_TOOL, LIST_MODELS_TOOL, VALIDATE_QUERY_TOOL
     )
-    from foggy.mcp.spi import SemanticMetadataRequest
+    from foggy.mcp_spi import SemanticMetadataRequest
     import json
 
     TOOLS = [QUERY_TOOL, METADATA_TOOL, LIST_MODELS_TOOL, VALIDATE_QUERY_TOOL]

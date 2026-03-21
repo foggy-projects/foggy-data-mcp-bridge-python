@@ -5,7 +5,7 @@ Java's SemanticQueryResponse, SemanticQueryRequest, etc. exactly.
 """
 
 import pytest
-from foggy.mcp.spi import (
+from foggy.mcp_spi import (
     ColumnDef,
     SchemaInfo,
     PaginationInfo,

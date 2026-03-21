@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from pydantic import BaseModel, Field
 
-from foggy.mcp.spi import LocalDatasetAccessor, SemanticQueryRequest, SemanticMetadataRequest
+from foggy.mcp_spi import LocalDatasetAccessor, SemanticQueryRequest, SemanticMetadataRequest
 from foggy.dataset_model.semantic import SemanticQueryService
 
 
