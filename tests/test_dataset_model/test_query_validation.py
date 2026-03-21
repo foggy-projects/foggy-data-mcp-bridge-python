@@ -64,7 +64,7 @@ class TestQueryValidation:
         """Filter conditions should appear in the generated SQL."""
         request = SemanticQueryRequest(
             columns=["orderStatus", "salesAmount"],
-            filters=[{"column": "orderStatus", "operator": "=", "value": "COMPLETED"}],
+            slice=[{"column": "orderStatus", "operator": "=", "value": "COMPLETED"}],
         )
         response = service.query_model("FactSalesModel", request, mode="validate")
         assert response.error is None
@@ -94,7 +94,8 @@ class TestQueryValidation:
         request = SemanticQueryRequest(columns=["orderStatus", "salesAmount"])
         response = service.query_model("FactSalesModel", request, mode="validate")
         assert response.error is None
-        assert "validation_time_ms" in response.metrics
+        # After Java alignment, timing is in debug.durationMs and metrics property
+        assert "duration_ms" in response.metrics
 
     def test_validate_with_order_by(self, service):
         """ORDER BY should appear in the generated SQL."""

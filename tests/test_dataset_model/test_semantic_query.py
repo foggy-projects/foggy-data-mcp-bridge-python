@@ -243,7 +243,7 @@ class TestAutoJoinQuery:
         """Filter customer$memberLevel = '钻石' -> LEFT JOIN dim_customer WHERE dc.member_level = ?."""
         request = SemanticQueryRequest(
             columns=["salesAmount"],
-            filters=[{"column": "customer$memberLevel", "operator": "=", "value": "钻石"}],
+            slice=[{"column": "customer$memberLevel", "operator": "=", "value": "钻石"}],
         )
         sql = _build_sql(service, "FactSalesModel", request)
         assert "LEFT JOIN dim_customer" in sql
@@ -253,7 +253,7 @@ class TestAutoJoinQuery:
         """Even if dimension is only in filter (not in columns), JOIN is added."""
         request = SemanticQueryRequest(
             columns=["orderStatus", "salesAmount"],
-            filters=[{"column": "product$categoryName", "operator": "=", "value": "电子产品"}],
+            slice=[{"column": "product$categoryName", "operator": "=", "value": "电子产品"}],
         )
         sql = _build_sql(service, "FactSalesModel", request)
         assert "LEFT JOIN dim_product" in sql
@@ -347,7 +347,7 @@ class TestAggregationQuery:
         """Filter + group by -> SQL has WHERE + GROUP BY."""
         request = SemanticQueryRequest(
             columns=["product$categoryName", "salesAmount"],
-            filters=[{"column": "customer$memberLevel", "operator": "=", "value": "金卡"}],
+            slice=[{"column": "customer$memberLevel", "operator": "=", "value": "金卡"}],
         )
         sql = _build_sql(service, "FactSalesModel", request)
         assert "WHERE" in sql

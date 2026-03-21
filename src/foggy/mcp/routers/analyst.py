@@ -9,7 +9,14 @@ from foggy.dataset_model.semantic import SemanticQueryService
 
 
 class QueryExecuteRequest(BaseModel):
-    """Request to execute a query."""
+    """Request to execute a query.
+
+    .. deprecated::
+        This model uses Python-style field names (filters, group_by, order_by, offset)
+        which do NOT match Java. Use ``SemanticQueryRequest`` from ``foggy.mcp.spi``
+        instead, which uses Java-aligned names (slice, groupBy, orderBy, start).
+        New V3 endpoints are at /semantic/v3/query/{model}.
+    """
 
     query_model: str = Field(..., description="Query model name")
     columns: List[str] = Field(default_factory=list, description="Columns to select")
@@ -86,11 +93,11 @@ def create_analyst_router(
 
         query_request = SemanticQueryRequest(
             columns=request.columns,
-            filters=request.filters,
+            slice=request.filters,
             group_by=request.group_by,
             order_by=request.order_by,
             limit=request.limit,
-            offset=request.offset,
+            start=request.offset or 0,
         )
 
         response = accessor.query_model(request.query_model, query_request.model_dump())
@@ -116,11 +123,11 @@ def create_analyst_router(
 
         query_request = SemanticQueryRequest(
             columns=request.columns,
-            filters=request.filters,
+            slice=request.filters,
             group_by=request.group_by,
             order_by=request.order_by,
             limit=request.limit,
-            offset=request.offset,
+            start=request.offset or 0,
         )
 
         response = accessor.query_model(
@@ -149,11 +156,11 @@ def create_analyst_router(
 
         query_request = SemanticQueryRequest(
             columns=request.columns,
-            filters=request.filters,
+            slice=request.filters,
             group_by=request.group_by,
             order_by=request.order_by,
             limit=request.limit,
-            offset=request.offset,
+            start=request.offset or 0,
         )
 
         # Build query and get SQL

@@ -1,4 +1,12 @@
-"""MCP Request schema definitions."""
+"""MCP Request schema definitions.
+
+.. deprecated::
+    The ``QueryRequest`` and ``MetadataRequest`` models in this module are
+    legacy and NOT aligned with Java. Use the Java-aligned models from
+    ``foggy.mcp.spi`` instead:
+    - ``SemanticQueryRequest`` (aligned with Java SemanticQueryRequest)
+    - ``SemanticMetadataRequest``
+"""
 
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field

@@ -23,6 +23,21 @@ from typing import Optional
 sys.path.insert(0, ".")
 
 
+def _json_serializable(obj):
+    """Convert obj to JSON-serializable form (handle Decimal, datetime, etc.)."""
+    import decimal
+    from datetime import datetime, date
+    if isinstance(obj, decimal.Decimal):
+        return float(obj)
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    if isinstance(obj, dict):
+        return {k: _json_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_serializable(i) for i in obj]
+    return obj
+
+
 def setup_logging(debug: bool = False):
     """Configure logging."""
     level = logging.DEBUG if debug else logging.INFO
@@ -118,7 +133,7 @@ def create_app_with_sample_data(executor):
     from fastapi.responses import JSONResponse
 
     from foggy.dataset_model.semantic import SemanticQueryService
-    from foggy.mcp.spi import LocalDatasetAccessor, SemanticQueryRequest
+    from foggy.mcp.spi import LocalDatasetAccessor
     from foggy.mcp.routers.mcp_rpc import create_mcp_router
     from foggy.demo.models.sample_models import create_all_sample_models
 
@@ -237,7 +252,7 @@ async def _create_handle_request(service, accessor, request):
         McpJsonRpcResponse, McpResource, McpTool,
         QUERY_TOOL, METADATA_TOOL, LIST_MODELS_TOOL, VALIDATE_QUERY_TOOL
     )
-    from foggy.mcp.spi import SemanticQueryRequest, SemanticMetadataRequest
+    from foggy.mcp.spi import SemanticMetadataRequest
     import json
 
     TOOLS = [QUERY_TOOL, METADATA_TOOL, LIST_MODELS_TOOL, VALIDATE_QUERY_TOOL]
@@ -331,23 +346,24 @@ async def _create_handle_request(service, accessor, request):
                         error={"code": -32602, "message": "model parameter required"}
                     )
 
-                query_request = SemanticQueryRequest(
-                    columns=tool_args.get("columns", []),
-                    filters=tool_args.get("filters", []),
-                    group_by=tool_args.get("group_by", []),
-                    order_by=tool_args.get("order_by", []),
-                    limit=tool_args.get("limit", 100),
-                    offset=tool_args.get("offset"),
+                # V3 format: pass payload through as-is
+                payload = tool_args.get("payload", {})
+                if not payload:
+                    # Flat format fallback
+                    payload = {
+                        "columns": tool_args.get("columns", []),
+                        "slice": tool_args.get("slice", []),
+                        "groupBy": tool_args.get("groupBy", []),
+                        "orderBy": tool_args.get("orderBy", []),
+                        "limit": tool_args.get("limit", 100),
+                        "start": tool_args.get("start", 0),
+                    }
+
+                response = accessor.query_model(model_name, payload)
+
+                result_data = _json_serializable(
+                    response.model_dump(by_alias=True, exclude_none=True)
                 )
-
-                response = accessor.query_model(model_name, query_request.model_dump())
-
-                result_data = {
-                    "data": response.data,
-                    "total": response.total,
-                    "sql": response.sql,
-                    "columns": response.columns,
-                }
 
                 if response.error:
                     result_data["error"] = response.error

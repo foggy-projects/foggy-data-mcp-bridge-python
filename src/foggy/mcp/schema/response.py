@@ -1,4 +1,12 @@
-"""MCP Response schema definitions."""
+"""MCP Response schema definitions.
+
+.. deprecated::
+    The ``QueryResult`` and ``MetadataResult`` models in this module are
+    legacy and NOT aligned with Java. Use the Java-aligned models from
+    ``foggy.mcp.spi`` instead:
+    - ``SemanticQueryResponse`` (aligned with Java SemanticQueryResponse)
+    - ``SemanticMetadataResponse``
+"""
 
 from typing import Any, ClassVar, Dict, List, Optional, Union
 from pydantic import BaseModel, Field

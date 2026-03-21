@@ -24,6 +24,7 @@ from foggy.mcp.spi import (
     SemanticMetadataRequest,
     SemanticQueryRequest,
     SemanticRequestContext,
+    DebugInfo,
 )
 
 
@@ -130,11 +131,9 @@ class SemanticQueryService(SemanticServiceResolver):
                 if model:
                     models.append(self._build_model_metadata(model, request))
 
-        return SemanticMetadataResponse(
-            models=models,
-            columns=[],
-            warnings=[],
-        )
+        resp = SemanticMetadataResponse(models=models)
+        resp.warnings = []
+        return resp
 
     def query_model(
         self,
@@ -148,28 +147,23 @@ class SemanticQueryService(SemanticServiceResolver):
 
         table_model = self.get_model(model)
         if not table_model:
-            return SemanticQueryResponse(
-                error=f"Model not found: {model}",
-                warnings=[],
-            )
+            return SemanticQueryResponse.from_error(f"Model not found: {model}")
 
         # Build query
         try:
             build_result = self._build_query(table_model, request)
         except Exception as e:
             logger.exception(f"Failed to build query for model {model}")
-            return SemanticQueryResponse(
-                error=f"Query build failed: {str(e)}",
-                warnings=[],
-            )
+            return SemanticQueryResponse.from_error(f"Query build failed: {str(e)}")
 
         # Validate mode
         if mode == "validate":
-            return SemanticQueryResponse(
+            return SemanticQueryResponse.from_legacy(
+                data=[],
+                columns_info=build_result.columns,
                 sql=build_result.sql,
-                columns=build_result.columns,
                 warnings=build_result.warnings,
-                metrics={"validation_time_ms": (time.time() - start_time) * 1000},
+                duration_ms=(time.time() - start_time) * 1000,
             )
 
         # Check cache
@@ -185,20 +179,22 @@ class SemanticQueryService(SemanticServiceResolver):
             response = self._execute_query(build_result, table_model)
         except Exception as e:
             logger.exception(f"Failed to execute query for model {model}")
-            return SemanticQueryResponse(
-                error=f"Query execution failed: {str(e)}",
+            return SemanticQueryResponse.from_legacy(
+                data=[],
                 sql=build_result.sql,
+                error=f"Query execution failed: {str(e)}",
                 warnings=build_result.warnings,
             )
 
-        # Add metrics
-        response.metrics = {
-            "query_time_ms": (time.time() - start_time) * 1000,
-            "total_time_ms": (time.time() - start_time) * 1000,
-            "from_cache": False,
-        }
-        response.sql = build_result.sql
-        response.warnings = build_result.warnings
+        # Add debug info with timing and SQL
+        duration_ms = (time.time() - start_time) * 1000
+        from foggy.mcp.spi import DebugInfo
+        response.debug = DebugInfo(
+            duration_ms=duration_ms,
+            extra={"sql": build_result.sql, "from_cache": False},
+        )
+        if build_result.warnings:
+            response.warnings = build_result.warnings
 
         # Cache result
         if self._enable_cache:
@@ -341,7 +337,7 @@ class SemanticQueryService(SemanticServiceResolver):
                 has_aggregation = True
 
         # 3. WHERE clause
-        for filter_item in request.filters:
+        for filter_item in request.slice:
             self._add_filter(builder, model, filter_item, ensure_join)
 
         # 4. GROUP BY
@@ -360,7 +356,7 @@ class SemanticQueryService(SemanticServiceResolver):
                 builder.group_by(dim_expr)
 
         # 5. HAVING
-        having_filters = request.parameters.get("having", [])
+        having_filters = (request.hints or {}).get("having", [])
         for hf in having_filters:
             col, op, val = hf.get("column"), hf.get("operator"), hf.get("value")
             if col and op and val is not None:
@@ -385,8 +381,8 @@ class SemanticQueryService(SemanticServiceResolver):
         # 7. LIMIT/OFFSET
         limit = min(request.limit or self._default_limit, self._max_limit)
         builder.limit(limit)
-        if request.offset:
-            builder.offset(request.offset)
+        if request.start:
+            builder.offset(request.start)
 
         sql, params = builder.build()
 
@@ -679,10 +675,9 @@ class SemanticQueryService(SemanticServiceResolver):
 
         if self._executor is None:
             logger.warning("No database executor configured - returning empty result")
-            return SemanticQueryResponse(
+            return SemanticQueryResponse.from_legacy(
                 data=[],
-                columns=build_result.columns,
-                total=0,
+                columns_info=build_result.columns,
             )
 
         try:
@@ -704,10 +699,9 @@ class SemanticQueryService(SemanticServiceResolver):
     ) -> SemanticQueryResponse:
         """Execute the built query asynchronously."""
         if self._executor is None:
-            return SemanticQueryResponse(
+            return SemanticQueryResponse.from_legacy(
                 data=[],
-                columns=build_result.columns,
-                total=0,
+                columns_info=build_result.columns,
                 error="No database executor configured",
             )
 
@@ -717,16 +711,18 @@ class SemanticQueryService(SemanticServiceResolver):
         )
 
         if result.error:
-            return SemanticQueryResponse(
-                error=result.error,
+            return SemanticQueryResponse.from_legacy(
+                data=[],
+                columns_info=build_result.columns,
                 sql=build_result.sql,
-                columns=build_result.columns,
+                error=result.error,
             )
 
-        return SemanticQueryResponse(
+        return SemanticQueryResponse.from_legacy(
             data=result.rows,
-            columns=build_result.columns,
+            columns_info=build_result.columns,
             total=result.total,
+            sql=build_result.sql,
         )
 
     def set_executor(self, executor) -> None:
@@ -748,20 +744,21 @@ class SemanticQueryService(SemanticServiceResolver):
 
         table_model = self.get_model(model)
         if not table_model:
-            return SemanticQueryResponse(error=f"Model not found: {model}", warnings=[])
+            return SemanticQueryResponse.from_error(f"Model not found: {model}")
 
         try:
             build_result = self._build_query(table_model, request)
         except Exception as e:
             logger.exception(f"Failed to build query for model {model}")
-            return SemanticQueryResponse(error=f"Query build failed: {str(e)}", warnings=[])
+            return SemanticQueryResponse.from_error(f"Query build failed: {str(e)}")
 
         if mode == "validate":
-            return SemanticQueryResponse(
+            return SemanticQueryResponse.from_legacy(
+                data=[],
+                columns_info=build_result.columns,
                 sql=build_result.sql,
-                columns=build_result.columns,
                 warnings=build_result.warnings,
-                metrics={"validation_time_ms": (time.time() - start_time) * 1000},
+                duration_ms=(time.time() - start_time) * 1000,
             )
 
         cache_key = self._get_cache_key(model, request)
@@ -774,18 +771,21 @@ class SemanticQueryService(SemanticServiceResolver):
             response = await self._execute_query_async(build_result)
         except Exception as e:
             logger.exception(f"Failed to execute query for model {model}")
-            return SemanticQueryResponse(
-                error=f"Query execution failed: {str(e)}",
+            return SemanticQueryResponse.from_legacy(
+                data=[],
                 sql=build_result.sql,
+                error=f"Query execution failed: {str(e)}",
                 warnings=build_result.warnings,
             )
 
-        response.metrics = {
-            "query_time_ms": (time.time() - start_time) * 1000,
-            "from_cache": False,
-        }
-        response.sql = build_result.sql
-        response.warnings = build_result.warnings
+        # Add debug info
+        duration_ms = (time.time() - start_time) * 1000
+        response.debug = DebugInfo(
+            duration_ms=duration_ms,
+            extra={"sql": build_result.sql, "from_cache": False},
+        )
+        if build_result.warnings:
+            response.warnings = build_result.warnings
 
         if self._enable_cache:
             self._cache[cache_key] = (response, time.time())
@@ -1155,11 +1155,11 @@ class SemanticQueryService(SemanticServiceResolver):
         key_data = {
             "model": model,
             "columns": sorted(request.columns),
-            "filters": request.filters,
-            "group_by": sorted(request.group_by),
+            "slice": request.slice,
+            "group_by": sorted(request.group_by) if request.group_by else [],
             "order_by": request.order_by,
             "limit": request.limit,
-            "offset": request.offset,
+            "start": request.start,
         }
 
         key_str = json.dumps(key_data, sort_keys=True)

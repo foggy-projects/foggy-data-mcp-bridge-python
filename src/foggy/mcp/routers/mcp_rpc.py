@@ -17,7 +17,7 @@ import json
 import asyncio
 import uuid
 
-from foggy.mcp.spi import LocalDatasetAccessor, SemanticQueryRequest, SemanticMetadataRequest
+from foggy.mcp.spi import LocalDatasetAccessor, SemanticMetadataRequest
 from foggy.dataset_model.semantic import SemanticQueryService
 
 
@@ -261,51 +261,28 @@ def create_mcp_router(
                             error={"code": -32602, "message": "model parameter required"}
                         )
 
-                    # Support both Java format {model, payload: {columns, slice, ...}, mode}
-                    # and Python format {model, columns, filters, ...}
+                    # V3 format: {model, payload: {columns, slice, groupBy, ...}, mode}
+                    # Payload is passed through as-is (Java camelCase field names)
                     payload = tool_args.get("payload", {})
                     mode = tool_args.get("mode", "execute")
 
-                    if payload:
-                        # Java V3 format: payload contains columns/slice/orderBy/groupBy
-                        query_dict = {
-                            "columns": payload.get("columns", []),
-                            "filters": payload.get("slice", []),  # Java uses "slice"
-                            "group_by": payload.get("groupBy", []),
-                            "order_by": payload.get("orderBy", []),
-                            "limit": payload.get("limit", 1000),
-                            "offset": payload.get("start"),
-                            "calculated_fields": payload.get("calculatedFields", []),
-                        }
-                    else:
-                        # Python flat format
-                        query_dict = {
-                            "columns": tool_args.get("columns", []),
-                            "filters": tool_args.get("filters", tool_args.get("slice", [])),
-                            "group_by": tool_args.get("group_by", tool_args.get("groupBy", [])),
-                            "order_by": tool_args.get("order_by", tool_args.get("orderBy", [])),
-                            "limit": tool_args.get("limit", 100),
-                            "offset": tool_args.get("offset", tool_args.get("start")),
-                            "calculated_fields": tool_args.get("calculated_fields", tool_args.get("calculatedFields", [])),
-                        }
-
                     _acc = _get_accessor()
                     if hasattr(_acc, 'query_model_async'):
-                        response = await _acc.query_model_async(model_name, query_dict, mode=mode)
+                        response = await _acc.query_model_async(model_name, payload, mode=mode)
                     else:
-                        response = _acc.query_model(model_name, query_dict, mode=mode)
+                        response = _acc.query_model(model_name, payload, mode=mode)
 
-                    result_data = _json_serializable({
-                        "data": response.data,
-                        "total": response.total,
-                        "sql": response.sql,
-                        "columns": response.columns,
-                    })
-
+                    # Check for internal error
                     if response.error:
-                        result_data["error"] = response.error
-                    if response.warnings:
-                        result_data["warnings"] = response.warnings
+                        return McpJsonRpcResponse(
+                            id=request.id,
+                            error={"code": -32001, "message": response.error}
+                        )
+
+                    # Serialize using Pydantic aliases → Java-compatible JSON
+                    result_data = _json_serializable(
+                        response.model_dump(by_alias=True, exclude_none=True)
+                    )
 
                     return McpJsonRpcResponse(
                         id=request.id,
@@ -325,18 +302,13 @@ def create_mcp_router(
                             error={"code": -32602, "message": "model parameter required"}
                         )
 
-                    query_request = SemanticQueryRequest(
-                        columns=tool_args.get("columns", []),
-                        filters=tool_args.get("filters", []),
-                        group_by=tool_args.get("group_by", []),
-                        order_by=tool_args.get("order_by", []),
-                    )
+                    payload = tool_args.get("payload", {})
 
                     _acc = _get_accessor()
                     if hasattr(_acc, 'query_model_async'):
-                        response = await _acc.query_model_async(model_name, query_request.model_dump(), mode="validate")
+                        response = await _acc.query_model_async(model_name, payload, mode="validate")
                     else:
-                        response = _acc.query_model(model_name, query_request.model_dump(), mode="validate")
+                        response = _acc.query_model(model_name, payload, mode="validate")
 
                     return McpJsonRpcResponse(
                         id=request.id,

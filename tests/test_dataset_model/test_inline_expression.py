@@ -43,7 +43,7 @@ class TestInlineExpression:
         assert "SUM(" in select_part
         # Should not produce a warning for this column
         response = service.query_model("FactSalesModel", request, mode="validate")
-        assert not any("sum(salesAmount)" in w for w in response.warnings)
+        assert not any("sum(salesAmount)" in w for w in (response.warnings or []))
 
     def test_parse_count_expression(self, service):
         """'count(orderId) as cnt' should produce COUNT(t.order_id) AS `cnt`."""
@@ -70,7 +70,7 @@ class TestInlineExpression:
         # Should appear as a simple column reference
         assert "t.order_id" in sql
         response = service.query_model("FactSalesModel", request, mode="validate")
-        assert len(response.warnings) == 0
+        assert len(response.warnings or []) == 0
 
     def test_dimension_reference_not_expression(self, service):
         """'product$caption' is a dimension join reference, not an expression."""
@@ -78,7 +78,7 @@ class TestInlineExpression:
         sql = _build_sql(service, request)
         assert "dp.product_name" in sql
         response = service.query_model("FactSalesModel", request, mode="validate")
-        assert len(response.warnings) == 0
+        assert len(response.warnings or []) == 0
 
     def test_parse_count_distinct_expression(self, service):
         """'count_distinct(orderId) as uniqueOrders' should produce COUNT(DISTINCT ...)."""

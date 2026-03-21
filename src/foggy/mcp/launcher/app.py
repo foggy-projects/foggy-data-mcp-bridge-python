@@ -19,6 +19,7 @@ from foggy.mcp.routers.admin import create_admin_router
 from foggy.mcp.routers.analyst import create_analyst_router
 from foggy.mcp.routers.health import create_health_router
 from foggy.mcp.routers.mcp_rpc import create_mcp_router
+from foggy.mcp.routers.semantic_v3 import create_semantic_v3_router
 from foggy.mcp.audit.service import ToolAuditService
 from foggy.mcp.spi import LocalDatasetAccessor, SemanticRequestContext
 from foggy.dataset_model.semantic import SemanticQueryService
@@ -194,6 +195,12 @@ def create_app(
         prefix="/mcp/analyst",
     )
 
+    # Semantic V3 REST router — aligned with Java SemanticServiceV3TestController
+    app.include_router(
+        create_semantic_v3_router(state_getter=lambda: state),
+        prefix="/semantic/v3",
+    )
+
     # Exception handlers
     from fastapi.responses import JSONResponse
     from fastapi import Request
@@ -228,7 +235,7 @@ def create_app(
         from foggy.mcp.spi import SemanticMetadataRequest
         request = SemanticMetadataRequest(model=model_name)
         response = state.semantic_service.get_metadata(request)
-        return response.model_dump()
+        return response.model_dump(by_alias=True, exclude_none=True)
 
     def _make_json_response(data: dict) -> JSONResponse:
         """Create JSONResponse that handles Decimal/datetime serialization."""
@@ -250,12 +257,16 @@ def create_app(
 
     @app.post("/api/v1/query/{model_name}", tags=["Query"])
     async def execute_query(model_name: str, payload: Dict[str, Any]):
-        """Execute a query against a model."""
+        """Execute a query against a model.
+
+        Payload uses Java camelCase field names:
+        {columns, slice, groupBy, orderBy, start, limit, calculatedFields, ...}
+        """
         if not state.accessor:
             return {"error": "Service not initialized"}
 
         response = await state.accessor.query_model_async(model_name, payload)
-        return _make_json_response(response.model_dump())
+        return _make_json_response(response.model_dump(by_alias=True, exclude_none=True))
 
     @app.post("/api/v1/query/{model_name}/validate", tags=["Query"])
     async def validate_query(model_name: str, payload: Dict[str, Any]):
@@ -264,7 +275,7 @@ def create_app(
             return {"error": "Service not initialized"}
 
         response = await state.accessor.query_model_async(model_name, payload, mode="validate")
-        return _make_json_response(response.model_dump())
+        return _make_json_response(response.model_dump(by_alias=True, exclude_none=True))
 
     return app
 
