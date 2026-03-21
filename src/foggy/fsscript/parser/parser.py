@@ -100,6 +100,7 @@ PRECEDENCE = {
     TokenType.GE: 11,
     TokenType.LIKE: 11,
     TokenType.IN: 11,
+    TokenType.INSTANCEOF: 11,
 
     # Addition/Subtraction
     TokenType.PLUS: 12,
@@ -1032,7 +1033,7 @@ class FsscriptParser:
             return self._parse_new()
 
         # Typeof
-        if token.type == TokenType.IDENTIFIER and token.value == 'typeof':
+        if token.type == TokenType.TYPEOF:
             return self._parse_typeof()
 
         # Spread (in array context)

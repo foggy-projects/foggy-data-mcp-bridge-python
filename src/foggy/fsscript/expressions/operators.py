@@ -36,6 +36,9 @@ class BinaryOperator(str, Enum):
     # Null-safe
     NULL_COALESCE = "??"
 
+    # Type check
+    INSTANCEOF = "instanceof"
+
 
 class UnaryOperator(str, Enum):
     """Unary operators."""
@@ -43,6 +46,7 @@ class UnaryOperator(str, Enum):
     NEGATE = "-"
     NOT = "!"
     BITWISE_NOT = "~"
+    TYPEOF = "typeof"
 
 
 class BinaryExpression(Expression):
@@ -106,6 +110,10 @@ class BinaryExpression(Expression):
         # Null-safe
         elif op == BinaryOperator.NULL_COALESCE:
             return right_val if left_val is None else left_val
+
+        # Type check
+        elif op == BinaryOperator.INSTANCEOF:
+            return _check_instanceof(left_val, right_val)
 
         return None
 
@@ -204,6 +212,9 @@ class UnaryExpression(Expression):
             if isinstance(val, int):
                 return ~val
             return 0
+
+        elif op == UnaryOperator.TYPEOF:
+            return fsscript_typeof(val)
 
         return None
 
@@ -323,6 +334,68 @@ class UpdateExpression(Expression):
         return f"({self.operand}{self.operator.value})"
 
 
+# ---------------------------------------------------------------------------
+# typeof / instanceof helpers
+# ---------------------------------------------------------------------------
+
+def fsscript_typeof(value: Any) -> str:
+    """Return a JS-compatible type string for the given value.
+
+    Matches ECMAScript ``typeof`` semantics:
+    - ``undefined`` / ``None``  → ``"undefined"``
+    - ``bool``                  → ``"boolean"``
+    - ``int`` / ``float``       → ``"number"``
+    - ``str``                   → ``"string"``
+    - callable                  → ``"function"``
+    - everything else           → ``"object"``
+    """
+    if value is None:
+        return "undefined"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, (int, float)):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if callable(value):
+        return "function"
+    return "object"
+
+
+_INSTANCEOF_MAP = {
+    "Array": lambda v: isinstance(v, list),
+    "Object": lambda v: isinstance(v, dict),
+    "Function": lambda v: callable(v),
+    "String": lambda v: isinstance(v, str),
+    "Number": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
+    "Boolean": lambda v: isinstance(v, bool),
+}
+
+
+def _check_instanceof(left_val: Any, right_val: Any) -> bool:
+    """Check ``left instanceof Right``.
+
+    *right_val* is resolved from context.  It may be:
+    - A Python ``type`` (``list``, ``dict``, …) registered as a builtin
+    - A string type-name coming from an unresolved identifier
+    """
+    # Fast path: right_val is a Python type (registered in builtins)
+    if isinstance(right_val, type):
+        return isinstance(left_val, right_val)
+
+    # String name lookup (fallback)
+    name = None
+    if isinstance(right_val, str):
+        name = right_val
+    elif right_val is not None and hasattr(right_val, "__name__"):
+        name = right_val.__name__
+
+    if name and name in _INSTANCEOF_MAP:
+        return _INSTANCEOF_MAP[name](left_val)
+
+    return False
+
+
 __all__ = [
     "BinaryOperator",
     "UnaryOperator",
@@ -331,4 +404,5 @@ __all__ = [
     "TernaryExpression",
     "UpdateOperator",
     "UpdateExpression",
+    "fsscript_typeof",
 ]

@@ -90,6 +90,8 @@ class TokenType(Enum):
     NEW = auto()
     DELETE = auto()
     LIKE = auto()
+    TYPEOF = auto()      # typeof
+    INSTANCEOF = auto()  # instanceof
 
     # Operators - Update
     INCREMENT = auto()   # ++
@@ -170,6 +172,8 @@ KEYWORDS: dict[str, TokenType] = {
     "or": TokenType.OR,
     "not": TokenType.NOT,
     "request": TokenType.REQUEST,
+    "typeof": TokenType.TYPEOF,
+    "instanceof": TokenType.INSTANCEOF,
 }
 
 
