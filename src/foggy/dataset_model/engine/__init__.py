@@ -26,7 +26,13 @@ from foggy.dataset_model.engine.hierarchy import (
     SelfAndAncestorsOfOperator,
     SiblingsOfOperator,
     LevelOperator,
+    ClosureTableDef,
+    ParentChildDimensionDef,
+    HierarchyConditionBuilder,
+    HierarchyOperatorRegistry,
+    get_default_hierarchy_registry,
 )
+from foggy.dataset_model.engine.dimension_path import DimensionPath
 
 __all__ = [
     # Expression classes
@@ -55,4 +61,12 @@ __all__ = [
     "SelfAndAncestorsOfOperator",
     "SiblingsOfOperator",
     "LevelOperator",
+    # Hierarchy models & utilities
+    "ClosureTableDef",
+    "ParentChildDimensionDef",
+    "HierarchyConditionBuilder",
+    "HierarchyOperatorRegistry",
+    "get_default_hierarchy_registry",
+    # Dimension path
+    "DimensionPath",
 ]
