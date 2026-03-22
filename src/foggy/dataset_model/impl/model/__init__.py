@@ -455,6 +455,18 @@ class DbTableModelImpl(BaseModel):
                 "join_def": None,
             }
 
+        # Try property (fact table own columns from TM properties section)
+        col_def = self.columns.get(field_name)
+        if col_def:
+            return {
+                "sql_expr": f"t.{col_def.name}",
+                "alias_label": col_def.alias or col_def.comment or col_def.name,
+                "table_alias": "t",
+                "is_measure": False,
+                "aggregation": None,
+                "join_def": None,
+            }
+
         return None
 
     def validate(self) -> List[str]:

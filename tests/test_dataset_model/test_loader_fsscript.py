@@ -367,3 +367,184 @@ export const model = {
             models = load_models_from_directory(tmpdir)
             assert len(models) == 1
             assert models[0].source_datasource == "odoo"
+
+    def test_dimension_joins_created(self, tm_dir):
+        """Dimensions with tableName should create DimensionJoinDef entries."""
+        models = load_models_from_directory(tm_dir)
+        simple = next(m for m in models if m.name == "SimpleModel")
+
+        assert len(simple.dimension_joins) == 1
+        j = simple.dimension_joins[0]
+        assert j.name == "category"
+        assert j.table_name == "dim_category"
+        assert j.foreign_key == "category_id"
+        assert j.primary_key == "id"
+        assert j.caption_column == "name"
+        assert j.caption == "Category"
+
+    def test_dimension_join_caption_query(self, tm_dir):
+        """dim$caption should resolve via DimensionJoinDef and generate JOIN."""
+        models = load_models_from_directory(tm_dir)
+        simple = next(m for m in models if m.name == "SimpleModel")
+
+        resolved = simple.resolve_field("category$caption")
+        assert resolved is not None
+        assert "dim_category" in resolved["sql_expr"] or "dc" in resolved["sql_expr"]
+        assert resolved["join_def"] is not None
+
+    def test_property_resolve_field(self, tm_dir):
+        """Properties should be resolvable via resolve_field()."""
+        models = load_models_from_directory(tm_dir)
+        simple = next(m for m in models if m.name == "SimpleModel")
+
+        resolved = simple.resolve_field("orderDate")
+        assert resolved is not None
+        assert "order_date" in resolved["sql_expr"]  # SQL uses original column name
+        assert resolved["is_measure"] is False
+
+    def test_property_sql_uses_original_column(self, tm_dir):
+        """Property SQL should use the original snake_case column, not camelCase name."""
+        from foggy.dataset_model.semantic.service import SemanticQueryService
+        from foggy.mcp_spi import SemanticQueryRequest
+
+        models = load_models_from_directory(tm_dir)
+        simple = next(m for m in models if m.name == "SimpleModel")
+
+        svc = SemanticQueryService()
+        svc.register_model(simple)
+        r = svc.query_model("SimpleModel", SemanticQueryRequest(columns=["orderDate"], limit=5), mode="validate")
+
+        assert r.error is None
+        assert not r.warnings
+        assert "order_date" in r.sql  # original column name in SQL
+
+    def test_at_service_import_handled(self):
+        """@service imports should not crash loading."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # dicts.fsscript with @service import
+            (Path(tmpdir) / "dicts.fsscript").write_text(
+                """
+import { registerDict } from '@jdbcModelDictService';
+export const dicts = {
+    status: registerDict({ id: 'status', items: [{value: 'a', label: 'A'}] })
+};
+""",
+                encoding="utf-8",
+            )
+            # TM that imports dicts
+            model_dir = Path(tmpdir) / "model"
+            model_dir.mkdir()
+            (model_dir / "TestModel.tm").write_text(
+                """
+import { dicts } from '../dicts.fsscript';
+export const model = {
+    name: 'TestModel',
+    tableName: 'test',
+    idColumn: 'id',
+    properties: [
+        { column: 'status', caption: 'Status', dictRef: dicts.status }
+    ]
+};
+""",
+                encoding="utf-8",
+            )
+            models = load_models_from_directory(tmpdir)
+            assert len(models) == 1
+            assert models[0].name == "TestModel"
+
+    def test_qm_files_loaded(self):
+        """QM files should be loaded as aliases to their referenced TM."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model_dir = Path(tmpdir) / "model"
+            model_dir.mkdir()
+            (model_dir / "SalesModel.tm").write_text(
+                """
+export const model = {
+    name: 'SalesModel',
+    caption: 'Sales',
+    tableName: 'sales',
+    idColumn: 'id',
+    measures: [
+        { column: 'amount', name: 'amount', caption: 'Amount', aggregation: 'sum' }
+    ]
+};
+""",
+                encoding="utf-8",
+            )
+            query_dir = Path(tmpdir) / "query"
+            query_dir.mkdir()
+            (query_dir / "SalesQueryModel.qm").write_text(
+                """
+const s = loadTableModel('SalesModel');
+export const queryModel = {
+    name: 'SalesQueryModel',
+    caption: 'Sales Query',
+    description: 'Query sales data',
+    model: s
+};
+""",
+                encoding="utf-8",
+            )
+
+            models = load_models_from_directory(tmpdir)
+            names = {m.name for m in models}
+            assert "SalesModel" in names
+            assert "SalesQueryModel" in names
+
+            qm = next(m for m in models if m.name == "SalesQueryModel")
+            assert qm.alias == "Sales Query"
+            assert qm.source_table == "sales"  # inherited from TM
+            assert "amount" in qm.measures  # inherited from TM
+
+    def test_qm_unknown_tm_skipped(self):
+        """QM referencing unknown TM should be skipped (not crash)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            query_dir = Path(tmpdir) / "query"
+            query_dir.mkdir()
+            # Need at least one .tm to not short-circuit
+            (Path(tmpdir) / "Dummy.tm").write_text(
+                "export const model = { name: 'Dummy', tableName: 't' };",
+                encoding="utf-8",
+            )
+            (query_dir / "OrphanQM.qm").write_text(
+                """
+const x = loadTableModel('NonExistent');
+export const queryModel = { name: 'OrphanQM', model: x };
+""",
+                encoding="utf-8",
+            )
+            models = load_models_from_directory(tmpdir)
+            names = {m.name for m in models}
+            assert "Dummy" in names
+            assert "OrphanQM" not in names
+
+    def test_odoo_demo_models_full_load(self):
+        """Integration test: load actual Odoo demo TM/QM files."""
+        import os
+        odoo_dir = os.path.join("src", "foggy", "demo", "models", "odoo")
+        if not os.path.exists(odoo_dir):
+            pytest.skip("Odoo demo models not found")
+
+        models = load_models_from_directory(odoo_dir)
+        names = {m.name for m in models}
+
+        # 8 TMs
+        assert "OdooSaleOrderModel" in names
+        assert "OdooHrEmployeeModel" in names
+        assert "OdooAccountMoveModel" in names
+
+        # QMs
+        assert "OdooSaleOrderQueryModel" in names
+        assert "OdooHrEmployeeQueryModel" in names
+
+        # Verify dimension JOINs exist
+        sale = next(m for m in models if m.name == "OdooSaleOrderModel")
+        assert len(sale.dimension_joins) >= 4  # partner, salesperson, company, salesTeam, ...
+        assert any(j.name == "partner" for j in sale.dimension_joins)
+
+        # Verify measures
+        assert len(sale.measures) >= 4  # amountUntaxed, amountTax, amountTotal, ...
+        assert "amountTotal" in sale.measures
+
+        # Verify properties
+        assert "dateOrder" in sale.columns
