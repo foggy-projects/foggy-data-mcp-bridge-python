@@ -25,8 +25,15 @@ __all__ = [
     "LikeFormula",
     "LeftLikeFormula",
     "RightLikeFormula",
+    "NotLikeFormula",
+    "NotLeftLikeFormula",
+    "NotRightLikeFormula",
     "IsNullFormula",
     "IsNotNullFormula",
+    "IsNullAndEmptyFormula",
+    "IsNotNullAndEmptyFormula",
+    "ForceEqFormula",
+    "BitInFormula",
     "RangeFormula",
     "BetweenFormula",
 ]
@@ -194,6 +201,77 @@ class IsNotNullFormula(SqlFormula):
 
 
 # ---------------------------------------------------------------------------
+# NOT LIKE variants
+# ---------------------------------------------------------------------------
+
+class NotLikeFormula(SqlFormula):
+    """``not like`` — wraps value with ``%`` on both sides, negated."""
+
+    def build_condition(self, column_expr: str, op: str, value: Any, params: list) -> str:
+        params.append(f"%{value}%")
+        return f"{column_expr} NOT LIKE ?"
+
+
+class NotLeftLikeFormula(SqlFormula):
+    """``not left_like`` — negated prefix match (value%)."""
+
+    def build_condition(self, column_expr: str, op: str, value: Any, params: list) -> str:
+        params.append(f"{value}%")
+        return f"{column_expr} NOT LIKE ?"
+
+
+class NotRightLikeFormula(SqlFormula):
+    """``not right_like`` — negated suffix match (%value)."""
+
+    def build_condition(self, column_expr: str, op: str, value: Any, params: list) -> str:
+        params.append(f"%{value}")
+        return f"{column_expr} NOT LIKE ?"
+
+
+# ---------------------------------------------------------------------------
+# Null-and-Empty checks
+# ---------------------------------------------------------------------------
+
+class IsNullAndEmptyFormula(SqlFormula):
+    """``isNullAndEmpty`` — ``(field IS NULL OR field = '')``."""
+
+    def build_condition(self, column_expr: str, op: str, value: Any, params: list) -> str:
+        return f"({column_expr} IS NULL OR {column_expr} = '')"
+
+
+class IsNotNullAndEmptyFormula(SqlFormula):
+    """``isNotNullAndEmpty`` — ``(field IS NOT NULL AND field <> '')``."""
+
+    def build_condition(self, column_expr: str, op: str, value: Any, params: list) -> str:
+        return f"({column_expr} IS NOT NULL AND {column_expr} <> '')"
+
+
+# ---------------------------------------------------------------------------
+# Force equality (ignores NULL special handling)
+# ---------------------------------------------------------------------------
+
+class ForceEqFormula(SqlFormula):
+    """``===`` / ``force_eq`` — direct equality, bypasses NULL coalescing."""
+
+    def build_condition(self, column_expr: str, op: str, value: Any, params: list) -> str:
+        params.append(value)
+        return f"{column_expr} = ?"
+
+
+# ---------------------------------------------------------------------------
+# Bitwise IN
+# ---------------------------------------------------------------------------
+
+class BitInFormula(SqlFormula):
+    """``bit_in`` — bitwise AND check: ``(column & value) = value``."""
+
+    def build_condition(self, column_expr: str, op: str, value: Any, params: list) -> str:
+        params.append(value)
+        params.append(value)
+        return f"({column_expr} & ?) = ?"
+
+
+# ---------------------------------------------------------------------------
 # Range / Between
 # ---------------------------------------------------------------------------
 
@@ -339,11 +417,32 @@ def get_default_registry() -> SqlFormulaRegistry:
     reg.register("left_like", LeftLikeFormula())
     reg.register("right_like", RightLikeFormula())
 
+    # not like variants
+    reg.register("not like", NotLikeFormula())
+    reg.register("not_like", NotLikeFormula())
+    reg.register("not left_like", NotLeftLikeFormula())
+    reg.register("not_left_like", NotLeftLikeFormula())
+    reg.register("not right_like", NotRightLikeFormula())
+    reg.register("not_right_like", NotRightLikeFormula())
+
     # null checks
     reg.register("is null", IsNullFormula())
     reg.register("isNull", IsNullFormula())
     reg.register("is not null", IsNotNullFormula())
     reg.register("isNotNull", IsNotNullFormula())
+
+    # null-and-empty checks
+    reg.register("isNullAndEmpty", IsNullAndEmptyFormula())
+    reg.register("is_null_and_empty", IsNullAndEmptyFormula())
+    reg.register("isNotNullAndEmpty", IsNotNullAndEmptyFormula())
+    reg.register("is_not_null_and_empty", IsNotNullAndEmptyFormula())
+
+    # force equality
+    reg.register("===", ForceEqFormula())
+    reg.register("force_eq", ForceEqFormula())
+
+    # bitwise
+    reg.register("bit_in", BitInFormula())
 
     # range / between
     range_formula = RangeFormula()

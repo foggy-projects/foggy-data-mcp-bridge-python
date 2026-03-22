@@ -492,6 +492,48 @@ class SemanticQueryService(SemanticServiceResolver):
 
     # ==================== Calculated Fields & Window Functions ====================
 
+    # Allowed SQL functions whitelist (aligned with Java AllowedFunctions.java).
+    # Only these functions are permitted in calculated fields and expressions.
+    # Any function call not in this set will be rejected to prevent SQL injection.
+    _ALLOWED_FUNCTIONS = frozenset({
+        # Aggregate (7)
+        'SUM', 'AVG', 'COUNT', 'MIN', 'MAX', 'GROUP_CONCAT',
+        'COUNT_DISTINCT',
+        # Statistical aggregate (4)
+        'STDDEV_POP', 'STDDEV_SAMP', 'VAR_POP', 'VAR_SAMP',
+        # Window (10)
+        'ROW_NUMBER', 'RANK', 'DENSE_RANK', 'NTILE',
+        'LAG', 'LEAD', 'FIRST_VALUE', 'LAST_VALUE',
+        'CUME_DIST', 'PERCENT_RANK',
+        # String (12)
+        'CONCAT', 'CONCAT_WS', 'SUBSTRING', 'SUBSTR', 'LEFT', 'RIGHT',
+        'LTRIM', 'RTRIM', 'LPAD', 'RPAD', 'REPLACE', 'LOCATE',
+        'CHAR_LENGTH', 'INSTR', 'UPPER', 'LOWER', 'TRIM',
+        # Numeric (7)
+        'ABS', 'ROUND', 'FLOOR', 'CEIL', 'CEILING', 'MOD', 'POWER', 'SQRT',
+        # Date (12)
+        'YEAR', 'MONTH', 'DAY', 'HOUR', 'MINUTE', 'SECOND',
+        'DATE_FORMAT', 'STR_TO_DATE', 'DATE_ADD', 'DATE_SUB',
+        'DATEDIFF', 'TIMESTAMPDIFF', 'EXTRACT',
+        'TIME', 'CURRENT_TIME', 'CURRENT_TIMESTAMP',
+        # Conditional / type (8)
+        'COALESCE', 'IFNULL', 'NVL', 'NULLIF', 'IF', 'CAST', 'CONVERT', 'ISNULL',
+        # Misc
+        'DISTINCT',
+    })
+
+    @classmethod
+    def validate_function(cls, func_name: str) -> bool:
+        """Check if a function name is in the allowed whitelist.
+
+        Args:
+            func_name: Function name (case-insensitive)
+
+        Returns:
+            True if allowed, False otherwise
+        """
+        return func_name.upper() in cls._ALLOWED_FUNCTIONS
+
     # SQL keywords and function names that should NOT be treated as field references
     _SQL_KEYWORDS = frozenset({
         'AND', 'OR', 'NOT', 'AS', 'BETWEEN', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END',
@@ -548,6 +590,16 @@ class SemanticQueryService(SemanticServiceResolver):
             return stripped
 
         keywords = self._SQL_KEYWORDS
+        allowed_funcs = self._ALLOWED_FUNCTIONS
+
+        # Validate function calls in expression against whitelist
+        func_calls = re.findall(r'\b(\w+)\s*\(', expression)
+        for func_name in func_calls:
+            if func_name.upper() not in allowed_funcs and func_name.upper() not in keywords:
+                raise ValueError(
+                    f"Function '{func_name}' is not in the allowed function whitelist. "
+                    f"Allowed functions: {sorted(allowed_funcs)}"
+                )
 
         def replace_field(match: re.Match) -> str:
             token = match.group(0)
@@ -658,6 +710,28 @@ class SemanticQueryService(SemanticServiceResolver):
             # Fallback to fact table
             dim = model.get_dimension(column)
             col_expr = f"t.{dim.column}" if dim else f"t.{column}"
+
+        # Check for $field value reference: {"value": {"$field": "otherField"}}
+        # Generates field-to-field comparison: col_a > col_b (no bind param)
+        if isinstance(value, dict) and "$field" in value:
+            ref_field = value["$field"]
+            ref_resolved = model.resolve_field(ref_field)
+            if ref_resolved:
+                ref_expr = ref_resolved["sql_expr"]
+                if ref_resolved["join_def"] and ensure_join:
+                    ensure_join(ref_resolved["join_def"])
+            else:
+                ref_dim = model.get_dimension(ref_field)
+                ref_expr = f"t.{ref_dim.column}" if ref_dim else f"t.{ref_field}"
+
+            # Map operator to SQL
+            op_map = {"=": "=", "eq": "=", "!=": "<>", "<>": "<>", "neq": "<>",
+                       ">": ">", "gt": ">", ">=": ">=", "gte": ">=",
+                       "<": "<", "lt": "<", "<=": "<=", "lte": "<=",
+                       "===": "=", "force_eq": "="}
+            sql_op = op_map.get(operator, operator)
+            builder.where(f"{col_expr} {sql_op} {ref_expr}")
+            return
 
         # Resolve value: support "values" key for IN, or range from filter_item
         effective_value = value
