@@ -4,6 +4,40 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
+class ModelDirectoryConfig(BaseModel):
+    """Configuration for a model directory (bundle).
+
+    Aligned with Java's ``@EnableFoggyFramework(bundleName, namespace)`` and
+    ``foggy.bundle.external.bundles[]`` YAML config.
+
+    Each entry maps a directory path to a namespace. All TM/QM models loaded
+    from the directory are registered under that namespace.
+
+    Examples::
+
+        ModelDirectoryConfig(path="/data/models/odoo", namespace="odoo")
+        ModelDirectoryConfig(path="./models")  # namespace=None -> no prefix
+    """
+
+    path: str = Field(..., description="Directory path containing TM/QM files")
+    namespace: Optional[str] = Field(
+        default=None,
+        description="Namespace for models in this directory (e.g., 'odoo', 'ecommerce'). "
+                    "Maps to Java @EnableFoggyFramework(namespace=...). "
+                    "When set, models are registered as 'namespace:ModelName'."
+    )
+    name: Optional[str] = Field(
+        default=None,
+        description="Bundle name (e.g., 'odoo-bridge'). For identification only."
+    )
+    watch: bool = Field(
+        default=False,
+        description="Watch for file changes and auto-reload (not yet implemented)"
+    )
+
+    model_config = {"extra": "allow"}
+
+
 class McpProperties(BaseModel):
     """MCP server configuration properties."""
 
@@ -27,10 +61,15 @@ class McpProperties(BaseModel):
     tool_timeout_seconds: int = Field(default=60, description="Tool execution timeout")
     enable_tool_audit: bool = Field(default=True, description="Enable tool audit logging")
 
-    # Model settings
+    # Model settings — supports both simple paths and namespace-aware bundles
     model_directories: List[str] = Field(
         default_factory=lambda: ["./models"],
-        description="Directories to load TM/QM models from"
+        description="Simple directory paths to load TM/QM models from (no namespace)"
+    )
+    model_bundles: List[ModelDirectoryConfig] = Field(
+        default_factory=list,
+        description="Namespace-aware model directories, aligned with Java "
+                    "foggy.bundle.external.bundles[{name, namespace, path, watch}]"
     )
     auto_reload_models: bool = Field(default=False, description="Auto reload models on file change")
 

@@ -364,7 +364,7 @@ def _create_service_aware_loader(base_path: Path):
     return ServiceAwareFileModuleLoader(base_path=base_path)
 
 
-def load_models_from_directory(model_dir: str) -> List[DbTableModelImpl]:
+def load_models_from_directory(model_dir: str, namespace: Optional[str] = None) -> List[DbTableModelImpl]:
     """Load TM and QM models from a directory containing FSScript files.
 
     Scans the directory (recursively) for:
@@ -375,10 +375,18 @@ def load_models_from_directory(model_dir: str) -> List[DbTableModelImpl]:
     QM files use ``export const queryModel = { ... }`` and reference TMs
     via ``loadTableModel('ModelName')``.
 
+    When ``namespace`` is provided, all model names are prefixed with
+    ``"namespace:"``, aligned with Java's ``@EnableFoggyFramework(namespace=...)``
+    and ``foggy.bundle.external.bundles[].namespace`` config.
+
     Handles ``@service`` imports gracefully (returns no-op stubs).
 
     Args:
         model_dir: Path to the directory containing .tm/.qm files
+        namespace: Optional namespace prefix for all models in this directory.
+                   When set (e.g., ``"odoo"``), model ``OdooSaleOrderModel``
+                   is registered as ``"odoo:OdooSaleOrderModel"``.
+                   Aligned with Java ``@EnableFoggyFramework(namespace="odoo")``.
 
     Returns:
         List of loaded DbTableModelImpl instances (TMs + QM aliases)
@@ -437,8 +445,12 @@ def load_models_from_directory(model_dir: str) -> List[DbTableModelImpl]:
             )
 
             model = loader.load(definition, context)
-            models.append(model)
+            # Store under original name for QM cross-reference
             tm_models[model.name] = model
+            # Apply namespace prefix to model name
+            if namespace:
+                model.name = f"{namespace}:{model.name}"
+            models.append(model)
             logger.info(f"Loaded TM: {model.name} (source={tm_file.name}, datasource={model.source_datasource})")
 
         except Exception as e:
@@ -491,11 +503,12 @@ def load_models_from_directory(model_dir: str) -> List[DbTableModelImpl]:
                 # Register the TM under the QM name as an alias
                 tm = tm_models[tm_ref_name]
                 alias_model = tm.model_copy(deep=True)
-                alias_model.name = qm_name
+                # Apply namespace prefix to QM name
+                alias_model.name = f"{namespace}:{qm_name}" if namespace else qm_name
                 alias_model.alias = qm_def.get("caption") or qm_def.get("alias") or alias_model.alias
                 alias_model.description = qm_def.get("description") or alias_model.description
                 models.append(alias_model)
-                logger.info(f"Loaded QM: {qm_name} -> {tm_ref_name} (source={qm_file.name})")
+                logger.info(f"Loaded QM: {alias_model.name} -> {tm_ref_name} (source={qm_file.name})")
             else:
                 logger.warning(f"QM '{qm_name}' references unknown TM '{tm_ref_name}' in {qm_file}")
 

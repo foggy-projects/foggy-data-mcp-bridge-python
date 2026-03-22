@@ -129,6 +129,8 @@ def create_app(
 
         # Load TM/QM models from directories via FSScript evaluator
         from foggy.dataset_model.impl.loader import load_models_from_directory
+
+        # 1. Simple model directories (no namespace)
         for model_dir in properties.model_directories:
             if not os.path.exists(model_dir):
                 logger.warning(f"Model directory not found: {model_dir}")
@@ -140,6 +142,20 @@ def create_app(
                 logger.info(f"Loaded {len(loaded_models)} models from: {model_dir}")
             except Exception as e:
                 logger.warning(f"Failed to load models from {model_dir}: {e}")
+
+        # 2. Namespace-aware model bundles (aligned with Java foggy.bundle.external.bundles)
+        for bundle in properties.model_bundles:
+            if not os.path.exists(bundle.path):
+                logger.warning(f"Bundle directory not found: {bundle.path} (namespace={bundle.namespace})")
+                continue
+            try:
+                loaded_models = load_models_from_directory(bundle.path, namespace=bundle.namespace)
+                for m in loaded_models:
+                    state.semantic_service.register_model(m)
+                ns_label = f" [namespace={bundle.namespace}]" if bundle.namespace else ""
+                logger.info(f"Loaded {len(loaded_models)} models from bundle '{bundle.name or bundle.path}'{ns_label}")
+            except Exception as e:
+                logger.warning(f"Failed to load bundle '{bundle.name or bundle.path}': {e}")
 
         # Initialize tool registry
         state.tool_registry = ToolRegistry()

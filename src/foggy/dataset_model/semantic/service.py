@@ -102,10 +102,32 @@ class SemanticQueryService(SemanticServiceResolver):
         escaped = identifier.replace('"', '""')
         return f'"{escaped}"'
 
-    def register_model(self, model: DbTableModelImpl) -> None:
-        """Register a table model with the service."""
-        self._models[model.name] = model
-        logger.info(f"Registered model: {model.name}")
+    def register_model(self, model: DbTableModelImpl, namespace: Optional[str] = None) -> None:
+        """Register a table model with the service.
+
+        If model.name already contains a namespace prefix (``ns:Name``),
+        it is registered as-is. Otherwise, if ``namespace`` is provided,
+        the model is registered under ``namespace:model.name``.
+
+        The model is also accessible by its bare name (without namespace
+        prefix) as a fallback, unless another model with the same bare
+        name is already registered.
+
+        Aligned with Java's ``namespace:modelName`` composite key pattern.
+        """
+        key = model.name
+        if namespace and ":" not in key:
+            key = f"{namespace}:{key}"
+            model.name = key
+
+        self._models[key] = model
+
+        # Also register bare name as fallback (don't overwrite existing)
+        bare_name = key.split(":", 1)[1] if ":" in key else key
+        if bare_name != key and bare_name not in self._models:
+            self._models[bare_name] = model
+
+        logger.info(f"Registered model: {key}")
 
     def unregister_model(self, name: str) -> bool:
         """Unregister a model by name."""
@@ -115,12 +137,36 @@ class SemanticQueryService(SemanticServiceResolver):
             return True
         return False
 
+    def unregister_by_namespace(self, namespace: str) -> int:
+        """Unregister all models belonging to a namespace.
+
+        Aligned with Java ``TableModelLoaderManager.clearByNamespace()``.
+
+        Args:
+            namespace: Namespace prefix to clear (e.g., ``"odoo"``)
+
+        Returns:
+            Number of models removed
+        """
+        prefix = f"{namespace}:"
+        to_remove = [k for k in self._models if k.startswith(prefix)]
+        for k in to_remove:
+            del self._models[k]
+        if to_remove:
+            self.invalidate_model_cache()
+            logger.info(f"Unregistered {len(to_remove)} models from namespace '{namespace}'")
+        return len(to_remove)
+
     def get_model(self, name: str) -> Optional[DbTableModelImpl]:
-        """Get a registered model by name."""
+        """Get a registered model by name.
+
+        Supports both namespaced (``"odoo:OdooSaleOrderModel"``) and
+        bare (``"OdooSaleOrderModel"``) lookups.
+        """
         return self._models.get(name)
 
     def get_all_model_names(self) -> List[str]:
-        """Get all registered model names."""
+        """Get all registered model names (including namespace-prefixed)."""
         return list(self._models.keys())
 
     def invalidate_model_cache(self) -> None:
