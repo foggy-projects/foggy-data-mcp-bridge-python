@@ -87,6 +87,7 @@ class SemanticQueryService(SemanticServiceResolver):
         self._cache_ttl = cache_ttl_seconds
         self._cache: Dict[str, Tuple[SemanticQueryResponse, float]] = {}
         self._executor = executor
+        self._executor_manager = None  # Optional[ExecutorManager] for multi-datasource routing
         self._dialect = dialect
         self._formula_registry: SqlFormulaRegistry = get_default_registry()
 
@@ -705,7 +706,8 @@ class SemanticQueryService(SemanticServiceResolver):
         """
         import asyncio
 
-        if self._executor is None:
+        executor = self._resolve_executor(model)
+        if executor is None:
             logger.warning("No database executor configured - returning empty result")
             return SemanticQueryResponse.from_legacy(
                 data=[],
@@ -725,28 +727,36 @@ class SemanticQueryService(SemanticServiceResolver):
                 sync_loop = self._get_sync_loop()
                 future = pool.submit(
                     sync_loop.run_until_complete,
-                    self._execute_query_async(build_result),
+                    self._execute_query_async(build_result, executor=executor),
                 )
                 return future.result(timeout=60)
         else:
             # No running loop — use persistent loop directly
             return self._get_sync_loop().run_until_complete(
-                self._execute_query_async(build_result)
+                self._execute_query_async(build_result, executor=executor)
             )
 
     async def _execute_query_async(
         self,
         build_result: QueryBuildResult,
+        executor=None,
     ) -> SemanticQueryResponse:
-        """Execute the built query asynchronously."""
-        if self._executor is None:
+        """Execute the built query asynchronously.
+
+        Args:
+            build_result: The built query with SQL and params
+            executor: Optional executor override (for multi-datasource routing).
+                     Falls back to self._executor if not provided.
+        """
+        executor = executor or self._executor
+        if executor is None:
             return SemanticQueryResponse.from_legacy(
                 data=[],
                 columns_info=build_result.columns,
                 error="No database executor configured",
             )
 
-        result = await self._executor.execute(
+        result = await executor.execute(
             build_result.sql,
             build_result.params,
         )
@@ -770,6 +780,44 @@ class SemanticQueryService(SemanticServiceResolver):
         """Set the database executor."""
         self._executor = executor
         logger.info(f"Database executor set: {type(executor).__name__}")
+
+    def set_executor_manager(self, manager) -> None:
+        """Set the executor manager for multi-datasource routing.
+
+        Args:
+            manager: ExecutorManager instance managing named executors
+        """
+        self._executor_manager = manager
+        logger.info(f"Executor manager set with {len(manager.list_names())} data sources: {manager.list_names()}")
+
+    def _resolve_executor(self, model: DbTableModelImpl):
+        """Resolve the appropriate executor for a model based on its source_datasource.
+
+        Resolution order:
+        1. If model has source_datasource and executor_manager has it → use named executor
+        2. Fall back to executor_manager default
+        3. Fall back to self._executor (backward compatible)
+
+        Args:
+            model: The table model being queried
+
+        Returns:
+            DatabaseExecutor or None
+        """
+        ds_name = getattr(model, 'source_datasource', None)
+        if ds_name and self._executor_manager:
+            executor = self._executor_manager.get(ds_name)
+            if executor:
+                return executor
+            logger.warning(
+                f"Named executor '{ds_name}' not found for model '{model.name}', "
+                f"falling back to default"
+            )
+        if self._executor_manager:
+            default = self._executor_manager.get_default()
+            if default:
+                return default
+        return self._executor
 
     # ==================== Async Query ====================
 
@@ -809,7 +857,8 @@ class SemanticQueryService(SemanticServiceResolver):
                 return cached_response
 
         try:
-            response = await self._execute_query_async(build_result)
+            executor = self._resolve_executor(table_model)
+            response = await self._execute_query_async(build_result, executor=executor)
         except Exception as e:
             logger.exception(f"Failed to execute query for model {model}")
             return SemanticQueryResponse.from_legacy(

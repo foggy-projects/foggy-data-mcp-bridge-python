@@ -302,6 +302,177 @@ class TableModelLoaderManager:
         return [k for k in self._model_cache if k.startswith(prefix)]
 
 
+def load_models_from_directory(model_dir: str) -> List[DbTableModelImpl]:
+    """Load TM models from a directory containing FSScript .tm files.
+
+    Scans the directory (recursively) for .tm files, evaluates them using
+    the FSScript engine, and converts the exported model definitions into
+    DbTableModelImpl instances.
+
+    FSScript TM files use ``export const model = { ... }`` syntax.
+    The exported dict is adapted to match JdbcTableModelLoader's expected format.
+
+    Args:
+        model_dir: Path to the directory containing .tm files
+
+    Returns:
+        List of loaded DbTableModelImpl instances
+    """
+    from foggy.fsscript.module_loader import FileModuleLoader
+    from foggy.fsscript.parser.parser import FsscriptParser
+    from foggy.fsscript.evaluator import ExpressionEvaluator
+
+    model_path = Path(model_dir)
+    if not model_path.exists():
+        logger.warning(f"Model directory does not exist: {model_dir}")
+        return []
+
+    models: List[DbTableModelImpl] = []
+    loader = JdbcTableModelLoader()
+
+    # Scan for .tm files (recursive)
+    tm_files = sorted(model_path.rglob("*.tm"))
+
+    if not tm_files:
+        logger.info(f"No .tm files found in: {model_dir}")
+        return []
+
+    # Create a FileModuleLoader rooted at the model directory
+    # so that relative imports in FSScript (e.g., import '../dicts.fsscript') resolve correctly
+    file_loader = FileModuleLoader(base_path=model_path)
+
+    for tm_file in tm_files:
+        try:
+            # Read and parse the FSScript .tm file
+            source = tm_file.read_text(encoding='utf-8')
+            parser = FsscriptParser(source)
+            ast = parser.parse_program()
+
+            # Evaluate with module loader for import support
+            evaluator = ExpressionEvaluator(
+                context={"__current_module__": str(tm_file)},
+                module_loader=file_loader,
+            )
+            evaluator.evaluate(ast)
+
+            exports = evaluator.get_exports()
+            model_def = exports.get("model")
+            if not model_def or not isinstance(model_def, dict):
+                logger.warning(f"No 'model' export found in: {tm_file}")
+                continue
+
+            # Adapt FSScript field names to JdbcTableModelLoader format
+            definition = _adapt_fsscript_tm(model_def)
+
+            # Load into DbTableModelImpl
+            context = ModelLoadContext(
+                datasource=definition.get("dataSourceName", "default"),
+                schema_name=definition.get("schema"),
+                validate_on_load=True,
+                fail_on_error=False,
+            )
+
+            model = loader.load(definition, context)
+            models.append(model)
+            logger.info(f"Loaded TM from FSScript: {model.name} (source={tm_file.name}, datasource={model.source_datasource})")
+
+        except Exception as e:
+            logger.warning(f"Failed to load TM from {tm_file}: {e}")
+
+    logger.info(f"Loaded {len(models)} models from {model_dir}")
+    return models
+
+
+def _adapt_fsscript_tm(model_def: Dict[str, Any]) -> Dict[str, Any]:
+    """Adapt FSScript TM export dict to JdbcTableModelLoader format.
+
+    FSScript TM uses slightly different field names than what
+    JdbcTableModelLoader expects. This function performs the mapping.
+
+    Args:
+        model_def: Raw dict from FSScript ``export const model = {...}``
+
+    Returns:
+        Adapted dict ready for JdbcTableModelLoader.load()
+    """
+    definition = dict(model_def)
+
+    # idColumn → primaryKey
+    if "idColumn" in definition and "primaryKey" not in definition:
+        definition["primaryKey"] = definition.pop("idColumn")
+
+    # caption → alias (model level)
+    if "caption" in definition and "alias" not in definition:
+        definition["alias"] = definition.get("caption")
+
+    # Adapt dimensions
+    raw_dims = definition.get("dimensions", [])
+    adapted_dims = []
+    for dim in raw_dims:
+        if not isinstance(dim, dict):
+            continue
+        d = dict(dim)
+
+        # foreignKey → column (the FK column on the fact table)
+        if "foreignKey" in d and "column" not in d:
+            d["column"] = d["foreignKey"]
+
+        # caption → alias (dimension level)
+        if "caption" in d and "alias" not in d:
+            d["alias"] = d.get("caption")
+
+        # captionColumn is already used by JdbcTableModelLoader (no change needed)
+
+        # Adapt dimension properties (sub-fields on the dimension table)
+        raw_props = d.get("properties", [])
+        if raw_props:
+            adapted_props = []
+            for prop in raw_props:
+                if not isinstance(prop, dict):
+                    continue
+                p = dict(prop)
+                # Ensure 'name' exists (use column as fallback)
+                if "name" not in p and "column" in p:
+                    p["name"] = p["column"]
+                if "caption" in p and "alias" not in p:
+                    p["alias"] = p.get("caption")
+                adapted_props.append(p)
+            d["properties"] = adapted_props
+
+        adapted_dims.append(d)
+    definition["dimensions"] = adapted_dims
+
+    # Adapt measures
+    raw_measures = definition.get("measures", [])
+    adapted_measures = []
+    for m in raw_measures:
+        if not isinstance(m, dict):
+            continue
+        measure = dict(m)
+        # caption → alias (measure level)
+        if "caption" in measure and "alias" not in measure:
+            measure["alias"] = measure.get("caption")
+        adapted_measures.append(measure)
+    definition["measures"] = adapted_measures
+
+    # Adapt properties (fact table columns exposed as properties)
+    raw_props = definition.get("properties", [])
+    adapted_props = []
+    for p in raw_props:
+        if not isinstance(p, dict):
+            continue
+        prop = dict(p)
+        # Ensure 'name' exists (use column as fallback)
+        if "name" not in prop and "column" in prop:
+            prop["name"] = prop["column"]
+        if "caption" in prop and "alias" not in prop:
+            prop["alias"] = prop.get("caption")
+        adapted_props.append(prop)
+    definition["properties"] = adapted_props
+
+    return definition
+
+
 _global_loader: Optional[TableModelLoaderManager] = None
 
 
@@ -323,6 +494,7 @@ __all__ = [
     "JdbcTableModelLoader",
     "TableModelLoaderManager",
     "ModelLoadContext",
+    "load_models_from_directory",
     "get_loader",
     "init_loader",
 ]

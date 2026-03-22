@@ -24,7 +24,7 @@ from foggy.mcp.audit.service import ToolAuditService
 from foggy.mcp_spi import LocalDatasetAccessor, SemanticRequestContext
 from foggy.dataset_model.semantic import SemanticQueryService
 from foggy.dataset_model.impl.model import DbTableModelImpl
-from foggy.dataset.db.executor import create_executor_from_url
+from foggy.dataset.db.executor import create_executor_from_url, ExecutorManager
 
 
 logger = logging.getLogger(__name__)
@@ -43,6 +43,7 @@ class AppState:
         self.tool_registry: Optional[ToolRegistry] = None
         self.audit_service: Optional[ToolAuditService] = None
         self.executor = None
+        self.executor_manager: Optional[ExecutorManager] = None
 
 
 def create_app(
@@ -94,18 +95,27 @@ def create_app(
             cache_ttl_seconds=300,
         )
 
-        # Create database executor from default data source and inject into semantic service
-        default_ds = state.data_source_manager.get()
-        if default_ds:
-            try:
-                executor_url = default_ds.get_executor_url()
-                state.executor = create_executor_from_url(executor_url)
-                state.semantic_service.set_executor(state.executor)
-                logger.info(f"Database executor initialized: {default_ds.source_type.value} -> {default_ds.host}:{default_ds.port}/{default_ds.database}")
-            except Exception as e:
-                logger.error(f"Failed to create database executor: {e}")
+        # Create database executors for all registered data sources
+        state.executor_manager = ExecutorManager()
+        for ds_name in state.data_source_manager.list_names():
+            ds_config = state.data_source_manager.get(ds_name)
+            if ds_config:
+                try:
+                    executor_url = ds_config.get_executor_url()
+                    executor = create_executor_from_url(executor_url)
+                    is_default = (ds_name == state.data_source_manager.default_source)
+                    state.executor_manager.register(ds_name, executor, set_default=is_default)
+                    logger.info(f"Executor initialized: {ds_name} -> {ds_config.source_type.value} {ds_config.host}:{ds_config.port}/{ds_config.database}")
+                except Exception as e:
+                    logger.error(f"Failed to create executor for '{ds_name}': {e}")
+
+        # Set default executor and manager on semantic service (backward compatible)
+        state.executor = state.executor_manager.get_default()
+        if state.executor:
+            state.semantic_service.set_executor(state.executor)
         else:
             logger.warning("No data source configured - queries will return empty results")
+        state.semantic_service.set_executor_manager(state.executor_manager)
 
         # Load demo models
         if load_demo_models:
@@ -117,11 +127,19 @@ def create_app(
             except Exception as e:
                 logger.warning(f"Failed to load demo models: {e}")
 
-        # Load models from directories
+        # Load TM/QM models from directories via FSScript evaluator
+        from foggy.dataset_model.impl.loader import load_models_from_directory
         for model_dir in properties.model_directories:
-            if os.path.exists(model_dir):
-                logger.info(f"Loading models from: {model_dir}")
-                # Future: implement TM/QM file loading via fsscript evaluator
+            if not os.path.exists(model_dir):
+                logger.warning(f"Model directory not found: {model_dir}")
+                continue
+            try:
+                loaded_models = load_models_from_directory(model_dir)
+                for m in loaded_models:
+                    state.semantic_service.register_model(m)
+                logger.info(f"Loaded {len(loaded_models)} models from: {model_dir}")
+            except Exception as e:
+                logger.warning(f"Failed to load models from {model_dir}: {e}")
 
         # Initialize tool registry
         state.tool_registry = ToolRegistry()
@@ -144,7 +162,12 @@ def create_app(
 
         # Shutdown
         logger.info("Shutting down server")
-        if state.executor:
+        if state.executor_manager:
+            try:
+                await state.executor_manager.close_all()
+            except Exception as e:
+                logger.warning(f"Error closing executors: {e}")
+        elif state.executor:
             try:
                 await state.executor.close()
             except Exception as e:

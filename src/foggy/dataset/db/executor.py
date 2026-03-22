@@ -422,11 +422,71 @@ def create_executor_from_url(connection_url: str) -> DatabaseExecutor:
         raise ValueError(f"Unsupported database scheme: {scheme}")
 
 
+class ExecutorManager:
+    """Manages multiple named DatabaseExecutor instances.
+
+    Provides named lookup with default fallback, mirroring the
+    DataSourceManager API pattern.
+    """
+
+    def __init__(self):
+        """Initialize with empty executor registry."""
+        self._executors: Dict[str, DatabaseExecutor] = {}
+        self._default_name: Optional[str] = None
+
+    def register(self, name: str, executor: DatabaseExecutor, set_default: bool = False) -> None:
+        """Register a named executor.
+
+        Args:
+            name: Data source name
+            executor: Database executor instance
+            set_default: Whether to set as default (also auto-set if first registration)
+        """
+        self._executors[name] = executor
+        if set_default or self._default_name is None:
+            self._default_name = name
+
+    def get(self, name: Optional[str] = None) -> Optional[DatabaseExecutor]:
+        """Get executor by name, falling back to default.
+
+        Args:
+            name: Data source name (None for default)
+
+        Returns:
+            DatabaseExecutor or None if not found
+        """
+        if name and name in self._executors:
+            return self._executors[name]
+        if self._default_name:
+            return self._executors.get(self._default_name)
+        return None
+
+    def get_default(self) -> Optional[DatabaseExecutor]:
+        """Get the default executor."""
+        return self.get(None)
+
+    def list_names(self) -> List[str]:
+        """List all registered executor names."""
+        return list(self._executors.keys())
+
+    async def close_all(self) -> None:
+        """Close all registered executors."""
+        for name, executor in self._executors.items():
+            try:
+                await executor.close()
+                logger.info(f"Closed executor: {name}")
+            except Exception as e:
+                logger.warning(f"Error closing executor '{name}': {e}")
+        self._executors.clear()
+        self._default_name = None
+
+
 __all__ = [
     "QueryResult",
     "DatabaseExecutor",
     "MySQLExecutor",
     "PostgreSQLExecutor",
     "SQLiteExecutor",
+    "ExecutorManager",
     "create_executor_from_url",
 ]
