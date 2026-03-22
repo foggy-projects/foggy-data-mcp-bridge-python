@@ -266,7 +266,7 @@ class TestCalculatedFieldAggregation:
         )
         sql = _build_sql(service, "FactSalesModel", request)
         # Should have the resolved column, no aggregation wrapper
-        assert "`calc`" in sql
+        assert '"calc"' in sql
 
 
 # ==================== Integration Tests ====================

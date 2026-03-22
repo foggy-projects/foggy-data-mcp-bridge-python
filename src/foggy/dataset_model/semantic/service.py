@@ -66,6 +66,7 @@ class SemanticQueryService(SemanticServiceResolver):
         enable_cache: bool = True,
         cache_ttl_seconds: int = 300,
         executor=None,
+        dialect=None,
     ):
         """Initialize the semantic query service.
 
@@ -75,6 +76,9 @@ class SemanticQueryService(SemanticServiceResolver):
             enable_cache: Enable query result caching
             cache_ttl_seconds: Cache TTL in seconds
             executor: Optional database executor for query execution
+            dialect: Optional database dialect for identifier quoting.
+                     If None, uses ANSI double-quote (compatible with
+                     PostgreSQL, SQLite, and most databases).
         """
         self._models: Dict[str, DbTableModelImpl] = {}
         self._default_limit = default_limit
@@ -83,7 +87,19 @@ class SemanticQueryService(SemanticServiceResolver):
         self._cache_ttl = cache_ttl_seconds
         self._cache: Dict[str, Tuple[SemanticQueryResponse, float]] = {}
         self._executor = executor
+        self._dialect = dialect
         self._formula_registry: SqlFormulaRegistry = get_default_registry()
+
+    def _qi(self, identifier: str) -> str:
+        """Quote an SQL identifier using the configured dialect.
+
+        Falls back to ANSI double-quote if no dialect is set.
+        """
+        if self._dialect and hasattr(self._dialect, 'quote_identifier'):
+            return self._dialect.quote_identifier(identifier)
+        # ANSI SQL standard: double-quote for identifiers
+        escaped = identifier.replace('"', '""')
+        return f'"{escaped}"'
 
     def register_model(self, model: DbTableModelImpl) -> None:
         """Register a table model with the service."""
@@ -263,7 +279,7 @@ class SemanticQueryService(SemanticServiceResolver):
                 if dim.visible:
                     col_expr = f"t.{dim.column}"
                     label = dim.alias or dim.name
-                    builder.select(f"{col_expr} AS `{label}`")
+                    builder.select(f"{col_expr} AS {self._qi(label)}")
                     columns_info.append({"name": label, "fieldName": dim_name, "expression": col_expr, "aggregation": None})
                     selected_dims.append(col_expr)
 
@@ -295,14 +311,14 @@ class SemanticQueryService(SemanticServiceResolver):
                     if resolved["is_measure"] and resolved["aggregation"]:
                         agg = resolved["aggregation"]
                         if agg == "COUNT_DISTINCT":
-                            sel = f"COUNT(DISTINCT {sql_expr}) AS `{label}`"
+                            sel = f"COUNT(DISTINCT {sql_expr}) AS {self._qi(label)}"
                         else:
-                            sel = f"{agg}({sql_expr}) AS `{label}`"
+                            sel = f"{agg}({sql_expr}) AS {self._qi(label)}"
                         builder.select(sel)
                         columns_info.append({"name": label, "fieldName": col_name, "expression": sql_expr, "aggregation": agg})
                         has_aggregation = True
                     else:
-                        builder.select(f"{sql_expr} AS `{label}`")
+                        builder.select(f"{sql_expr} AS {self._qi(label)}")
                         columns_info.append({"name": label, "fieldName": col_name, "expression": sql_expr, "aggregation": None})
                         selected_dims.append(sql_expr)
                 else:
@@ -312,7 +328,7 @@ class SemanticQueryService(SemanticServiceResolver):
                     if dim:
                         col_expr = f"t.{dim.column}"
                         label = dim.alias or dim.name
-                        builder.select(f"{col_expr} AS `{label}`")
+                        builder.select(f"{col_expr} AS {self._qi(label)}")
                         columns_info.append({"name": label, "fieldName": col_name, "expression": col_expr, "aggregation": None})
                         selected_dims.append(col_expr)
                     elif measure:
@@ -328,7 +344,7 @@ class SemanticQueryService(SemanticServiceResolver):
             cf = CalculatedFieldDef(**cf_dict) if isinstance(cf_dict, dict) else cf_dict
             select_sql = self._build_calculated_field_sql(cf, model, ensure_join)
             alias = cf.alias or cf.name
-            builder.select(f"{select_sql} AS `{alias}`")
+            builder.select(f"{select_sql} AS {self._qi(alias)}")
             columns_info.append({
                 "name": alias, "fieldName": cf.name,
                 "expression": cf.expression, "aggregation": cf.agg,
@@ -373,7 +389,7 @@ class SemanticQueryService(SemanticServiceResolver):
                     if resolved["join_def"]:
                         ensure_join(resolved["join_def"])
                     if resolved["is_measure"]:
-                        builder.order_by(f"`{resolved['alias_label']}`", direction)
+                        builder.order_by(self._qi(resolved['alias_label']), direction)
                     else:
                         builder.order_by(resolved["sql_expr"], direction)
                 else:
@@ -400,12 +416,12 @@ class SemanticQueryService(SemanticServiceResolver):
         if measure.aggregation:
             agg_name = measure.aggregation.value.upper()
             if agg_name == "COUNT_DISTINCT":
-                select_expr = f"COUNT(DISTINCT t.{col}) AS `{alias}`"
+                select_expr = f"COUNT(DISTINCT t.{col}) AS {self._qi(alias)}"
             else:
-                select_expr = f"{agg_name}(t.{col}) AS `{alias}`"
+                select_expr = f"{agg_name}(t.{col}) AS {self._qi(alias)}"
             agg = agg_name
         else:
-            select_expr = f"t.{col} AS `{alias}`"
+            select_expr = f"t.{col} AS {self._qi(alias)}"
 
         return {
             "name": alias,
@@ -461,9 +477,9 @@ class SemanticQueryService(SemanticServiceResolver):
             default_alias = alias or f"{func_name.lower()}_{field_name}"
 
         if agg == "COUNT_DISTINCT":
-            select_expr = f"COUNT(DISTINCT {sql_col}) AS `{default_alias}`"
+            select_expr = f"COUNT(DISTINCT {sql_col}) AS {self._qi(default_alias)}"
         else:
-            select_expr = f"{agg}({sql_col}) AS `{default_alias}`"
+            select_expr = f"{agg}({sql_col}) AS {self._qi(default_alias)}"
 
         return {
             "name": default_alias,
@@ -662,6 +678,17 @@ class SemanticQueryService(SemanticServiceResolver):
 
     # ==================== Query Execution ====================
 
+    def _get_sync_loop(self):
+        """Get or create a persistent event loop for synchronous execution.
+
+        Reuses the same loop across calls to avoid closing connection pools
+        (e.g., asyncpg) that are bound to a specific event loop.
+        """
+        import asyncio
+        if not hasattr(self, '_sync_loop') or self._sync_loop is None or self._sync_loop.is_closed():
+            self._sync_loop = asyncio.new_event_loop()
+        return self._sync_loop
+
     def _execute_query(
         self,
         build_result: QueryBuildResult,
@@ -671,6 +698,10 @@ class SemanticQueryService(SemanticServiceResolver):
 
         When called from an async context (e.g., FastAPI), prefer
         using query_model_async() instead.
+
+        Uses a persistent event loop to avoid closing async connection
+        pools between consecutive queries (fixes asyncpg/aiomysql
+        "Event loop is closed" errors in embedded scenarios).
         """
         import asyncio
 
@@ -687,12 +718,21 @@ class SemanticQueryService(SemanticServiceResolver):
             loop = None
 
         if loop and loop.is_running():
+            # Already in an async context (e.g., FastAPI) —
+            # run in a thread with its own persistent loop
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(asyncio.run, self._execute_query_async(build_result))
+                sync_loop = self._get_sync_loop()
+                future = pool.submit(
+                    sync_loop.run_until_complete,
+                    self._execute_query_async(build_result),
+                )
                 return future.result(timeout=60)
         else:
-            return asyncio.run(self._execute_query_async(build_result))
+            # No running loop — use persistent loop directly
+            return self._get_sync_loop().run_until_complete(
+                self._execute_query_async(build_result)
+            )
 
     async def _execute_query_async(
         self,
