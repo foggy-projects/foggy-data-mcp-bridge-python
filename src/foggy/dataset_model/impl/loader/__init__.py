@@ -383,6 +383,21 @@ def load_models_from_directory(model_dir: str) -> List[DbTableModelImpl]:
     return models
 
 
+def _snake_to_camel(name: str) -> str:
+    """Convert snake_case to camelCase.
+
+    Mirrors Java's automatic column-to-name conversion:
+    ``user_id`` → ``userId``, ``date_order`` → ``dateOrder``,
+    ``amount_untaxed`` → ``amountUntaxed``.
+
+    If the name contains no underscores, it is returned as-is.
+    """
+    parts = name.split("_")
+    if len(parts) <= 1:
+        return name
+    return parts[0] + "".join(p.capitalize() for p in parts[1:])
+
+
 def _adapt_fsscript_tm(model_def: Dict[str, Any]) -> Dict[str, Any]:
     """Adapt FSScript TM export dict to JdbcTableModelLoader format.
 
@@ -431,9 +446,9 @@ def _adapt_fsscript_tm(model_def: Dict[str, Any]) -> Dict[str, Any]:
                 if not isinstance(prop, dict):
                     continue
                 p = dict(prop)
-                # Ensure 'name' exists (use column as fallback)
+                # Ensure 'name' exists (convert column snake_case → camelCase)
                 if "name" not in p and "column" in p:
-                    p["name"] = p["column"]
+                    p["name"] = _snake_to_camel(p["column"])
                 if "caption" in p and "alias" not in p:
                     p["alias"] = p.get("caption")
                 adapted_props.append(p)
@@ -449,6 +464,9 @@ def _adapt_fsscript_tm(model_def: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(m, dict):
             continue
         measure = dict(m)
+        # Ensure 'name' exists (convert column snake_case → camelCase)
+        if "name" not in measure and "column" in measure:
+            measure["name"] = _snake_to_camel(measure["column"])
         # caption → alias (measure level)
         if "caption" in measure and "alias" not in measure:
             measure["alias"] = measure.get("caption")
@@ -462,9 +480,9 @@ def _adapt_fsscript_tm(model_def: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(p, dict):
             continue
         prop = dict(p)
-        # Ensure 'name' exists (use column as fallback)
+        # Ensure 'name' exists (convert column snake_case → camelCase)
         if "name" not in prop and "column" in prop:
-            prop["name"] = prop["column"]
+            prop["name"] = _snake_to_camel(prop["column"])
         if "caption" in prop and "alias" not in prop:
             prop["alias"] = prop.get("caption")
         adapted_props.append(prop)
