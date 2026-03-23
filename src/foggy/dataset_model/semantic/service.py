@@ -1158,13 +1158,14 @@ class SemanticQueryService(SemanticServiceResolver):
                         "description": prop.description or prop.caption or prop_name,
                     }
 
-            # Fact table own dimensions → expand to $id and $caption
+            # Fact table own dimensions → use plain field name (no $id suffix)
+            # These are simple attributes on the fact table (e.g. orderId, orderStatus),
+            # NOT join dimensions, so they should be referenced directly by name.
             for dim_name, dim in model.dimensions.items():
-                id_fn = f"{dim_name}$id"
-                if id_fn not in fields:
-                    fields[id_fn] = {
-                        "name": f"{dim.alias or dim_name}(ID)",
-                        "fieldName": id_fn,
+                if dim_name not in fields:
+                    fields[dim_name] = {
+                        "name": dim.alias or dim_name,
+                        "fieldName": dim_name,
                         "meta": f"属性 | {dim.data_type.value}",
                         "type": dim.data_type.value.upper(),
                         "filterType": "text",
@@ -1174,7 +1175,7 @@ class SemanticQueryService(SemanticServiceResolver):
                         "sourceColumn": dim.column,
                         "models": {},
                     }
-                fields[id_fn]["models"][model_name] = {
+                fields[dim_name]["models"][model_name] = {
                     "description": dim.description or dim.alias or dim_name,
                 }
 

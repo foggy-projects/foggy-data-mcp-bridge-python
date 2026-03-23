@@ -520,7 +520,9 @@ class TestMetadataV3:
         assert pid["measure"] is False
 
     def test_metadata_fact_dimension_present(self, service: SemanticQueryService):
-        """Fact table own dimensions (e.g. orderStatus) appear as fields."""
+        """Fact table own dimensions (e.g. orderStatus) use plain name (no $id suffix)."""
         meta = service.get_metadata_v3()
         fields = meta["fields"]
-        assert "orderStatus$id" in fields
+        assert "orderStatus" in fields
+        # Should NOT have $id suffix for fact table own dimensions
+        assert "orderStatus$id" not in fields
