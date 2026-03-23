@@ -782,7 +782,8 @@ class SemanticQueryService(SemanticServiceResolver):
         # Resolve value: support "values" key for IN, or range from filter_item
         effective_value = value
         if operator.upper() in ("IN", "NOT IN", "NIN"):
-            effective_value = filter_item.get("values", [value] if value else [])
+            raw = filter_item.get("values") or filter_item.get("value")
+            effective_value = raw if isinstance(raw, list) else ([raw] if raw is not None else [])
         elif operator.upper() == "BETWEEN":
             from_val = filter_item.get("from")
             to_val = filter_item.get("to")
