@@ -1100,10 +1100,14 @@ class SemanticQueryService(SemanticServiceResolver):
                 dim_name = join_def.name
                 dim_caption = join_def.caption or dim_name
 
+                # Check hierarchy support from the corresponding dimension object
+                dim_obj = model.dimensions.get(dim_name)
+                is_hier = dim_obj is not None and dim_obj.supports_hierarchy_operators()
+
                 # dim$id
                 id_fn = f"{dim_name}$id"
                 if id_fn not in fields:
-                    fields[id_fn] = {
+                    field_info: Dict[str, Any] = {
                         "name": f"{dim_caption}(ID)",
                         "fieldName": id_fn,
                         "meta": f"维度ID | {join_def.primary_key}",
@@ -1115,6 +1119,10 @@ class SemanticQueryService(SemanticServiceResolver):
                         "sourceColumn": join_def.foreign_key,
                         "models": {},
                     }
+                    if is_hier:
+                        field_info["hierarchical"] = True
+                        field_info["supportedOps"] = ["selfAndDescendantsOf", "selfAndAncestorsOf"]
+                    fields[id_fn] = field_info
                 fields[id_fn]["models"][model_name] = {
                     "description": f"{dim_caption}(ID)",
                     "usage": "用于精确查询、排序",
@@ -1207,6 +1215,8 @@ class SemanticQueryService(SemanticServiceResolver):
                 "- 字段名直接使用 fields 中的 fieldName\n"
                 "- 维度用 xxx$id(查询/过滤) 或 xxx$caption(展示)\n"
                 "- 度量默认带聚合，可用内联表达式如 sum(fieldName)\n"
+                "- 标记 hierarchical=true 的维度支持层级操作符: "
+                "selfAndDescendantsOf(值及其所有下级), selfAndAncestorsOf(值及其所有上级)\n"
             ),
             "version": "v3",
             "fields": fields,
@@ -1236,15 +1246,51 @@ class SemanticQueryService(SemanticServiceResolver):
         else:
             return self._build_multi_model_markdown(target_models)
 
+    # ---------- Type description helpers (aligned with Java getDataTypeDescription) ----------
+
+    @staticmethod
+    def _get_column_type_description(column_type) -> str:
+        """Map ColumnType enum to Chinese description (aligned with Java getDataTypeDescription)."""
+        if column_type is None:
+            return "文本"
+        type_name = column_type.value.upper() if hasattr(column_type, 'value') else str(column_type).upper()
+        mapping = {
+            "STRING": "文本",
+            "TEXT": "文本",
+            "INTEGER": "文本",   # Java maps INTEGER properties to 文本 by default
+            "LONG": "文本",
+            "FLOAT": "数值",
+            "DOUBLE": "数值",
+            "DECIMAL": "数值",
+            "MONEY": "金额",
+            "NUMBER": "数值",
+            "BOOLEAN": "布尔",
+            "BOOL": "布尔",
+            "DATE": "日期(yyyy-MM-dd)",
+            "DAY": "日期(yyyy-MM-dd)",
+            "DATETIME": "日期时间",
+            "TIMESTAMP": "日期时间",
+            "TIME": "文本",
+            "DICT": "字典",
+            "JSON": "文本",
+        }
+        return mapping.get(type_name, "文本")
+
     def _build_single_model_markdown(self, model_name: str, model: 'DbTableModelImpl') -> str:
         """Build detailed markdown for a single model (aligned with Java buildSingleModelMarkdown)."""
         lines: List[str] = []
         alias = model.alias or model_name
 
+        # Collect dimension field names for exclusion from properties section
+        dimension_field_names: set = set()
+
         lines.append(f"# {model_name} - {alias}")
         lines.append("")
         lines.append("## 模型信息")
         lines.append(f"- 表名: {model.source_table}")
+        # Primary key (aligned with Java: jdbcModel.getIdColumn())
+        if model.primary_key:
+            lines.append(f"- 主键: {', '.join(model.primary_key)}")
         if model.description:
             lines.append(f"- 说明: {model.description}")
         lines.append("")
@@ -1252,25 +1298,44 @@ class SemanticQueryService(SemanticServiceResolver):
         # Dimension JOIN fields
         if model.dimension_joins:
             lines.append("## 维度字段")
-            lines.append("| 字段名 | 名称 | 类型 | 说明 |")
-            lines.append("|--------|------|------|------|")
+            lines.append("| 字段名 | 名称 | 类型 | 层级 | 说明 |")
+            lines.append("|--------|------|------|------|------|")
             for jd in model.dimension_joins:
                 dc = jd.caption or jd.name
-                lines.append(f"| {jd.name}$id | {dc}(ID) | INTEGER | {jd.key_description or jd.description or ''} |")
-                lines.append(f"| {jd.name}$caption | {dc}(名称) | TEXT | {dc}显示名称 |")
+                dim_obj = model.dimensions.get(jd.name)
+                is_hier = dim_obj is not None and dim_obj.supports_hierarchy_operators()
+                hier_label = "✅ selfAndDescendantsOf / selfAndAncestorsOf" if is_hier else "-"
+                id_field = f"{jd.name}$id"
+                caption_field = f"{jd.name}$caption"
+                dimension_field_names.add(id_field)
+                dimension_field_names.add(caption_field)
+                lines.append(f"| {id_field} | {dc}(ID) | INTEGER | {hier_label} | {jd.key_description or jd.description or ''} |")
+                lines.append(f"| {caption_field} | {dc}(名称) | TEXT | - | {dc}显示名称 |")
                 for prop in jd.properties:
                     pn = prop.get_name()
-                    lines.append(f"| {jd.name}${pn} | {prop.caption or pn} | {prop.data_type} | {prop.description or ''} |")
+                    prop_field = f"{jd.name}${pn}"
+                    dimension_field_names.add(prop_field)
+                    lines.append(f"| {prop_field} | {prop.caption or pn} | {prop.data_type} | - | {prop.description or ''} |")
             lines.append("")
 
-        # Fact table own attributes
-        if model.dimensions:
-            lines.append("## 属性字段")
-            lines.append("| 字段名 | 名称 | 类型 | 说明 |")
-            lines.append("|--------|------|------|------|")
-            for dim_name, dim in model.dimensions.items():
-                lines.append(f"| {dim_name} | {dim.alias or dim_name} | {dim.data_type.value.upper()} | {dim.description or ''} |")
-            lines.append("")
+        # Fact table own properties (aligned with Java: queryModel.getQueryProperties())
+        # Use model.columns (DbColumnDef) — the TM-defined properties, NOT model.dimensions
+        if model.columns:
+            # Filter out columns already shown in dimension fields
+            filtered_columns = {
+                name: col for name, col in model.columns.items()
+                if name not in dimension_field_names
+            }
+            if filtered_columns:
+                lines.append("## 属性字段")
+                lines.append("| 字段名 | 名称 | 类型 | 说明 |")
+                lines.append("|--------|------|------|------|")
+                for col_name, col in filtered_columns.items():
+                    col_caption = col.alias or col_name
+                    col_type = self._get_column_type_description(col.column_type)
+                    col_desc = col.comment or ""
+                    lines.append(f"| {col_name} | {col_caption} | {col_type} | {col_desc} |")
+                lines.append("")
 
         # Measure fields
         if model.measures:
@@ -1288,6 +1353,7 @@ class SemanticQueryService(SemanticServiceResolver):
         lines.append("- 维度用 `xxx$id`(查询/过滤), `xxx$caption`(展示), `xxx$property`(维度属性)")
         lines.append("- 度量支持内联聚合: `sum(salesAmount) as total`")
         lines.append("- 系统自动处理 groupBy，通常无需手动指定")
+        lines.append("- 层级维度支持 `selfAndDescendantsOf`(值及其所有下级) 和 `selfAndAncestorsOf`(值及其所有上级) 操作符")
 
         return "\n".join(lines)
 
@@ -1322,20 +1388,26 @@ class SemanticQueryService(SemanticServiceResolver):
                 lines.append("**维度**")
                 for jd in model.dimension_joins:
                     dc = jd.caption or jd.name
-                    lines.append(f"- {dc}")
-                    lines.append(f"    - [field:{jd.name}$id] | ID, 用于查询/过滤")
+                    dim_obj = model.dimensions.get(jd.name)
+                    is_hier = dim_obj is not None and dim_obj.supports_hierarchy_operators()
+                    hier_hint = " 🔗层级" if is_hier else ""
+                    lines.append(f"- {dc}{hier_hint}")
+                    id_ops = " *(支持 selfAndDescendantsOf / selfAndAncestorsOf)*" if is_hier else ""
+                    lines.append(f"    - [field:{jd.name}$id] | ID, 用于查询/过滤{id_ops}")
                     lines.append(f"    - [field:{jd.name}$caption] | 名称, 用于展示")
                     for prop in jd.properties:
                         pn = prop.get_name()
                         lines.append(f"    - [field:{jd.name}${pn}] | {prop.caption or pn}")
 
-            # Fact table attributes
-            if model.dimensions:
+            # Fact table properties (use model.columns, NOT model.dimensions)
+            if model.columns:
                 lines.append("")
                 lines.append("**属性**")
-                for dim_name, dim in model.dimensions.items():
-                    lines.append(f"- {dim.alias or dim_name}")
-                    lines.append(f"    - [field:{dim_name}] | {dim.data_type.value.upper()}")
+                for col_name, col in model.columns.items():
+                    col_caption = col.alias or col_name
+                    col_type = self._get_column_type_description(col.column_type)
+                    lines.append(f"- {col_caption}")
+                    lines.append(f"    - [field:{col_name}] | {col_type}")
 
             # Measures
             if model.measures:

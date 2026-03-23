@@ -229,15 +229,12 @@ def create_mcp_router(
                             error={"code": -32602, "message": "model parameter required"}
                         )
 
-                    meta_request = SemanticMetadataRequest(
-                        model=model_name,
-                        include_dimensions=True,
-                        include_measures=True,
-                        include_columns=True,
-                    )
-                    response = _get_service().get_metadata(meta_request)
-
-                    if not response.models:
+                    svc = _get_service()
+                    # Use V3 markdown format — aligned with Java LocalDatasetAccessor
+                    # (default format="markdown"). Markdown is ~40-60% fewer tokens
+                    # and expands JOIN dimensions as {dim}$id / {dim}$caption.
+                    md = svc.get_metadata_v3_markdown(model_names=[model_name])
+                    if md.startswith("# 暂无可用数据模型"):
                         return McpJsonRpcResponse(
                             id=request.id,
                             error={"code": -32602, "message": f"Model not found: {model_name}"}
@@ -248,7 +245,7 @@ def create_mcp_router(
                         result={
                             "content": [{
                                 "type": "text",
-                                "text": json.dumps(response.models[0], ensure_ascii=False, indent=2)
+                                "text": md,
                             }]
                         }
                     )
