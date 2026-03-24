@@ -8,6 +8,7 @@ This module provides async database execution capabilities using:
 
 from typing import Any, Dict, List, Optional, Union
 from abc import ABC, abstractmethod
+from datetime import datetime, date
 import logging
 import time
 
@@ -277,7 +278,35 @@ class PostgreSQLExecutor(DatabaseExecutor):
             else:
                 result.append(sql[i])
             i += 1
-        return ''.join(result), params
+        return ''.join(result), self._auto_convert_params(params)
+
+    @staticmethod
+    def _auto_convert_params(params: List[Any]) -> List[Any]:
+        """Convert string params to proper Python types for asyncpg.
+
+        asyncpg uses PostgreSQL's prepared statement protocol which requires
+        strict type matching. JSON string dates from MCP clients must be
+        converted to Python datetime objects.
+        """
+        if not params:
+            return params
+        converted = []
+        for p in params:
+            if isinstance(p, str):
+                # Try ISO date/datetime parsing (most specific first)
+                for fmt in ('%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d'):
+                    try:
+                        dt = datetime.strptime(p, fmt)
+                        # Return date object for date-only strings
+                        converted.append(dt.date() if fmt == '%Y-%m-%d' else dt)
+                        break
+                    except ValueError:
+                        continue
+                else:
+                    converted.append(p)  # Keep as string if not a date
+            else:
+                converted.append(p)
+        return converted
 
     async def execute_count(self, sql: str, params: Optional[List[Any]] = None) -> int:
         """Execute a COUNT query."""
