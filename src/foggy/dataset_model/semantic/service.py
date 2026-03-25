@@ -1167,10 +1167,19 @@ class SemanticQueryService(SemanticServiceResolver):
                         "description": prop.description or prop.caption or prop_name,
                     }
 
+            # Collect JOIN dimension names to exclude from fact-table properties
+            # JOIN dimensions are already represented by $id/$caption fields above.
+            # Including them again as plain fields would create duplicate sourceColumn
+            # mappings (e.g. both company$id and company → sourceColumn: company_id),
+            # causing downstream reverse-mapping to pick the wrong field name.
+            join_dim_names = {jd.name for jd in model.dimension_joins}
+
             # Fact table own dimensions → use plain field name (no $id suffix)
             # These are simple attributes on the fact table (e.g. orderId, orderStatus),
             # NOT join dimensions, so they should be referenced directly by name.
             for dim_name, dim in model.dimensions.items():
+                if dim_name in join_dim_names:
+                    continue  # Skip JOIN dimensions — covered by $id/$caption above
                 if dim_name not in fields:
                     fields[dim_name] = {
                         "name": dim.alias or dim_name,
