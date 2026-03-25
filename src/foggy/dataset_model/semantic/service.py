@@ -729,7 +729,39 @@ class SemanticQueryService(SemanticServiceResolver):
         filter_item: Dict[str, Any],
         ensure_join=None,
     ) -> None:
-        """Add a single filter condition with auto-JOIN support."""
+        """Add a single filter condition with auto-JOIN support.
+
+        Supports compound conditions:
+          {"$or": [{...}, {...}]}  → (cond1 OR cond2)
+          {"$and": [{...}, {...}]} → cond1 AND cond2
+        Nesting is supported: {"$or": [{"$and": [...]}, {...}]}
+        """
+        # --- Handle $or compound condition ---
+        if "$or" in filter_item:
+            or_fragments: list[str] = []
+            or_params: list[Any] = []
+            for sub_item in filter_item["$or"]:
+                sub_builder = SqlQueryBuilder()
+                self._add_filter(sub_builder, model, sub_item, ensure_join)
+                if sub_builder._query.where and sub_builder._query.where.conditions:
+                    fragment = " AND ".join(sub_builder._query.where.conditions)
+                    if len(sub_builder._query.where.conditions) > 1:
+                        fragment = f"({fragment})"
+                    or_fragments.append(fragment)
+                    or_params.extend(sub_builder._query.where.params)
+            if or_fragments:
+                or_clause = " OR ".join(or_fragments)
+                if len(or_fragments) > 1:
+                    or_clause = f"({or_clause})"
+                builder.where(or_clause, params=or_params if or_params else None)
+            return
+
+        # --- Handle $and compound condition ---
+        if "$and" in filter_item:
+            for sub_item in filter_item["$and"]:
+                self._add_filter(builder, model, sub_item, ensure_join)
+            return
+
         column = filter_item.get("column") or filter_item.get("field")
         operator = filter_item.get("operator") or filter_item.get("op", "=")
         value = filter_item.get("value")

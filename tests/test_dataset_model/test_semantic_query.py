@@ -259,6 +259,71 @@ class TestAutoJoinQuery:
         assert "LEFT JOIN dim_product" in sql
         assert "dp.category_name" in sql
 
+    def test_or_compound_filter(self, service: SemanticQueryService):
+        """$or compound filter generates (cond1 OR cond2) SQL."""
+        request = SemanticQueryRequest(
+            columns=["salesAmount"],
+            slice=[{
+                "$or": [
+                    {"field": "customer$id", "op": "=", "value": 6},
+                    {"field": "customer$id", "op": "is null"},
+                ]
+            }],
+        )
+        sql = _build_sql(service, "FactSalesModel", request)
+        assert " OR " in sql
+        assert "t.customer_key" in sql
+
+    def test_and_compound_filter(self, service: SemanticQueryService):
+        """$and compound filter generates cond1 AND cond2 SQL."""
+        request = SemanticQueryRequest(
+            columns=["salesAmount"],
+            slice=[{
+                "$and": [
+                    {"field": "orderStatus", "op": "=", "value": "completed"},
+                    {"field": "customer$id", "op": "=", "value": 1},
+                ]
+            }],
+        )
+        sql = _build_sql(service, "FactSalesModel", request)
+        assert "t.order_status" in sql
+        assert "t.customer_key" in sql
+
+    def test_nested_or_and_filter(self, service: SemanticQueryService):
+        """Nested $or with $and generates correct SQL grouping."""
+        request = SemanticQueryRequest(
+            columns=["salesAmount"],
+            slice=[{
+                "$or": [
+                    {"$and": [
+                        {"field": "orderStatus", "op": "=", "value": "completed"},
+                        {"field": "customer$id", "op": "=", "value": 1},
+                    ]},
+                    {"field": "customer$id", "op": "=", "value": 2},
+                ]
+            }],
+        )
+        sql = _build_sql(service, "FactSalesModel", request)
+        assert " OR " in sql
+        # The $and sub-group should be parenthesized
+        assert "(" in sql
+
+    def test_or_filter_triggers_join(self, service: SemanticQueryService):
+        """$or with dimension property fields triggers the necessary JOINs."""
+        request = SemanticQueryRequest(
+            columns=["salesAmount"],
+            slice=[{
+                "$or": [
+                    {"field": "product$categoryName", "op": "=", "value": "电子"},
+                    {"field": "product$categoryName", "op": "=", "value": "服装"},
+                ]
+            }],
+        )
+        sql = _build_sql(service, "FactSalesModel", request)
+        assert "LEFT JOIN dim_product" in sql
+        assert "dp.category_name" in sql
+        assert " OR " in sql
+
     def test_order_by_dimension(self, service: SemanticQueryService):
         """ORDER BY product$categoryName -> ORDER BY dp.category_name."""
         request = SemanticQueryRequest(
