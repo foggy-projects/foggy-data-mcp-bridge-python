@@ -17,6 +17,7 @@ from foggy.dataset_model.impl.model import (
     DimensionJoinDef,
     DimensionPropertyDef,
 )
+from foggy.dataset_model.definitions.base import DbColumnDef, ColumnType
 from foggy.demo.models.ecommerce_models import create_fact_sales_model, create_fact_order_model
 from foggy.mcp_spi import SemanticQueryRequest
 
@@ -591,3 +592,69 @@ class TestMetadataV3:
         assert "orderStatus" in fields
         # Should NOT have $id suffix for fact table own dimensions
         assert "orderStatus$id" not in fields
+
+    def test_metadata_columns_appear_in_v3(self, service: SemanticQueryService):
+        """TM properties stored in model.columns should appear in V3 JSON metadata.
+
+        This tests the fix for the bug where get_metadata_v3() only iterated
+        model.dimensions and model.measures, missing model.columns entirely.
+        Properties like partner_share (loaded via TM properties section)
+        were invisible in V3 metadata.
+        """
+        # Add a property directly to model.columns (simulating TM properties loading)
+        model = service._models["FactSalesModel"]
+        model.columns["partnerShare"] = DbColumnDef(
+            name="partner_share",   # SQL column name (snake_case)
+            alias="Is Shared",
+            column_type=ColumnType.BOOLEAN,
+            comment="Shared with portal",
+        )
+
+        meta = service.get_metadata_v3()
+        fields = meta["fields"]
+        assert "partnerShare" in fields
+        field = fields["partnerShare"]
+        assert field["fieldName"] == "partnerShare"
+        assert field["sourceColumn"] == "partner_share"
+        assert field["type"] == "BOOLEAN"
+        assert field["measure"] is False
+        assert "FactSalesModel" in field["models"]
+
+        # Clean up
+        del model.columns["partnerShare"]
+
+    def test_metadata_columns_sourceColumn_unique(self, service: SemanticQueryService):
+        """model.columns entries should NOT create duplicate sourceColumn
+        with existing dimension JOIN fields.
+
+        If a column has the same name as an existing field (e.g., already
+        added via model.dimensions), the `if col_name not in fields` guard
+        should prevent duplication.
+        """
+        model = service._models["FactSalesModel"]
+        # orderStatus already exists in model.dimensions
+        model.columns["orderStatus"] = DbColumnDef(
+            name="order_status",
+            column_type=ColumnType.STRING,
+        )
+
+        meta = service.get_metadata_v3()
+        fields = meta["fields"]
+        # Should still be present (from dimensions), no error
+        assert "orderStatus" in fields
+
+        # Clean up
+        del model.columns["orderStatus"]
+
+    def test_metadata_columns_not_duplicated_with_dimensions(self, service: SemanticQueryService):
+        """Verify no sourceColumn collision between model.columns and dimension JOINs.
+
+        A model.columns entry with the same fieldName as a JOIN dimension's
+        $id field should not overwrite it (guarded by `if col_name not in fields`).
+        """
+        meta = service.get_metadata_v3()
+        fields = meta["fields"]
+        # product$id exists from dimension JOIN — no plain 'product' entry should exist
+        assert "product$id" in fields
+        # Verify sourceColumn points to the JOIN FK
+        assert fields["product$id"]["sourceColumn"] == "product_key"
