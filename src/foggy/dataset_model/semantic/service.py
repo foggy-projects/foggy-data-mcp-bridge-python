@@ -1229,6 +1229,28 @@ class SemanticQueryService(SemanticServiceResolver):
                     "description": dim.description or dim.alias or dim_name,
                 }
 
+            # Fact table properties (from TM properties section, stored in model.columns)
+            # These are explicit properties like id, name, state, partner_share, etc.
+            # NOT dimensions, so they appear with their camelCase name directly.
+            for col_name, col_def in model.columns.items():
+                if col_name not in fields:
+                    col_type = col_def.column_type.value if col_def.column_type else "STRING"
+                    fields[col_name] = {
+                        "name": col_def.alias or col_name,
+                        "fieldName": col_name,
+                        "meta": f"属性 | {col_type}",
+                        "type": col_type.upper(),
+                        "filterType": "text",
+                        "filterable": True,
+                        "measure": False,
+                        "aggregatable": False,
+                        "sourceColumn": col_def.name,  # SQL column name (snake_case)
+                        "models": {},
+                    }
+                fields[col_name]["models"][model_name] = {
+                    "description": col_def.comment or col_def.alias or col_name,
+                }
+
             # Measure fields
             for measure_name, measure in model.measures.items():
                 if measure_name not in fields:
