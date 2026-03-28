@@ -12,6 +12,9 @@ from pathlib import Path
 from foggy.dataset_model.impl.loader import (
     _snake_to_camel,
     _adapt_fsscript_tm,
+    _TmRefProxy,
+    _extract_allowed_fields,
+    _apply_column_group_filter,
     load_models_from_directory,
 )
 
@@ -548,3 +551,340 @@ export const queryModel = { name: 'OrphanQM', model: x };
 
         # Verify properties
         assert "dateOrder" in sale.columns
+
+
+# ==================== columnGroups filtering ====================
+
+
+class TestTmRefProxy:
+    """Tests for _TmRefProxy — the loadTableModel() stub dict."""
+
+    def test_get_always_returns_key_name(self):
+        """proxy.get(key) should always return the key itself as a field ref."""
+        proxy = _TmRefProxy({"__tm_ref__": "Sales", "name": "Sales"})
+        # Even for keys present in the dict, get() returns the key name
+        assert proxy.get("__tm_ref__") == "__tm_ref__"
+        assert proxy.get("name") == "name"
+        assert proxy.get("department") == "department"
+        assert proxy.get("salesDate$year") == "salesDate$year"
+
+    def test_internal_get_returns_real_value(self):
+        """_internal_get() bypasses the proxy and returns stored values."""
+        proxy = _TmRefProxy({"__tm_ref__": "Sales", "name": "Sales"})
+        assert proxy._internal_get("__tm_ref__") == "Sales"
+        assert proxy._internal_get("name") == "Sales"
+        assert proxy._internal_get("department") is None
+
+    def test_unknown_key_via_dict_bracket(self):
+        """Standard dict[key] still raises KeyError for unknown keys."""
+        proxy = _TmRefProxy({"__tm_ref__": "X"})
+        with pytest.raises(KeyError):
+            _ = proxy["missing"]
+
+
+class TestExtractAllowedFields:
+    """Tests for _extract_allowed_fields()."""
+
+    def test_v2_ref_items(self):
+        groups = [
+            {
+                "caption": "Org",
+                "items": [
+                    {"ref": "department"},
+                    {"ref": "job"},
+                ],
+            }
+        ]
+        assert _extract_allowed_fields(groups) == {"department", "job"}
+
+    def test_v1_name_items(self):
+        groups = [
+            {
+                "caption": "Info",
+                "items": [
+                    {"name": "orderId"},
+                    {"name": "status"},
+                ],
+            }
+        ]
+        assert _extract_allowed_fields(groups) == {"orderId", "status"}
+
+    def test_formula_items_skipped(self):
+        groups = [
+            {
+                "caption": "Advanced",
+                "items": [
+                    {"name": "profitRate", "formula": "profit / sales * 100", "type": "NUMBER"},
+                ],
+            }
+        ]
+        assert _extract_allowed_fields(groups) == set()
+
+    def test_mixed_groups(self):
+        groups = [
+            {"caption": "G1", "items": [{"ref": "department"}]},
+            {"caption": "G2", "items": [{"ref": "salesAmount"}, {"name": "calc", "formula": "1+1"}]},
+        ]
+        assert _extract_allowed_fields(groups) == {"department", "salesAmount"}
+
+    def test_empty_groups(self):
+        assert _extract_allowed_fields([]) == set()
+
+    def test_dollar_refs(self):
+        groups = [
+            {
+                "caption": "Date",
+                "items": [
+                    {"ref": "salesDate"},
+                    {"ref": "salesDate$year"},
+                    {"ref": "salesDate$month"},
+                ],
+            }
+        ]
+        assert _extract_allowed_fields(groups) == {"salesDate", "salesDate$year", "salesDate$month"}
+
+
+class TestApplyColumnGroupFilter:
+    """Tests for _apply_column_group_filter()."""
+
+    def _make_model(self):
+        """Create a test model with multiple dimensions, columns, measures."""
+        from foggy.dataset_model.impl.model import (
+            DbTableModelImpl,
+            DbModelDimensionImpl,
+            DbModelMeasureImpl,
+            DimensionJoinDef,
+        )
+        from foggy.dataset_model.definitions.base import DbColumnDef
+
+        return DbTableModelImpl(
+            name="TestTM",
+            source_table="test_table",
+            dimensions={
+                "department": DbModelDimensionImpl(name="department", column="department_id"),
+                "job": DbModelDimensionImpl(name="job", column="job_id"),
+                "user": DbModelDimensionImpl(name="user", column="user_id"),
+            },
+            dimension_joins=[
+                DimensionJoinDef(name="department", table_name="hr_department", foreign_key="department_id", primary_key="id"),
+                DimensionJoinDef(name="job", table_name="hr_job", foreign_key="job_id", primary_key="id"),
+                DimensionJoinDef(name="user", table_name="res_users", foreign_key="user_id", primary_key="id"),
+            ],
+            columns={
+                "id": DbColumnDef(name="id"),
+                "name": DbColumnDef(name="name"),
+                "email": DbColumnDef(name="email"),
+            },
+            measures={
+                "employeeCount": DbModelMeasureImpl(name="employeeCount", column="id"),
+                "salary": DbModelMeasureImpl(name="salary", column="salary"),
+            },
+        )
+
+    def test_filter_removes_unreferenced_dimensions(self):
+        model = self._make_model()
+        allowed = {"department", "job", "id", "name", "employeeCount"}
+        _apply_column_group_filter(model, allowed)
+
+        assert "department" in model.dimensions
+        assert "job" in model.dimensions
+        assert "user" not in model.dimensions  # filtered out
+
+    def test_filter_removes_unreferenced_dimension_joins(self):
+        model = self._make_model()
+        allowed = {"department", "id", "employeeCount"}
+        _apply_column_group_filter(model, allowed)
+
+        join_names = {j.name for j in model.dimension_joins}
+        assert "department" in join_names
+        assert "job" not in join_names
+        assert "user" not in join_names
+
+    def test_filter_removes_unreferenced_columns(self):
+        model = self._make_model()
+        allowed = {"department", "id", "name", "employeeCount"}
+        _apply_column_group_filter(model, allowed)
+
+        assert "id" in model.columns
+        assert "name" in model.columns
+        assert "email" not in model.columns
+
+    def test_filter_removes_unreferenced_measures(self):
+        model = self._make_model()
+        allowed = {"department", "id", "employeeCount"}
+        _apply_column_group_filter(model, allowed)
+
+        assert "employeeCount" in model.measures
+        assert "salary" not in model.measures
+
+    def test_dollar_ref_keeps_base_dimension(self):
+        """salesDate$year should keep the 'salesDate' dimension."""
+        model = self._make_model()
+        # Use dollar refs — base name 'department' should be extracted
+        allowed = {"department$completeName", "id"}
+        _apply_column_group_filter(model, allowed)
+
+        assert "department" in model.dimensions
+        assert "job" not in model.dimensions
+
+
+class TestQmColumnGroupsIntegration:
+    """Integration tests: load TM+QM from temp files, verify columnGroups filtering."""
+
+    def test_qm_filters_dimensions_via_column_groups(self):
+        """QM with columnGroups should only expose referenced dimensions."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model_dir = Path(tmpdir) / "model"
+            model_dir.mkdir()
+            (model_dir / "EmpModel.tm").write_text(
+                """
+export const model = {
+    name: 'EmpModel',
+    caption: 'Employees',
+    tableName: 'hr_employee',
+    idColumn: 'id',
+    dimensions: [
+        { name: 'department', tableName: 'hr_dept', foreignKey: 'dept_id', primaryKey: 'id', captionColumn: 'name' },
+        { name: 'job', tableName: 'hr_job', foreignKey: 'job_id', primaryKey: 'id', captionColumn: 'name' },
+        { name: 'user', tableName: 'res_users', foreignKey: 'user_id', primaryKey: 'id', captionColumn: 'login' }
+    ],
+    properties: [
+        { column: 'id', caption: 'ID', type: 'INTEGER' },
+        { column: 'name', caption: 'Name', type: 'STRING' },
+        { column: 'email', caption: 'Email', type: 'STRING' }
+    ],
+    measures: [
+        { column: 'id', name: 'empCount', caption: 'Count', aggregation: 'COUNT_DISTINCT' }
+    ]
+};
+""",
+                encoding="utf-8",
+            )
+            query_dir = Path(tmpdir) / "query"
+            query_dir.mkdir()
+            (query_dir / "EmpQueryModel.qm").write_text(
+                """
+const emp = loadTableModel('EmpModel');
+export const queryModel = {
+    name: 'EmpQueryModel',
+    caption: 'Employee Query',
+    model: emp,
+    columnGroups: [
+        {
+            caption: 'Info',
+            items: [
+                { ref: emp.id },
+                { ref: emp.name }
+            ]
+        },
+        {
+            caption: 'Org',
+            items: [
+                { ref: emp.department },
+                { ref: emp.job }
+            ]
+        },
+        {
+            caption: 'Metrics',
+            items: [
+                { ref: emp.empCount }
+            ]
+        }
+    ]
+};
+""",
+                encoding="utf-8",
+            )
+
+            models = load_models_from_directory(tmpdir)
+            qm = next(m for m in models if m.name == "EmpQueryModel")
+
+            # 'user' dimension should be filtered out
+            assert "department" in qm.dimensions
+            assert "job" in qm.dimensions
+            assert "user" not in qm.dimensions
+
+            # dimension_joins too
+            join_names = {j.name for j in qm.dimension_joins}
+            assert "department" in join_names
+            assert "job" in join_names
+            assert "user" not in join_names
+
+            # columns: only id and name
+            assert "id" in qm.columns
+            assert "name" in qm.columns
+            assert "email" not in qm.columns
+
+            # measures
+            assert "empCount" in qm.measures
+
+    def test_qm_without_column_groups_keeps_all(self):
+        """QM without columnGroups should expose all TM fields (backward compat)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model_dir = Path(tmpdir) / "model"
+            model_dir.mkdir()
+            (model_dir / "SalesModel.tm").write_text(
+                """
+export const model = {
+    name: 'SalesModel',
+    caption: 'Sales',
+    tableName: 'sales',
+    idColumn: 'id',
+    dimensions: [
+        { name: 'product', tableName: 'dim_product', foreignKey: 'product_id', primaryKey: 'id', captionColumn: 'name' },
+        { name: 'customer', tableName: 'dim_customer', foreignKey: 'customer_id', primaryKey: 'id', captionColumn: 'name' }
+    ],
+    measures: [
+        { column: 'amount', name: 'amount', caption: 'Amount', aggregation: 'sum' }
+    ]
+};
+""",
+                encoding="utf-8",
+            )
+            query_dir = Path(tmpdir) / "query"
+            query_dir.mkdir()
+            (query_dir / "SalesQueryModel.qm").write_text(
+                """
+const s = loadTableModel('SalesModel');
+export const queryModel = {
+    name: 'SalesQueryModel',
+    caption: 'Sales Query',
+    model: s
+};
+""",
+                encoding="utf-8",
+            )
+
+            models = load_models_from_directory(tmpdir)
+            qm = next(m for m in models if m.name == "SalesQueryModel")
+
+            # All TM dimensions should be present
+            assert "product" in qm.dimensions
+            assert "customer" in qm.dimensions
+            assert "amount" in qm.measures
+
+    def test_odoo_employee_qm_filters_user_dimension(self):
+        """Integration: OdooHrEmployeeQueryModel should NOT expose 'user' dimension."""
+        import os
+        odoo_dir = os.path.join("src", "foggy", "demo", "models", "odoo")
+        if not os.path.exists(odoo_dir):
+            pytest.skip("Odoo demo models not found")
+
+        models = load_models_from_directory(odoo_dir)
+        tm = next(m for m in models if m.name == "OdooHrEmployeeModel")
+        qm = next(m for m in models if m.name == "OdooHrEmployeeQueryModel")
+
+        # TM should still have 'user' dimension
+        assert "user" in tm.dimensions
+
+        # QM should NOT have 'user' — it's excluded by columnGroups
+        assert "user" not in qm.dimensions
+        join_names = {j.name for j in qm.dimension_joins}
+        assert "user" not in join_names
+
+        # QM should still have the 5 referenced dimensions
+        assert "department" in qm.dimensions
+        assert "job" in qm.dimensions
+        assert "company" in qm.dimensions
+        assert "parent" in qm.dimensions
+        assert "workLocation" in qm.dimensions

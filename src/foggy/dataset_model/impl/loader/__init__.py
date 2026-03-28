@@ -34,6 +34,101 @@ from foggy.dataset_model.impl.model import (
 logger = logging.getLogger(__name__)
 
 
+class _TmRefProxy(dict):
+    """Proxy dict returned by loadTableModel() stub.
+
+    When FSScript evaluates ``emp.department``, :class:`MemberAccessExpression`
+    calls ``dict.get(member)``.  We *always* return the member name as a plain
+    string so that the evaluated ``columnGroups`` items carry the original field
+    reference, e.g. ``{"ref": "department"}``.
+
+    Even for keys physically present in the dict (``__tm_ref__``, ``name``),
+    we return the member name — because ``emp.name`` in a QM refers to the TM
+    column ``name``, not the model's own name string.
+    """
+
+    # Internal keys that should never be intercepted — only ``__tm_ref__``
+    # and ``name`` are stored, but they are used by the loader to resolve
+    # which TM this proxy refers to.  ``_internal_get`` gives access.
+    def _internal_get(self, key: str, default=None):
+        """Access the real dict value (used by the loader to resolve TM ref)."""
+        return super().get(key, default)
+
+    def get(self, key: str, default=None):  # type: ignore[override]
+        # Always return the key name itself as a column/field reference.
+        return key
+
+
+def _extract_allowed_fields(column_groups: List[Dict[str, Any]]) -> set:
+    """Extract the set of referenced field names from evaluated columnGroups.
+
+    Handles both V2 (``{ref: ...}``) and V1 (``{name: ...}``) item formats.
+    Calculated fields (items with ``formula``) are skipped — they don't map
+    to TM columns directly.
+
+    Returns a set of *base* field names (the part before ``$``), suitable for
+    filtering dimensions, dimension_joins, columns and measures.
+    """
+    refs: set = set()
+    for group in column_groups:
+        items = group.get("items") or []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            # Skip calculated / window fields — they don't reference TM entities
+            if item.get("formula"):
+                continue
+            # V2: { ref: emp.department } → ref resolved to string by _TmRefProxy
+            field = item.get("ref")
+            # V1 fallback: { name: 'department' }
+            if field is None:
+                field = item.get("name")
+            if isinstance(field, str) and field:
+                refs.add(field)
+    return refs
+
+
+def _apply_column_group_filter(
+    model: DbTableModelImpl,
+    allowed_refs: set,
+) -> None:
+    """Filter *model* in-place so only fields referenced by *allowed_refs* remain.
+
+    ``allowed_refs`` may contain plain names (``department``, ``salesAmount``)
+    or qualified ``dimension$property`` strings.  We derive the set of allowed
+    *base* names (the part before ``$``) and use it to prune:
+
+    * ``dimensions`` dict
+    * ``dimension_joins`` list
+    * ``columns`` dict
+    * ``measures`` dict
+    """
+    # Build set of base dimension/column/measure names
+    base_names: set = set()
+    for ref in allowed_refs:
+        base_names.add(ref.split("$")[0])
+
+    # --- dimensions ---
+    model.dimensions = {
+        k: v for k, v in model.dimensions.items() if k in base_names
+    }
+
+    # --- dimension_joins ---
+    model.dimension_joins = [
+        dj for dj in model.dimension_joins if dj.name in base_names
+    ]
+
+    # --- columns (fact-table properties like id, name, jobTitle) ---
+    model.columns = {
+        k: v for k, v in model.columns.items() if k in base_names
+    }
+
+    # --- measures ---
+    model.measures = {
+        k: v for k, v in model.measures.items() if k in base_names
+    }
+
+
 class TableModelLoader(ABC):
     """表模型加载器接口"""
 
@@ -464,10 +559,12 @@ def load_models_from_directory(model_dir: str, namespace: Optional[str] = None) 
             parser = FsscriptParser(source)
             ast = parser.parse_program()
 
-            # Provide loadTableModel() built-in so QM can reference TMs
-            def load_table_model(name: str) -> Dict[str, Any]:
-                """Stub for QM's loadTableModel() — returns a placeholder dict."""
-                return {"__tm_ref__": name, "name": name}
+            # Provide loadTableModel() built-in so QM can reference TMs.
+            # _TmRefProxy ensures that property accesses like ``emp.department``
+            # resolve to the field name string instead of None.
+            def load_table_model(name: str) -> _TmRefProxy:
+                """Stub for QM's loadTableModel() — returns a proxy that captures field refs."""
+                return _TmRefProxy({"__tm_ref__": name, "name": name})
 
             evaluator = ExpressionEvaluator(
                 context={
@@ -491,7 +588,9 @@ def load_models_from_directory(model_dir: str, namespace: Optional[str] = None) 
             # Resolve the referenced TM
             model_ref = qm_def.get("model", {})
             tm_ref_name = None
-            if isinstance(model_ref, dict):
+            if isinstance(model_ref, _TmRefProxy):
+                tm_ref_name = model_ref._internal_get("__tm_ref__") or model_ref._internal_get("name")
+            elif isinstance(model_ref, dict):
                 tm_ref_name = model_ref.get("__tm_ref__") or model_ref.get("name")
             elif isinstance(model_ref, str):
                 tm_ref_name = model_ref
@@ -507,6 +606,24 @@ def load_models_from_directory(model_dir: str, namespace: Optional[str] = None) 
                 alias_model.name = f"{namespace}:{qm_name}" if namespace else qm_name
                 alias_model.alias = qm_def.get("caption") or qm_def.get("alias") or alias_model.alias
                 alias_model.description = qm_def.get("description") or alias_model.description
+
+                # --- columnGroups filtering (aligned with Java QmColumnGroupResolver) ---
+                # When the QM defines columnGroups, only fields referenced therein
+                # should be exposed.  This prevents the Python engine from leaking
+                # TM dimensions/measures that the QM deliberately excluded.
+                column_groups = qm_def.get("columnGroups")
+                if column_groups and isinstance(column_groups, list):
+                    allowed = _extract_allowed_fields(column_groups)
+                    if allowed:
+                        _apply_column_group_filter(alias_model, allowed)
+                        logger.debug(
+                            f"QM '{alias_model.name}': filtered to {len(allowed)} refs "
+                            f"(dims={len(alias_model.dimensions)}, "
+                            f"joins={len(alias_model.dimension_joins)}, "
+                            f"cols={len(alias_model.columns)}, "
+                            f"measures={len(alias_model.measures)})"
+                        )
+
                 models.append(alias_model)
                 logger.info(f"Loaded QM: {alias_model.name} -> {tm_ref_name} (source={qm_file.name})")
             else:

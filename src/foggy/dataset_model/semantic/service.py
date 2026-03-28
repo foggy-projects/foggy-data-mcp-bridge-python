@@ -15,6 +15,11 @@ from pydantic import BaseModel
 from foggy.dataset_model.impl.model import DbTableModelImpl, DbModelDimensionImpl, DbModelMeasureImpl
 from foggy.dataset_model.engine.query import SqlQueryBuilder
 from foggy.dataset_model.engine.formula import get_default_registry, SqlFormulaRegistry
+from foggy.dataset_model.engine.hierarchy import (
+    ClosureTableDef,
+    HierarchyConditionBuilder,
+    get_default_hierarchy_registry,
+)
 from foggy.dataset_model.engine.join import JoinGraph, JoinEdge, JoinType
 from foggy.dataset_model.definitions.query_request import CalculatedFieldDef
 from foggy.mcp_spi import (
@@ -90,6 +95,7 @@ class SemanticQueryService(SemanticServiceResolver):
         self._executor_manager = None  # Optional[ExecutorManager] for multi-datasource routing
         self._dialect = dialect
         self._formula_registry: SqlFormulaRegistry = get_default_registry()
+        self._hierarchy_registry = get_default_hierarchy_registry()
 
     def _qi(self, identifier: str) -> str:
         """Quote an SQL identifier using the configured dialect.
@@ -728,6 +734,7 @@ class SemanticQueryService(SemanticServiceResolver):
         model: DbTableModelImpl,
         filter_item: Dict[str, Any],
         ensure_join=None,
+        root_builder: Optional[SqlQueryBuilder] = None,
     ) -> None:
         """Add a single filter condition with auto-JOIN support.
 
@@ -736,13 +743,16 @@ class SemanticQueryService(SemanticServiceResolver):
           {"$and": [{...}, {...}]} → cond1 AND cond2
         Nesting is supported: {"$or": [{"$and": [...]}, {...}]}
         """
+        if root_builder is None:
+            root_builder = builder
+
         # --- Handle $or compound condition ---
         if "$or" in filter_item:
             or_fragments: list[str] = []
             or_params: list[Any] = []
             for sub_item in filter_item["$or"]:
                 sub_builder = SqlQueryBuilder()
-                self._add_filter(sub_builder, model, sub_item, ensure_join)
+                self._add_filter(sub_builder, model, sub_item, ensure_join, root_builder=root_builder)
                 if sub_builder._query.where and sub_builder._query.where.conditions:
                     fragment = " AND ".join(sub_builder._query.where.conditions)
                     if len(sub_builder._query.where.conditions) > 1:
@@ -759,7 +769,7 @@ class SemanticQueryService(SemanticServiceResolver):
         # --- Handle $and compound condition ---
         if "$and" in filter_item:
             for sub_item in filter_item["$and"]:
-                self._add_filter(builder, model, sub_item, ensure_join)
+                self._add_filter(builder, model, sub_item, ensure_join, root_builder=root_builder)
             return
 
         column = filter_item.get("column") or filter_item.get("field")
@@ -822,6 +832,16 @@ class SemanticQueryService(SemanticServiceResolver):
             if from_val is not None and to_val is not None:
                 effective_value = [from_val, to_val]
 
+        hierarchy_condition = self._build_hierarchy_filter(
+            root_builder, model, column, operator, effective_value
+        )
+        if hierarchy_condition:
+            builder.where(
+                hierarchy_condition["condition"],
+                params=hierarchy_condition["params"] if hierarchy_condition["params"] else None,
+            )
+            return
+
         # Use SqlFormulaRegistry for all operators
         params: List[Any] = []
         condition = self._formula_registry.build_condition(
@@ -829,6 +849,104 @@ class SemanticQueryService(SemanticServiceResolver):
         )
         if condition:
             builder.where(condition, params=params if params else None)
+
+    def _build_hierarchy_filter(
+        self,
+        builder: SqlQueryBuilder,
+        model: DbTableModelImpl,
+        field_name: str,
+        operator: str,
+        value: Any,
+    ) -> Optional[Dict[str, Any]]:
+        """Build closure-table JOIN + WHERE for hierarchy operators."""
+        op_class = self._hierarchy_registry.get(operator)
+        if op_class is None or "$" not in field_name:
+            return None
+
+        dim_name, suffix = field_name.split("$", 1)
+        if suffix != "id":
+            return None
+
+        dim = model.get_dimension(dim_name)
+        join_def = model.get_dimension_join(dim_name)
+        if dim is None or join_def is None or not dim.supports_hierarchy_operators():
+            return None
+
+        child_column = dim.level_column or join_def.primary_key
+        closure = ClosureTableDef(
+            table_name=dim.hierarchy_table,
+            parent_column=dim.parent_column or "parent_id",
+            child_column=child_column,
+        )
+
+        alias_index = 1
+        existing_joins = []
+        if builder._query.from_clause:
+            existing_joins = builder._query.from_clause.joins
+        alias_index += len(existing_joins)
+        closure_alias = f"h_{dim_name}_{alias_index}"
+
+        op_instance = op_class.model_construct(dimension=dim_name, member_value=value)
+        values = value if isinstance(value, list) else [value]
+        params: List[Any] = []
+        fragments: List[str] = []
+
+        self._ensure_join(
+            builder,
+            closure.qualified_table(),
+            closure_alias,
+            (
+                f"t.{join_def.foreign_key} = {closure_alias}."
+                f"{closure.parent_column if op_instance.is_ancestor_direction else closure.child_column}"
+            ),
+        )
+
+        for single_value in values:
+            if op_instance.is_ancestor_direction:
+                built = HierarchyConditionBuilder.build_ancestors_condition(
+                    closure=closure,
+                    closure_alias=closure_alias,
+                    fact_fk_column=join_def.foreign_key,
+                    fact_alias="t",
+                    value=single_value,
+                    include_self=operator.lower() == "selfandancestorsof",
+                )
+            else:
+                built = HierarchyConditionBuilder.build_descendants_condition(
+                    closure=closure,
+                    closure_alias=closure_alias,
+                    fact_fk_column=join_def.foreign_key,
+                    fact_alias="t",
+                    value=single_value,
+                    include_self=operator.lower() == "selfanddescendantsof",
+                )
+
+            leaf_parts = [built["where_condition"]]
+            if built["distance_condition"]:
+                leaf_parts.insert(0, built["distance_condition"])
+            fragments.append("(" + " AND ".join(leaf_parts) + ")")
+            params.extend(built["where_params"])
+
+        if not fragments:
+            return None
+
+        condition = fragments[0] if len(fragments) == 1 else "(" + " OR ".join(fragments) + ")"
+        return {"condition": condition, "params": params}
+
+    def _ensure_join(
+        self,
+        builder: SqlQueryBuilder,
+        table_name: str,
+        alias: str,
+        on_condition: str,
+    ) -> None:
+        """Add a JOIN if the exact table alias pair is not already present."""
+        if not builder._query.from_clause:
+            return
+        for join in builder._query.from_clause.joins:
+            if join.table_name == table_name and join.alias == alias:
+                return
+        builder.left_join(table_name, alias=alias, on_condition=on_condition)
 
     # ==================== Query Execution ====================
 
