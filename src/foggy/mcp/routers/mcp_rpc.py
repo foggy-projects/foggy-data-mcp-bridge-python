@@ -230,11 +230,23 @@ def create_mcp_router(
                         )
 
                     svc = _get_service()
-                    # Use V3 markdown format — aligned with Java LocalDatasetAccessor
-                    # (default format="markdown"). Markdown is ~40-60% fewer tokens
-                    # and expands JOIN dimensions as {dim}$id / {dim}$caption.
-                    md = svc.get_metadata_v3_markdown(model_names=[model_name])
-                    if md.startswith("# 暂无可用数据模型"):
+                    fmt = tool_args.get("format", "markdown")
+
+                    if fmt == MetadataFormat.JSON:
+                        v3_data = svc.get_metadata_v3(model_names=[model_name])
+                        if model_name not in (v3_data.get("models") or {}):
+                            return McpJsonRpcResponse(
+                                id=request.id,
+                                error={"code": -32602, "message": f"Model not found: {model_name}"}
+                            )
+                        text = json.dumps(v3_data, ensure_ascii=False, indent=2)
+                    else:
+                        # Use V3 markdown format — aligned with Java LocalDatasetAccessor
+                        # (default format="markdown"). Markdown is ~40-60% fewer tokens
+                        # and expands JOIN dimensions as {dim}$id / {dim}$caption.
+                        text = svc.get_metadata_v3_markdown(model_names=[model_name])
+
+                    if text.startswith("# 暂无可用数据模型"):
                         return McpJsonRpcResponse(
                             id=request.id,
                             error={"code": -32602, "message": f"Model not found: {model_name}"}
@@ -245,7 +257,7 @@ def create_mcp_router(
                         result={
                             "content": [{
                                 "type": "text",
-                                "text": md,
+                                "text": text,
                             }]
                         }
                     )
