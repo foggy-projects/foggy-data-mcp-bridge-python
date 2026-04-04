@@ -118,7 +118,11 @@ class CalculatedFieldDef(BaseModel):
 
 
 class CondRequestDef(BaseModel):
-    """Condition request for query filtering."""
+    """Condition request for query filtering.
+
+    DSL 契约：公开输出统一使用 ``value`` 字段。
+    ``values`` 仅作为历史兼容输入读路径，序列化时自动归一到 ``value``。
+    """
 
     # Condition type
     condition_type: FilterType = Field(default=FilterType.SIMPLE, description="Filter type")
@@ -132,8 +136,8 @@ class CondRequestDef(BaseModel):
     from_value: Optional[Any] = Field(default=None, description="Range from value")
     to_value: Optional[Any] = Field(default=None, description="Range to value")
 
-    # List filter
-    values: Optional[List[Any]] = Field(default=None, description="List of values")
+    # List filter — 历史兼容输入，序列化时排除
+    values: Optional[List[Any]] = Field(default=None, exclude=True, description="(deprecated) use value instead")
 
     # Expression filter
     expression: Optional[str] = Field(default=None, description="Filter expression")
@@ -145,6 +149,11 @@ class CondRequestDef(BaseModel):
     model_config = {
         "extra": "allow",
     }
+
+    def model_post_init(self, __context: Any) -> None:
+        """将 values 归一到 value（历史兼容）"""
+        if self.values is not None and self.value is None:
+            self.value = self.values
 
     def to_sql(self) -> str:
         """Convert to SQL WHERE clause.
@@ -162,9 +171,11 @@ class CondRequestDef(BaseModel):
             return f"{from_cond} AND {to_cond}"
 
         elif self.condition_type == FilterType.LIST:
-            if self.values:
+            # value 已由 model_post_init 从 values 归一
+            list_vals = self.value if isinstance(self.value, list) else self.values
+            if list_vals:
                 vals = ", ".join(
-                    f"'{v}'" if isinstance(v, str) else str(v) for v in self.values
+                    f"'{v}'" if isinstance(v, str) else str(v) for v in list_vals
                 )
                 return f"{self.column} IN ({vals})"
             return "1=1"
