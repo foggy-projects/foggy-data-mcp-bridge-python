@@ -77,10 +77,15 @@
 
 无。
 
+## 2026-04-05 更新：re-sync 到 community 1.1.1
+
+- `pull-odoo-models.py` re-sync 成功，lock 更新为 version=1.1.1 + 标准 sha256 checksum
+- MrpProduction/ProjectTask 模型文件已从目录中删除
+
 ## 后续衔接
 
 | 后续项 | 状态 |
 |--------|------|
-| lock 文件已提交到 git | ✅ |
+| lock 文件已提交到 git | ✅（version=1.1.1） |
 | GENERATED 标记已添加 | ✅ |
 | 漂移校验可集成到 CI | ✅ |

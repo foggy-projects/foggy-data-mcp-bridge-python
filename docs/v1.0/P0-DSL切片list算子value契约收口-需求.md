@@ -3,8 +3,28 @@
 ## 基本信息
 - 目标版本：`v1.0`
 - 需求等级：`P0`
-- 状态：`待处理`
+- 状态：`已完成`
+- 完成日期：2026-04-05
 - 责任项目：`foggy-data-mcp-bridge-python`
+
+## 完成记录
+
+### 开发进度：已完成
+
+改动文件：`src/foggy/dataset_model/definitions/query_request.py`
+
+| 改动 | 说明 |
+|------|------|
+| `CondRequestDef.values` 字段添加 `exclude=True` | 序列化时不再输出 `values`，公开 JSON 只有 `value` |
+| 新增 `model_post_init` | 构造时将 `values` 归一到 `value`（历史兼容） |
+| `to_sql()` 更新 | 优先使用 `value`（已归一），`values` 作为 fallback |
+| 文档注释 | 明确标注 `values` 为 deprecated 输入兼容 |
+
+### 测试进度：已完成
+
+- `pytest tests/`: 1388 passed, 76 skipped, 0 failed
+
+### 体验进度：N/A
 
 ## 背景
 2026-04-02 在 Odoo bridge 本地快测中，`tests/test_permission_bridge.py` 大量失败。根因不是权限桥接逻辑本身出错，而是测试仍按历史字段 `values` 断言，而当前实现已统一对 `in` / `not in` 输出：
