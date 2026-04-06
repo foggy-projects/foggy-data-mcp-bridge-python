@@ -3,7 +3,7 @@
 ## 基本信息
 
 - 优先级：中
-- 状态：待排期
+- 状态：✅ 已修复
 - 来源：`foggy-odoo-bridge-pro` P0-08 Phase 4
 - 影响：Python gateway 通过 Odoo MCP 透传时，E2E 测试需要额外兼容代码
 

@@ -245,8 +245,12 @@ class SemanticQueryService(SemanticServiceResolver):
                 return cached_response
 
         # Execute query
+        effective_limit = min(request.limit or self._default_limit, self._max_limit)
         try:
-            response = self._execute_query(build_result, table_model)
+            response = self._execute_query(
+                build_result, table_model,
+                start=request.start, limit=effective_limit,
+            )
         except Exception as e:
             logger.exception(f"Failed to execute query for model {model}")
             return SemanticQueryResponse.from_legacy(
@@ -965,6 +969,8 @@ class SemanticQueryService(SemanticServiceResolver):
         self,
         build_result: QueryBuildResult,
         model: DbTableModelImpl,
+        start: int = 0,
+        limit: Optional[int] = None,
     ) -> SemanticQueryResponse:
         """Execute the built query (synchronous wrapper).
 
@@ -998,19 +1004,23 @@ class SemanticQueryService(SemanticServiceResolver):
                 sync_loop = self._get_sync_loop()
                 future = pool.submit(
                     sync_loop.run_until_complete,
-                    self._execute_query_async(build_result, executor=executor),
+                    self._execute_query_async(build_result, executor=executor,
+                                              start=start, limit=limit),
                 )
                 return future.result(timeout=60)
         else:
             # No running loop — use persistent loop directly
             return self._get_sync_loop().run_until_complete(
-                self._execute_query_async(build_result, executor=executor)
+                self._execute_query_async(build_result, executor=executor,
+                                          start=start, limit=limit)
             )
 
     async def _execute_query_async(
         self,
         build_result: QueryBuildResult,
         executor=None,
+        start: int = 0,
+        limit: Optional[int] = None,
     ) -> SemanticQueryResponse:
         """Execute the built query asynchronously.
 
@@ -1018,6 +1028,8 @@ class SemanticQueryService(SemanticServiceResolver):
             build_result: The built query with SQL and params
             executor: Optional executor override (for multi-datasource routing).
                      Falls back to self._executor if not provided.
+            start: Pagination start offset (for response pagination info).
+            limit: Pagination limit (for response pagination info).
         """
         executor = executor or self._executor
         if executor is None:
@@ -1045,6 +1057,9 @@ class SemanticQueryService(SemanticServiceResolver):
             columns_info=build_result.columns,
             total=result.total,
             sql=build_result.sql,
+            start=start,
+            limit=limit,
+            has_more=result.has_more,
         )
 
     def set_executor(self, executor) -> None:
@@ -1127,9 +1142,13 @@ class SemanticQueryService(SemanticServiceResolver):
             if time.time() - cached_time < self._cache_ttl:
                 return cached_response
 
+        effective_limit = min(request.limit or self._default_limit, self._max_limit)
         try:
             executor = self._resolve_executor(table_model)
-            response = await self._execute_query_async(build_result, executor=executor)
+            response = await self._execute_query_async(
+                build_result, executor=executor,
+                start=request.start, limit=effective_limit,
+            )
         except Exception as e:
             logger.exception(f"Failed to execute query for model {model}")
             return SemanticQueryResponse.from_legacy(

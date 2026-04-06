@@ -61,6 +61,10 @@ class DimensionJoinDef(BaseModel):
     key_description: Optional[str] = Field(default=None, description="Key format description")
     alias: Optional[str] = Field(default=None, description="Table alias in SQL (auto-generated if None)")
     properties: List[DimensionPropertyDef] = Field(default_factory=list, description="Dimension properties")
+    caption_def_raw: Optional[Any] = Field(
+        default=None, exclude=True,
+        description="Raw captionDef dict with builder callables for deferred formula resolution",
+    )
 
     model_config = {"extra": "allow"}
 
@@ -222,6 +226,34 @@ class DbModelMeasureImpl(BaseModel):
         if self.measure_type == MeasureType.CALCULATED:
             return False
         return self.aggregation != AggregationType.NONE
+
+
+def _resolve_caption_sql(join_def: "DimensionJoinDef", table_alias: str) -> str:
+    """Resolve caption SQL expression for a dimension join.
+
+    Priority:
+    1. dialectFormulaDef[*].builder — dialect-specific formula (e.g., JSONB extraction)
+    2. formulaDef.builder — universal formula (e.g., COALESCE wrapper)
+    3. caption_column — simple column reference
+    4. primary_key — ultimate fallback
+    """
+    cdr = getattr(join_def, "caption_def_raw", None)
+    if cdr and isinstance(cdr, dict):
+        # 1. Dialect-specific formula
+        dialect_formulas = cdr.get("dialectFormulaDef")
+        if dialect_formulas and isinstance(dialect_formulas, dict):
+            for entry in dialect_formulas.values():
+                if isinstance(entry, dict) and callable(entry.get("builder")):
+                    return entry["builder"](table_alias)
+
+        # 2. Universal formula
+        formula_def = cdr.get("formulaDef")
+        if formula_def and isinstance(formula_def, dict) and callable(formula_def.get("builder")):
+            return formula_def["builder"](table_alias)
+
+    # 3. Fallback to simple column
+    cap_col = join_def.caption_column or join_def.primary_key
+    return f"{table_alias}.{cap_col}"
 
 
 class DbTableModelImpl(BaseModel):
@@ -407,9 +439,9 @@ class DbTableModelImpl(BaseModel):
                     "join_def": join_def,
                 }
             elif suffix == "caption":
-                cap_col = join_def.caption_column or join_def.primary_key
+                sql_expr = _resolve_caption_sql(join_def, ta)
                 return {
-                    "sql_expr": f"{ta}.{cap_col}",
+                    "sql_expr": sql_expr,
                     "alias_label": f"{join_def.caption or dim_name}",
                     "table_alias": ta,
                     "is_measure": False,

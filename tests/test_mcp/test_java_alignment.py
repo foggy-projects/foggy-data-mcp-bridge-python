@@ -149,6 +149,57 @@ class TestSemanticQueryResponseAlignment:
         assert j["schema"]["columns"][0]["dataType"] == "INT"
         assert j["debug"]["extra"]["sql"] == "SELECT x FROM t"
 
+    def test_from_legacy_with_pagination(self):
+        """from_legacy() builds PaginationInfo when limit is provided."""
+        resp = SemanticQueryResponse.from_legacy(
+            data=[{"a": 1}, {"a": 2}],
+            total=10,
+            start=0,
+            limit=5,
+            has_more=True,
+        )
+        j = resp.model_dump(by_alias=True, exclude_none=True)
+        assert "pagination" in j
+        p = j["pagination"]
+        assert p["start"] == 0
+        assert p["limit"] == 5
+        assert p["returned"] == 2
+        assert p["totalCount"] == 10
+        assert p["hasMore"] is True
+        assert "rangeDescription" in p
+        assert p["rangeDescription"] == "第 1-2 条，共 10 条"
+
+    def test_from_legacy_with_pagination_has_more_computed(self):
+        """from_legacy() computes hasMore when not explicitly provided."""
+        # start=0, returned=2, total=5 → hasMore = True (0+2 < 5)
+        resp = SemanticQueryResponse.from_legacy(
+            data=[{"a": 1}, {"a": 2}],
+            total=5,
+            start=0,
+            limit=2,
+        )
+        j = resp.model_dump(by_alias=True, exclude_none=True)
+        assert j["pagination"]["hasMore"] is True
+
+        # start=3, returned=2, total=5 → hasMore = False (3+2 >= 5)
+        resp2 = SemanticQueryResponse.from_legacy(
+            data=[{"a": 4}, {"a": 5}],
+            total=5,
+            start=3,
+            limit=2,
+        )
+        j2 = resp2.model_dump(by_alias=True, exclude_none=True)
+        assert j2["pagination"]["hasMore"] is False
+
+    def test_from_legacy_without_limit_no_pagination(self):
+        """from_legacy() without limit does not produce pagination (backward compat)."""
+        resp = SemanticQueryResponse.from_legacy(
+            data=[{"x": 1}],
+            total=1,
+        )
+        j = resp.model_dump(by_alias=True, exclude_none=True)
+        assert "pagination" not in j
+
     def test_from_error_factory(self):
         """from_error() creates response with internal error."""
         resp = SemanticQueryResponse.from_error("Model not found: foo")

@@ -97,11 +97,11 @@ class BinaryExpression(Expression):
         elif op == BinaryOperator.GREATER_EQUAL:
             return self._compare(left_val, right_val) >= 0
 
-        # Logical
+        # Logical — JavaScript semantics: return actual operand, not bool
         elif op == BinaryOperator.AND:
-            return self._to_bool(left_val) and self._to_bool(right_val)
+            return left_val if not self._to_bool(left_val) else right_val
         elif op == BinaryOperator.OR:
-            return self._to_bool(left_val) or self._to_bool(right_val)
+            return left_val if self._to_bool(left_val) else right_val
 
         # String
         elif op == BinaryOperator.CONCAT:

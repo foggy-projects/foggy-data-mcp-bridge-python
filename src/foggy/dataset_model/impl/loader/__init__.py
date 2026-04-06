@@ -247,6 +247,10 @@ class JdbcTableModelLoader(TableModelLoader):
                     key_description=dim_def.get("keyDescription"),
                     properties=join_props,
                 )
+                # Attach raw captionDef for formula-based caption resolution
+                raw_cdef = dim_def.get("_captionDefRaw")
+                if raw_cdef:
+                    join_def.caption_def_raw = raw_cdef
                 model.dimension_joins.append(join_def)
 
     def _load_measures(self, model: DbTableModelImpl, definition: Dict[str, Any], context: ModelLoadContext) -> None:
@@ -690,6 +694,15 @@ def _adapt_fsscript_tm(model_def: Dict[str, Any]) -> Dict[str, Any]:
             d["alias"] = d.get("caption")
 
         # captionColumn is already used by JdbcTableModelLoader (no change needed)
+        # Handle captionDef (with formulaDef / dialectFormulaDef builder callables)
+        caption_def = d.get("captionDef")
+        if caption_def and isinstance(caption_def, dict):
+            # Extract column as captionColumn if not already set
+            col_val = caption_def.get("column")
+            if not d.get("captionColumn") and isinstance(col_val, str):
+                d["captionColumn"] = col_val
+            # Preserve full captionDef for formula resolution at SQL generation time
+            d["_captionDefRaw"] = caption_def
 
         # Adapt dimension properties (sub-fields on the dimension table)
         raw_props = d.get("properties", [])

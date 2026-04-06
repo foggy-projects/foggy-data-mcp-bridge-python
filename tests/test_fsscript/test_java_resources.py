@@ -11,10 +11,16 @@ from foggy.fsscript.evaluator import ExpressionEvaluator
 from foggy.fsscript.module_loader import FileModuleLoader, StringModuleLoader
 
 
-# Path to Java test resources
-JAVA_RESOURCES_PATH = Path(
-    "D:/foggy-projects/foggy-data-mcp-bridge/foggy-fsscript/src/test/resources/com/foggyframework/fsscript"
-)
+# Path to Java test resources — resolved relative to workspace root.
+# Repo layout:  <workspace>/foggy-data-mcp-bridge-python/tests/test_fsscript/THIS_FILE
+#               <workspace>/foggy-data-mcp-bridge/foggy-fsscript/src/test/resources/...
+_JAVA_RESOURCE_REL = Path("foggy-data-mcp-bridge/foggy-fsscript/src/test/resources/com/foggyframework/fsscript")
+_REPO_ROOT = Path(__file__).resolve().parents[2]            # -> foggy-data-mcp-bridge-python
+_WORKSPACE_ROOT = _REPO_ROOT.parent                         # -> <workspace>
+JAVA_RESOURCES_PATH = _WORKSPACE_ROOT / _JAVA_RESOURCE_REL
+if not JAVA_RESOURCES_PATH.exists():
+    # Fallback: legacy absolute path (standalone checkout)
+    JAVA_RESOURCES_PATH = Path("D:/foggy-projects") / _JAVA_RESOURCE_REL
 
 
 def get_fsscript_file(relative_path: str) -> Path:

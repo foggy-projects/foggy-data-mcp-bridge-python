@@ -188,6 +188,9 @@ class SemanticQueryResponse(BaseModel):
         error: Optional[str] = None,
         warnings: Optional[List[str]] = None,
         duration_ms: Optional[float] = None,
+        start: int = 0,
+        limit: Optional[int] = None,
+        has_more: Optional[bool] = None,
     ) -> "SemanticQueryResponse":
         """Create from legacy (Python-internal) field names — migration helper."""
         schema = None
@@ -205,9 +208,30 @@ class SemanticQueryResponse(BaseModel):
         extra = {"sql": sql} if sql else None
         debug = DebugInfo(duration_ms=duration_ms, extra=extra) if (duration_ms or sql) else None
 
+        # Build pagination when limit is provided (aligned with Java)
+        pagination = None
+        if limit is not None:
+            returned = len(data or [])
+            effective_total = total or returned
+            computed_has_more = has_more if has_more is not None else (start + returned < effective_total)
+            end = start + returned
+            range_desc = (
+                f"第 {start + 1}-{end} 条，共 {effective_total} 条"
+                if effective_total > 0 else ""
+            )
+            pagination = PaginationInfo(
+                start=start,
+                limit=limit,
+                returned=returned,
+                total_count=effective_total,
+                has_more=computed_has_more,
+                range_description=range_desc,
+            )
+
         resp = cls(
             items=data or [],
             schema_info=schema,
+            pagination=pagination,
             total=total or len(data or []),
             warnings=warnings if warnings else None,
             debug=debug,
