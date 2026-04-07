@@ -88,8 +88,20 @@ _MASK_FUNCS = {
 def apply_masking(
     items: List[Dict[str, Any]],
     field_access: Optional[FieldAccessDef],
+    display_to_qm: Optional[Dict[str, str]] = None,
 ) -> List[Dict[str, Any]]:
     """Apply masking rules to query result rows **in-place** and return them.
+
+    Parameters
+    ----------
+    items
+        Result rows.  Keys are **display names** (SQL aliases).
+    field_access
+        Column governance.  ``masking`` maps QM field names → mask types.
+    display_to_qm
+        Mapping from display-name key → QM field name.  Used to translate
+        row keys before looking up masking rules.  ``None`` means keys are
+        matched directly (unit-test / legacy compat).
 
     If ``field_access`` is ``None`` or ``masking`` is empty, rows are returned
     unchanged (v1.1 compat).
@@ -102,14 +114,22 @@ def apply_masking(
     if not items:
         return items
 
-    # Pre-resolve mask functions
-    resolved: Dict[str, Any] = {}
+    # Pre-resolve: QM field name → mask function
+    qm_resolved: Dict[str, Any] = {}
     for field_name, mask_type in field_access.masking.items():
-        resolved[field_name] = _MASK_FUNCS.get(mask_type, _mask_full)
+        qm_resolved[field_name] = _MASK_FUNCS.get(mask_type, _mask_full)
+
+    # Build reverse map: QM field name → display name(s) in row keys
+    qm_to_display: Dict[str, str] = {}
+    if display_to_qm:
+        for disp, qm in display_to_qm.items():
+            qm_to_display[qm] = disp
 
     for row in items:
-        for field_name, mask_fn in resolved.items():
-            if field_name in row:
-                row[field_name] = mask_fn(row[field_name])
+        for qm_name, mask_fn in qm_resolved.items():
+            # Try display-name lookup first, fall back to direct key match
+            key = qm_to_display.get(qm_name, qm_name)
+            if key in row:
+                row[key] = mask_fn(row[key])
 
     return items

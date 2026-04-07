@@ -286,12 +286,28 @@ class SemanticQueryService(SemanticServiceResolver):
             )
 
         # --- v1.2 column governance: post-execution ---
+        # Build display_name → qm_field_name mapping from columns_info.
+        # Items keys are SQL aliases (display names like "Email"), but
+        # field_access uses QM field names (like "email").
+        display_to_qm: Optional[Dict[str, str]] = None
+        if field_access is not None and (field_access.visible or field_access.masking):
+            display_to_qm = {}
+            for col in build_result.columns:
+                disp = col.get("name", "")
+                qm = col.get("fieldName", "")
+                if disp and qm:
+                    display_to_qm[disp] = qm
+
         if field_access is not None and field_access.visible:
             # Filter result columns to visible only
-            response.items = filter_response_columns(response.items, field_access)
+            response.items = filter_response_columns(
+                response.items, field_access, display_to_qm=display_to_qm,
+            )
         if field_access is not None and field_access.masking:
             # Apply masking to remaining visible columns
-            apply_masking(response.items, field_access)
+            apply_masking(
+                response.items, field_access, display_to_qm=display_to_qm,
+            )
 
         # Add debug info with timing and SQL
         duration_ms = (time.time() - start_time) * 1000

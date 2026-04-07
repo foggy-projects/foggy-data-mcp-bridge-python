@@ -482,3 +482,94 @@ class TestBuildQueryRequestGovernance:
         assert req.field_access.visible == ["name", "amount"]
         assert req.field_access.masking == {"email": "email_mask"}
         assert req.system_slice == [{"field": "company_id", "op": "eq", "value": 1}]
+
+
+# ============================================================================
+# BUG FIX: display_name → qm_field_name mapping
+# ============================================================================
+
+class TestFilterResponseColumnsWithDisplayNames:
+    """Regression tests for display-name mismatch bug.
+
+    Engine returns items with display-name keys (SQL aliases like "Email"),
+    but field_access.visible uses QM field names (like "email").
+    The display_to_qm mapping bridges the gap.
+    """
+
+    def test_display_name_filtering(self):
+        """Items keyed by display name should be filtered using qm mapping."""
+        fa = FieldAccessDef(visible=["name", "email"])
+        display_to_qm = {"Name": "name", "Email": "email", "Secret": "secret"}
+        rows = [{"Name": "Admin", "Email": "a@b.com", "Secret": "password"}]
+        result = filter_response_columns(rows, fa, display_to_qm=display_to_qm)
+        assert result == [{"Name": "Admin", "Email": "a@b.com"}]
+
+    def test_display_name_no_mapping_fallback(self):
+        """Without display_to_qm, keys are matched directly (legacy compat)."""
+        fa = FieldAccessDef(visible=["name", "email"])
+        rows = [{"name": "Admin", "email": "a@b.com", "secret": "x"}]
+        result = filter_response_columns(rows, fa, display_to_qm=None)
+        assert result == [{"name": "Admin", "email": "a@b.com"}]
+
+    def test_display_name_all_blocked(self):
+        """If all display-name keys map to blocked qm fields, result is empty dicts."""
+        fa = FieldAccessDef(visible=["name"])
+        display_to_qm = {"Secret": "secret", "Hidden": "hidden"}
+        rows = [{"Secret": "x", "Hidden": "y"}]
+        result = filter_response_columns(rows, fa, display_to_qm=display_to_qm)
+        assert result == [{}]
+
+    def test_display_name_partial_mapping(self):
+        """Keys not in display_to_qm fall back to direct match."""
+        fa = FieldAccessDef(visible=["name", "rawKey"])
+        display_to_qm = {"Name": "name"}  # rawKey not in mapping
+        rows = [{"Name": "Admin", "rawKey": "value", "Other": "x"}]
+        result = filter_response_columns(rows, fa, display_to_qm=display_to_qm)
+        assert result == [{"Name": "Admin", "rawKey": "value"}]
+
+
+class TestApplyMaskingWithDisplayNames:
+    """Regression tests for masking with display-name mismatch."""
+
+    def test_masking_via_display_name(self):
+        """Masking rules use QM names, but row keys are display names."""
+        fa = FieldAccessDef(masking={"email": "email_mask", "phone": "phone_mask"})
+        display_to_qm = {"Name": "name", "Email": "email", "Phone": "phone"}
+        rows = [{"Name": "Zhang", "Email": "zhang@test.com", "Phone": "13812345678"}]
+        apply_masking(rows, fa, display_to_qm=display_to_qm)
+        assert rows[0]["Name"] == "Zhang"  # unmasked
+        assert rows[0]["Email"] == "z***@test.com"
+        assert rows[0]["Phone"] == "138****5678"
+
+    def test_masking_no_mapping_fallback(self):
+        """Without display_to_qm, keys are matched directly (legacy compat)."""
+        fa = FieldAccessDef(masking={"email": "email_mask"})
+        rows = [{"email": "a@b.com"}]
+        apply_masking(rows, fa, display_to_qm=None)
+        assert rows[0]["email"] == "a***@b.com"
+
+    def test_masking_display_name_full_mask(self):
+        fa = FieldAccessDef(masking={"secret": "full_mask"})
+        display_to_qm = {"Secret Field": "secret"}
+        rows = [{"Secret Field": "password123", "Name": "test"}]
+        apply_masking(rows, fa, display_to_qm=display_to_qm)
+        assert rows[0]["Secret Field"] == "***"
+        assert rows[0]["Name"] == "test"
+
+    def test_combined_filter_then_mask(self):
+        """End-to-end: filter visible columns, then mask remaining."""
+        fa = FieldAccessDef(
+            visible=["name", "email"],
+            masking={"email": "email_mask"},
+        )
+        display_to_qm = {"Name": "name", "Email": "email", "Secret": "secret"}
+        rows = [{"Name": "Admin", "Email": "admin@example.com", "Secret": "pwd"}]
+
+        # Step 1: filter
+        filtered = filter_response_columns(rows, fa, display_to_qm=display_to_qm)
+        assert filtered == [{"Name": "Admin", "Email": "admin@example.com"}]
+
+        # Step 2: mask
+        apply_masking(filtered, fa, display_to_qm=display_to_qm)
+        assert filtered[0]["Name"] == "Admin"
+        assert filtered[0]["Email"] == "a***@example.com"

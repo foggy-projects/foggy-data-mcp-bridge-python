@@ -283,8 +283,22 @@ def validate_field_access(
 def filter_response_columns(
     items: List[Dict[str, Any]],
     field_access: Optional[FieldAccessDef],
+    display_to_qm: Optional[Dict[str, str]] = None,
 ) -> List[Dict[str, Any]]:
     """Remove blocked columns from query result rows.
+
+    Parameters
+    ----------
+    items
+        Result rows from the query engine.  Keys are **display names**
+        (SQL aliases like ``"Email"``), not QM field names.
+    field_access
+        Column governance definition.  ``visible`` contains QM field names.
+    display_to_qm
+        Mapping from display-name key → QM field name, built from
+        ``build_result.columns``.  When provided, each row key is first
+        translated to its QM name before checking the visible set.  When
+        ``None``, keys are matched directly (unit-test / legacy compat).
 
     If ``field_access`` is ``None`` or ``visible`` is empty, rows are
     returned unchanged (v1.1 compat).
@@ -295,13 +309,9 @@ def filter_response_columns(
         return items
 
     visible_set = set(field_access.visible)
+    _map = display_to_qm or {}
 
-    # Also keep alias-derived keys that don't match any raw field
-    # (e.g. "total" from "sum(amount) as total" should stay if "amount" is visible)
-    # The engine produces result keys based on aliases, so we keep all keys
-    # that are either in visible_set or are not raw field names
-    # Strategy: remove only keys that look like raw field names and are NOT visible
     return [
-        {k: v for k, v in row.items() if k in visible_set}
+        {k: v for k, v in row.items() if _map.get(k, k) in visible_set}
         for row in items
     ]
