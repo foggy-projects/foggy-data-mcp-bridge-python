@@ -204,12 +204,14 @@ def create_mcp_router(
                     # Markdown is ~40-60% fewer tokens and better for LLM comprehension
                     svc = _get_service()
                     fmt = tool_args.get("format", "markdown")
+                    # v1.2 column governance: optional visible_fields filter
+                    visible_fields = tool_args.get("visibleFields")
 
                     if fmt == MetadataFormat.JSON:
-                        v3_data = svc.get_metadata_v3()
+                        v3_data = svc.get_metadata_v3(visible_fields=visible_fields)
                         text = json.dumps(v3_data, ensure_ascii=False, indent=2)
                     else:
-                        text = svc.get_metadata_v3_markdown()
+                        text = svc.get_metadata_v3_markdown(visible_fields=visible_fields)
 
                     return McpJsonRpcResponse(
                         id=request.id,

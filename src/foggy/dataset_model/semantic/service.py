@@ -32,6 +32,12 @@ from foggy.mcp_spi import (
     DebugInfo,
     QueryMode,
 )
+from foggy.mcp_spi.semantic import FieldAccessDef
+from foggy.dataset_model.semantic.field_validator import (
+    validate_field_access,
+    filter_response_columns,
+)
+from foggy.dataset_model.semantic.masking import apply_masking
 
 
 logger = logging.getLogger(__name__)
@@ -219,6 +225,25 @@ class SemanticQueryService(SemanticServiceResolver):
         if not table_model:
             return SemanticQueryResponse.from_error(f"Model not found: {model}")
 
+        # --- v1.2 column governance: validate user fields ---
+        field_access = request.field_access
+        if field_access is not None and field_access.visible:
+            validation = validate_field_access(
+                columns=request.columns,
+                slice_items=request.slice,
+                order_by=request.order_by,
+                calculated_fields=request.calculated_fields,
+                field_access=field_access,
+            )
+            if not validation.valid:
+                return SemanticQueryResponse.from_error(validation.error_message)
+
+        # --- v1.2: merge system_slice into request slice ---
+        if request.system_slice:
+            # system_slice bypasses field governance — merge directly
+            merged_slice = list(request.slice) + list(request.system_slice)
+            request = request.model_copy(update={"slice": merged_slice})
+
         # Build query
         try:
             build_result = self._build_query(table_model, request)
@@ -259,6 +284,14 @@ class SemanticQueryService(SemanticServiceResolver):
                 error=f"Query execution failed: {str(e)}",
                 warnings=build_result.warnings,
             )
+
+        # --- v1.2 column governance: post-execution ---
+        if field_access is not None and field_access.visible:
+            # Filter result columns to visible only
+            response.items = filter_response_columns(response.items, field_access)
+        if field_access is not None and field_access.masking:
+            # Apply masking to remaining visible columns
+            apply_masking(response.items, field_access)
 
         # Add debug info with timing and SQL
         duration_ms = (time.time() - start_time) * 1000
@@ -1229,11 +1262,24 @@ class SemanticQueryService(SemanticServiceResolver):
 
         return metadata
 
-    def get_metadata_v3(self, model_names: Optional[List[str]] = None) -> Dict[str, Any]:
+    def get_metadata_v3(
+        self,
+        model_names: Optional[List[str]] = None,
+        visible_fields: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         """Build V3 metadata package — aligned with Java SemanticServiceV3Impl.
 
         Returns a combined metadata package with all models and their fields
         in the format expected by AI assistants (same as Java get_metadata).
+
+        Parameters
+        ----------
+        model_names
+            Subset of models to include. ``None`` → all.
+        visible_fields
+            v1.2 column governance: when set, only fields whose ``fieldName``
+            is in this list appear in the ``fields`` dict. ``None`` means no
+            filtering (v1.1 compat).
 
         Structure:
             {
@@ -1409,6 +1455,11 @@ class SemanticQueryService(SemanticServiceResolver):
                     "description": f"{measure.alias or measure_name} (聚合方式: {agg_name})",
                 }
 
+        # --- v1.2 column governance: filter fields by visible_fields ---
+        if visible_fields is not None:
+            visible_set = set(visible_fields)
+            fields = {k: v for k, v in fields.items() if k in visible_set}
+
         return {
             "prompt": (
                 "## 使用说明 (V3版本)\n"
@@ -1423,7 +1474,11 @@ class SemanticQueryService(SemanticServiceResolver):
             "models": models_info,
         }
 
-    def get_metadata_v3_markdown(self, model_names: Optional[List[str]] = None) -> str:
+    def get_metadata_v3_markdown(
+        self,
+        model_names: Optional[List[str]] = None,
+        visible_fields: Optional[List[str]] = None,
+    ) -> str:
         """Build V3 metadata as markdown — aligned with Java default format.
 
         Java's LocalDatasetAccessor hardcodes format="markdown" for get_metadata.
@@ -1441,10 +1496,14 @@ class SemanticQueryService(SemanticServiceResolver):
         if not target_models:
             return "# 暂无可用数据模型\n"
 
+        visible_set = set(visible_fields) if visible_fields is not None else None
+
         if len(target_models) == 1:
-            return self._build_single_model_markdown(target_models[0][0], target_models[0][1])
+            return self._build_single_model_markdown(
+                target_models[0][0], target_models[0][1], visible_set=visible_set,
+            )
         else:
-            return self._build_multi_model_markdown(target_models)
+            return self._build_multi_model_markdown(target_models, visible_set=visible_set)
 
     # ---------- Type description helpers (aligned with Java getDataTypeDescription) ----------
 
@@ -1476,10 +1535,25 @@ class SemanticQueryService(SemanticServiceResolver):
         }
         return mapping.get(type_name, "文本")
 
-    def _build_single_model_markdown(self, model_name: str, model: 'DbTableModelImpl') -> str:
-        """Build detailed markdown for a single model (aligned with Java buildSingleModelMarkdown)."""
+    def _build_single_model_markdown(
+        self,
+        model_name: str,
+        model: 'DbTableModelImpl',
+        visible_set: Optional[set] = None,
+    ) -> str:
+        """Build detailed markdown for a single model (aligned with Java buildSingleModelMarkdown).
+
+        Parameters
+        ----------
+        visible_set
+            v1.2 governance: only include fields whose name is in this set.
+            ``None`` means no filtering.
+        """
         lines: List[str] = []
         alias = model.alias or model_name
+
+        def _visible(field_name: str) -> bool:
+            return visible_set is None or field_name in visible_set
 
         # Collect dimension field names for exclusion from properties section
         dimension_field_names: set = set()
@@ -1497,9 +1571,7 @@ class SemanticQueryService(SemanticServiceResolver):
 
         # Dimension JOIN fields
         if model.dimension_joins:
-            lines.append("## 维度字段")
-            lines.append("| 字段名 | 名称 | 类型 | 层级 | 说明 |")
-            lines.append("|--------|------|------|------|------|")
+            dim_rows: List[str] = []
             for jd in model.dimension_joins:
                 dc = jd.caption or jd.name
                 dim_obj = model.dimensions.get(jd.name)
@@ -1509,22 +1581,30 @@ class SemanticQueryService(SemanticServiceResolver):
                 caption_field = f"{jd.name}$caption"
                 dimension_field_names.add(id_field)
                 dimension_field_names.add(caption_field)
-                lines.append(f"| {id_field} | {dc}(ID) | INTEGER | {hier_label} | {jd.key_description or jd.description or ''} |")
-                lines.append(f"| {caption_field} | {dc}(名称) | TEXT | - | {dc}显示名称 |")
+                if _visible(id_field):
+                    dim_rows.append(f"| {id_field} | {dc}(ID) | INTEGER | {hier_label} | {jd.key_description or jd.description or ''} |")
+                if _visible(caption_field):
+                    dim_rows.append(f"| {caption_field} | {dc}(名称) | TEXT | - | {dc}显示名称 |")
                 for prop in jd.properties:
                     pn = prop.get_name()
                     prop_field = f"{jd.name}${pn}"
                     dimension_field_names.add(prop_field)
-                    lines.append(f"| {prop_field} | {prop.caption or pn} | {prop.data_type} | - | {prop.description or ''} |")
-            lines.append("")
+                    if _visible(prop_field):
+                        dim_rows.append(f"| {prop_field} | {prop.caption or pn} | {prop.data_type} | - | {prop.description or ''} |")
+            if dim_rows:
+                lines.append("## 维度字段")
+                lines.append("| 字段名 | 名称 | 类型 | 层级 | 说明 |")
+                lines.append("|--------|------|------|------|------|")
+                lines.extend(dim_rows)
+                lines.append("")
 
         # Fact table own properties (aligned with Java: queryModel.getQueryProperties())
         # Use model.columns (DbColumnDef) — the TM-defined properties, NOT model.dimensions
         if model.columns:
-            # Filter out columns already shown in dimension fields
+            # Filter out columns already shown in dimension fields + governance
             filtered_columns = {
                 name: col for name, col in model.columns.items()
-                if name not in dimension_field_names
+                if name not in dimension_field_names and _visible(name)
             }
             if filtered_columns:
                 lines.append("## 属性字段")
@@ -1539,15 +1619,20 @@ class SemanticQueryService(SemanticServiceResolver):
 
         # Measure fields
         if model.measures:
-            lines.append("## 度量字段")
-            lines.append("| 字段名 | 名称 | 类型 | 聚合 | 说明 |")
-            lines.append("|--------|------|------|------|------|")
+            measure_rows: List[str] = []
             for m_name, measure in model.measures.items():
+                if not _visible(m_name):
+                    continue
                 m_alias = measure.alias or m_name
                 agg = measure.aggregation.value.upper() if measure.aggregation else "-"
                 m_desc = measure.description or ""
-                lines.append(f"| {m_name} | {m_alias} | NUMBER | {agg} | {m_desc} |")
-            lines.append("")
+                measure_rows.append(f"| {m_name} | {m_alias} | NUMBER | {agg} | {m_desc} |")
+            if measure_rows:
+                lines.append("## 度量字段")
+                lines.append("| 字段名 | 名称 | 类型 | 聚合 | 说明 |")
+                lines.append("|--------|------|------|------|------|")
+                lines.extend(measure_rows)
+                lines.append("")
 
         lines.append("## 使用提示")
         lines.append("- 维度用 `xxx$id`(查询/过滤), `xxx$caption`(展示), `xxx$property`(维度属性)")
@@ -1557,9 +1642,23 @@ class SemanticQueryService(SemanticServiceResolver):
 
         return "\n".join(lines)
 
-    def _build_multi_model_markdown(self, models: List[tuple]) -> str:
-        """Build compact index markdown for multiple models (aligned with Java buildMultiModelMarkdown)."""
+    def _build_multi_model_markdown(
+        self,
+        models: List[tuple],
+        visible_set: Optional[set] = None,
+    ) -> str:
+        """Build compact index markdown for multiple models (aligned with Java buildMultiModelMarkdown).
+
+        Parameters
+        ----------
+        visible_set
+            v1.2 governance: only include fields whose name is in this set.
+            ``None`` means no filtering.
+        """
         lines: List[str] = []
+
+        def _visible(field_name: str) -> bool:
+            return visible_set is None or field_name in visible_set
 
         lines.append("# 数据模型语义索引 V3")
         lines.append("")
@@ -1585,39 +1684,61 @@ class SemanticQueryService(SemanticServiceResolver):
 
             # Dimension JOINs
             if model.dimension_joins:
-                lines.append("**维度**")
+                dim_lines: List[str] = []
                 for jd in model.dimension_joins:
                     dc = jd.caption or jd.name
                     dim_obj = model.dimensions.get(jd.name)
                     is_hier = dim_obj is not None and dim_obj.supports_hierarchy_operators()
                     hier_hint = " 🔗层级" if is_hier else ""
-                    lines.append(f"- {dc}{hier_hint}")
-                    id_ops = " *(支持 selfAndDescendantsOf / selfAndAncestorsOf)*" if is_hier else ""
-                    lines.append(f"    - [field:{jd.name}$id] | ID, 用于查询/过滤{id_ops}")
-                    lines.append(f"    - [field:{jd.name}$caption] | 名称, 用于展示")
+                    sub_lines: List[str] = []
+                    id_field = f"{jd.name}$id"
+                    if _visible(id_field):
+                        id_ops = " *(支持 selfAndDescendantsOf / selfAndAncestorsOf)*" if is_hier else ""
+                        sub_lines.append(f"    - [field:{id_field}] | ID, 用于查询/过滤{id_ops}")
+                    cap_field = f"{jd.name}$caption"
+                    if _visible(cap_field):
+                        sub_lines.append(f"    - [field:{cap_field}] | 名称, 用于展示")
                     for prop in jd.properties:
                         pn = prop.get_name()
-                        lines.append(f"    - [field:{jd.name}${pn}] | {prop.caption or pn}")
+                        prop_field = f"{jd.name}${pn}"
+                        if _visible(prop_field):
+                            sub_lines.append(f"    - [field:{prop_field}] | {prop.caption or pn}")
+                    if sub_lines:
+                        dim_lines.append(f"- {dc}{hier_hint}")
+                        dim_lines.extend(sub_lines)
+                if dim_lines:
+                    lines.append("**维度**")
+                    lines.extend(dim_lines)
 
             # Fact table properties (use model.columns, NOT model.dimensions)
             if model.columns:
-                lines.append("")
-                lines.append("**属性**")
+                prop_lines: List[str] = []
                 for col_name, col in model.columns.items():
+                    if not _visible(col_name):
+                        continue
                     col_caption = col.alias or col_name
                     col_type = self._get_column_type_description(col.column_type)
-                    lines.append(f"- {col_caption}")
-                    lines.append(f"    - [field:{col_name}] | {col_type}")
+                    prop_lines.append(f"- {col_caption}")
+                    prop_lines.append(f"    - [field:{col_name}] | {col_type}")
+                if prop_lines:
+                    lines.append("")
+                    lines.append("**属性**")
+                    lines.extend(prop_lines)
 
             # Measures
             if model.measures:
-                lines.append("")
-                lines.append("**度量**")
+                measure_lines: List[str] = []
                 for m_name, measure in model.measures.items():
+                    if not _visible(m_name):
+                        continue
                     m_alias = measure.alias or m_name
                     agg = measure.aggregation.value.upper() if measure.aggregation else "SUM"
-                    lines.append(f"- {m_alias}")
-                    lines.append(f"    - [field:{m_name}] | {agg}")
+                    measure_lines.append(f"- {m_alias}")
+                    measure_lines.append(f"    - [field:{m_name}] | {agg}")
+                if measure_lines:
+                    lines.append("")
+                    lines.append("**度量**")
+                    lines.extend(measure_lines)
 
             lines.append("")
 

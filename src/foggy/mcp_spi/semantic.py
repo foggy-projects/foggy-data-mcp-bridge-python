@@ -293,6 +293,36 @@ class SemanticMetadataResponse(BaseModel):
 
 
 # ============================================================================
+# Column Governance DTOs — v1.2
+# ============================================================================
+
+class FieldAccessDef(BaseModel):
+    """Column governance parameters — computed by Bridge, passed to engine.
+
+    * ``visible``: whitelist of field names the user may see / query.
+    * ``masking``: field-name → mask-type mapping for sensitive columns.
+
+    When the Bridge does **not** send this object the engine behaves exactly
+    as v1.1 (no governance).
+    """
+    model_config = ConfigDict(populate_by_name=True)
+
+    visible: List[str] = Field(default_factory=list)
+    masking: Dict[str, str] = Field(default_factory=dict)
+
+
+class SystemSlice(BaseModel):
+    """System-injected slice — **not** subject to visible_fields governance.
+
+    Used by the permission bridge (ir.rule) to inject row-level filters that
+    may reference blocked columns.  The engine merges these into the WHERE
+    clause without column-visibility checks.
+    """
+
+    slices: List[Any] = Field(default_factory=list)
+
+
+# ============================================================================
 # SemanticMetadataRequest
 # ============================================================================
 
@@ -303,6 +333,12 @@ class SemanticMetadataRequest(BaseModel):
     include_columns: bool = True
     include_measures: bool = True
     include_dimensions: bool = True
+    visible_fields: Optional[List[str]] = Field(
+        None,
+        alias="visibleFields",
+        description="When set, only these fields appear in the response. "
+                    "None means return all fields (v1.1 compat).",
+    )
 
 
 # ============================================================================
@@ -346,6 +382,19 @@ class SemanticQueryRequest(BaseModel):
     return_total: bool = Field(False, alias="returnTotal")
     distinct: bool = False
     with_subtotals: bool = Field(False, alias="withSubtotals")
+
+    # --- v1.2 column governance ---
+    field_access: Optional[FieldAccessDef] = Field(
+        None,
+        alias="fieldAccess",
+        description="Column governance: visible whitelist + masking rules. "
+                    "None means no governance (v1.1 compat).",
+    )
+    system_slice: Optional[List[Any]] = Field(
+        None,
+        alias="systemSlice",
+        description="System-injected slice (ir.rule). Bypasses visible_fields checks.",
+    )
 
 
 # ============================================================================

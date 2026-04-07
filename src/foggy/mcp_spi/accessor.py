@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from foggy.mcp_spi.enums import AccessMode
 from foggy.mcp_spi.semantic import (
+    FieldAccessDef,
     SemanticMetadataRequest,
     SemanticMetadataResponse,
     SemanticQueryRequest,
@@ -84,6 +85,11 @@ def build_query_request(payload: Dict[str, Any]) -> SemanticQueryRequest:
     Payload keys must use Java camelCase names:
     columns, slice, groupBy, orderBy, start, limit, calculatedFields, etc.
     """
+    # --- v1.2 column governance ---
+    field_access_raw = payload.get("fieldAccess")
+    field_access = FieldAccessDef(**field_access_raw) if isinstance(field_access_raw, dict) else None
+    system_slice = payload.get("systemSlice")
+
     return SemanticQueryRequest(
         columns=payload.get("columns", []),
         slice=payload.get("slice", []),
@@ -100,6 +106,8 @@ def build_query_request(payload: Dict[str, Any]) -> SemanticQueryRequest:
         stream=payload.get("stream"),
         caption_match_mode=payload.get("captionMatchMode", "EXACT"),
         mismatch_handle_strategy=payload.get("mismatchHandleStrategy", "ABORT"),
+        field_access=field_access,
+        system_slice=system_slice,
     )
 
 
