@@ -1,12 +1,26 @@
+---
+type: bug
+bug_source: acceptance-found
+version: v1.2
+ticket: BUG-001
+severity: critical
+status: closed
+reproduction_status: confirmed
+test_strategy: unit-test
+automation_decision: required
+owner: foggy-data-mcp-bridge-python
+---
+
 # BUG — 列治理 filter_response_columns / apply_masking display name 不匹配
 
 ## 基本信息
 
 - 发现日期：2026-04-07
+- 修复日期：2026-04-07
 - 发现方：`foggy-odoo-bridge-pro` v1.2 E2E 验证
-- 严重级别：**高**（有治理配置的模型查询结果全部列被清空）
+- 严重级别：**critical**（有治理配置的模型查询结果全部列被清空）
 - 影响范围：`filter_response_columns()` + `apply_masking()`
-- 状态：**已修复** (2026-04-07)
+- 状态：**closed** (2026-04-07)
 
 ## 问题描述
 
@@ -224,3 +238,46 @@ def apply_masking(items, field_access, display_to_qm=None):
 1. `filter_response_columns` 在 items key 为 display name 时正确按 visible 过滤
 2. `apply_masking` 在 items key 为 display name 时正确执行掩码
 3. 集成测试：查询带 fieldAccess 参数时，返回结果包含 visible 列且 masked 列被掩码
+
+## Test Strategy
+
+- **层级**：`unit-test`（`field_validator.py` 和 `masking.py` 为纯函数，可完全隔离测试）
+- **自动化决策**：`required`
+  - 核心治理链路，post-query 阶段唯一的数据安全屏障
+  - 问题可稳定复现
+  - 修复逻辑集中在两个函数的映射参数，适合精确单测覆盖
+
+## Fix Checklist
+
+| # | 修复项 | 文件 | 状态 |
+|---|--------|------|------|
+| 1 | `filter_response_columns()` 增加 `display_to_qm` 参数，按映射将 display key 转为 QM field name 再比对 `visible_set` | `field_validator.py` L283-317 | ✅ 已完成 |
+| 2 | `apply_masking()` 增加 `display_to_qm` 参数，构建反查映射 `qm_to_display`，用 display key 执行掩码 | `masking.py` L88-135 | ✅ 已完成 |
+| 3 | `service.py` `query_model()` 从 `build_result.columns` 构建 `display_to_qm` 映射并传给 filter/masking | `service.py` L288-310 | ✅ 已完成 |
+| 4 | 补充 display name 场景回归测试（filter × 4 + masking × 4） | `tests/test_column_governance.py` L491-576 | ✅ 已完成 |
+
+## Verification
+
+| 验证项 | 结果 |
+|--------|------|
+| `test_display_name_filtering` — display key 按 visible 过滤 | ✅ passed |
+| `test_display_name_no_mapping_fallback` — 无映射时向后兼容 | ✅ passed |
+| `test_display_name_all_blocked` — 全部列被 block | ✅ passed |
+| `test_display_name_partial_mapping` — 部分映射 | ✅ passed |
+| `test_masking_via_display_name` — 掩码经 display name 执行 | ✅ passed |
+| `test_masking_no_mapping_fallback` — 无映射时向后兼容 | ✅ passed |
+| `test_masking_display_name_full_mask` — full mask + display name | ✅ passed |
+| `test_combined_filter_then_mask` — 端到端 filter + mask | ✅ passed |
+| 全量回归 | ✅ 1658 passed，无回归 |
+
+## Regression Prevention
+
+- `display_to_qm` 映射从 `columns_info`（引擎已有数据）自动构建，不依赖额外配置
+- 不传映射时（`display_to_qm=None`）函数降级为原始行为（key 原样比对），保证向后兼容
+- 8 个专项回归用例覆盖 filter + masking 在 display name 场景下的所有分支
+
+## References
+
+- 上游需求：`docs/v1.2/P0-column-governance-engine-support-需求.md`
+- 进度跟踪：`docs/v1.2/P0-column-governance-engine-support-progress.md`
+- 总控规划：`docs/v1.2/P0-column-governance-execution-plan.md`（workspace root）
