@@ -177,6 +177,23 @@ class TestIdentifierQuoting:
         # The exact alias with correct casing should appear in both SELECT and ORDER BY
         assert '"totalSalesAmount"' in sql
 
+    def test_inline_agg_order_by_uses_quoted_alias(self, sales_model):
+        """Inline aggregate alias in ORDER BY must use dialect quoting, not raw identifier."""
+        svc = _make_service(sales_model, dialect=PostgresDialect())
+        request = SemanticQueryRequest(
+            columns=["orderStatus", "sum(salesAmount) as totalSalesAmount"],
+            order_by=[{"field": "totalSalesAmount", "dir": "desc"}],
+        )
+        sql = _build_sql(svc, "FactSalesModel", request)
+        order_idx = sql.upper().index("ORDER BY")
+        order_clause = sql[order_idx:]
+        assert '"totalSalesAmount"' in order_clause, (
+            f"ORDER BY should use quoted inline aggregate alias, got: {order_clause}"
+        )
+        assert "ORDER BY totalSalesAmount DESC" not in order_clause, (
+            f"ORDER BY should not use raw inline aggregate alias, got: {order_clause}"
+        )
+
 
 # ==================== Bug 2: Error propagation ====================
 

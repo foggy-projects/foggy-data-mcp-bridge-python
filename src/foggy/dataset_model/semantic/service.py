@@ -486,10 +486,15 @@ class SemanticQueryService(SemanticServiceResolver):
                 builder.having(f"{col} {op} ?", params=[val])
 
         # 6. ORDER BY
+        selected_order_aliases = self._build_selected_order_aliases(columns_info)
         for order_item in request.order_by:
             column = order_item.get("column") or order_item.get("field")
             direction = (order_item.get("direction") or order_item.get("dir", "asc")).upper()
             if column:
+                selected_alias = selected_order_aliases.get(column)
+                if selected_alias:
+                    builder.order_by(selected_alias, direction)
+                    continue
                 resolved = model.resolve_field(column)
                 if resolved:
                     if resolved["join_def"]:
@@ -594,6 +599,27 @@ class SemanticQueryService(SemanticServiceResolver):
             "aggregation": agg,
             "select_expr": select_expr,
         }
+
+    def _build_selected_order_aliases(
+        self,
+        columns_info: List[Dict[str, Any]],
+    ) -> Dict[str, str]:
+        """Map selected column keys to their quoted SQL aliases for ORDER BY."""
+        alias_map: Dict[str, str] = {}
+
+        for info in columns_info:
+            alias = info.get("name")
+            if not alias:
+                continue
+
+            quoted_alias = self._qi(alias)
+            alias_map[alias] = quoted_alias
+
+            field_name = info.get("fieldName")
+            if field_name:
+                alias_map[field_name] = quoted_alias
+
+        return alias_map
 
     # ==================== Calculated Fields & Window Functions ====================
 
