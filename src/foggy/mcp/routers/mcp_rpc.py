@@ -115,6 +115,13 @@ def _load_tools():
 SHARED_TOOLS = _load_tools()
 
 
+def _build_text_content(text: str) -> list[dict[str, str]]:
+    return [{
+        "type": "text",
+        "text": text,
+    }]
+
+
 def create_mcp_router(
     semantic_service: SemanticQueryService = None,
     accessor: LocalDatasetAccessor = None,
@@ -272,9 +279,15 @@ def create_mcp_router(
                             error={"code": -32602, "message": "model parameter required"}
                         )
 
+                    if "payload" not in tool_args or tool_args.get("payload") is None:
+                        return McpJsonRpcResponse(
+                            id=request.id,
+                            error={"code": -32602, "message": "payload parameter required"}
+                        )
+
                     # V3 format: {model, payload: {columns, slice, groupBy, ...}, mode}
                     # Payload is passed through as-is (Java camelCase field names)
-                    payload = tool_args.get("payload", {})
+                    payload = tool_args["payload"]
                     mode = tool_args.get("mode", "execute")
 
                     _acc = _get_accessor()
@@ -287,7 +300,10 @@ def create_mcp_router(
                     if response.error:
                         return McpJsonRpcResponse(
                             id=request.id,
-                            error={"code": -32001, "message": response.error}
+                            result={
+                                "status": "failed",
+                                "content": _build_text_content(response.error),
+                            }
                         )
 
                     # Serialize using Pydantic aliases → Java-compatible JSON
@@ -298,10 +314,10 @@ def create_mcp_router(
                     return McpJsonRpcResponse(
                         id=request.id,
                         result={
-                            "content": [{
-                                "type": "text",
-                                "text": json.dumps(result_data, ensure_ascii=False, indent=2)
-                            }]
+                            "status": "success",
+                            "content": _build_text_content(
+                                json.dumps(result_data, ensure_ascii=False, indent=2)
+                            ),
                         }
                     )
 
