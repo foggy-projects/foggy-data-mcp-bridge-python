@@ -66,3 +66,5 @@ Thumbs.db
 # Project specific
 *.pyc
 .cache/charts/
+.agents/
+.codex/
