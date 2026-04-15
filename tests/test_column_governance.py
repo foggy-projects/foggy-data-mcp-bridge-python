@@ -1,8 +1,9 @@
-"""Tests for v1.2 column governance — field_validator + masking.
+"""Tests for v1.3 column governance — field_validator + masking.
 
 Covers:
 - Expression parsing & field extraction
-- Alias back-tracking for orderBy
+- Dependency-aware field extraction from inline expressions
+- Alias back-tracking for orderBy (including expression aliases)
 - Visible-field validation (columns, slice, orderBy, calculatedFields)
 - Result column filtering
 - Masking execution (full_mask, partial_mask, email_mask, phone_mask)
@@ -13,11 +14,12 @@ import pytest
 
 from foggy.mcp_spi.semantic import FieldAccessDef, SystemSlice, SemanticQueryRequest
 from foggy.dataset_model.semantic.field_validator import (
-    extract_field_from_expr,
+    extract_field_dependencies,
+    _extract_field_dependencies,
+    _parse_column_expr,
     validate_field_access,
     filter_response_columns,
     FieldValidationResult,
-    _build_alias_map,
     _extract_fields_from_slice,
 )
 from foggy.dataset_model.semantic.masking import (
@@ -27,6 +29,8 @@ from foggy.dataset_model.semantic.masking import (
     _mask_email,
     _mask_phone,
 )
+from foggy.dataset_model.semantic.service import SemanticQueryService
+from foggy.demo.models.ecommerce_models import create_fact_sales_model
 
 
 # ============================================================================
@@ -94,62 +98,74 @@ class TestSemanticQueryRequestGovernance:
 # Expression parsing tests
 # ============================================================================
 
-class TestExtractFieldFromExpr:
-    """Test expression parsing and field extraction."""
+class TestParseColumnExpr:
+    """Test expression parsing, field extraction, and dependency resolution."""
 
     def test_bare_field(self):
-        assert extract_field_from_expr("name") == "name"
+        p = _parse_column_expr("name")
+        assert p.source_field == "name"
+        assert p.source_fields == {"name"}
+        assert p.alias is None
 
     def test_dimension_caption(self):
-        assert extract_field_from_expr("partner$caption") == "partner$caption"
+        p = _parse_column_expr("partner$caption")
+        assert p.source_field == "partner$caption"
+        assert p.source_fields == {"partner$caption"}
 
     def test_dimension_id(self):
-        assert extract_field_from_expr("partner$id") == "partner$id"
+        p = _parse_column_expr("partner$id")
+        assert p.source_field == "partner$id"
 
     def test_dimension_property(self):
-        assert extract_field_from_expr("company$industry") == "company$industry"
+        p = _parse_column_expr("company$industry")
+        assert p.source_field == "company$industry"
 
     def test_sum_with_alias(self):
-        assert extract_field_from_expr("sum(amountTotal) as total") == "amountTotal"
+        p = _parse_column_expr("sum(amountTotal) as total")
+        assert p.source_field == "amountTotal"
+        assert p.source_fields == {"amountTotal"}
+        assert p.alias == "total"
 
     def test_count_with_alias(self):
-        assert extract_field_from_expr("count(name) as cnt") == "name"
+        p = _parse_column_expr("count(name) as cnt")
+        assert p.source_field == "name"
+        assert p.alias == "cnt"
 
     def test_avg_with_alias(self):
-        assert extract_field_from_expr("avg(price) as avgPrice") == "price"
+        p = _parse_column_expr("avg(price) as avgPrice")
+        assert p.source_field == "price"
 
     def test_min_no_alias(self):
-        assert extract_field_from_expr("min(amount)") == "amount"
+        p = _parse_column_expr("min(amount)")
+        assert p.source_field == "amount"
+        assert p.source_fields == {"amount"}
 
     def test_max_no_alias(self):
-        assert extract_field_from_expr("max(quantity)") == "quantity"
+        p = _parse_column_expr("max(quantity)")
+        assert p.source_field == "quantity"
 
     def test_field_as_alias_no_agg(self):
-        assert extract_field_from_expr("amountTotal as amt") == "amountTotal"
+        p = _parse_column_expr("amountTotal as amt")
+        assert p.source_field == "amountTotal"
+        assert p.alias == "amt"
 
     def test_count_distinct(self):
-        assert extract_field_from_expr("count_distinct(customerId) as uniqueCustomers") == "customerId"
+        p = _parse_column_expr("count_distinct(customerId) as uniqueCustomers")
+        assert p.source_field == "customerId"
 
     def test_whitespace_tolerance(self):
-        assert extract_field_from_expr("  sum( amountTotal ) as total  ") == "amountTotal"
+        p = _parse_column_expr("  sum( amountTotal ) as total  ")
+        assert p.source_field == "amountTotal"
 
+    def test_arithmetic_expression_with_alias(self):
+        p = _parse_column_expr("a + b as c")
+        assert p.alias == "c"
+        assert p.source_fields == {"a", "b"}
 
-# ============================================================================
-# Alias map tests
-# ============================================================================
-
-class TestBuildAliasMap:
-    def test_basic(self):
-        m = _build_alias_map(["name", "sum(amount) as total", "count(name) as cnt"])
-        assert m == {"total": "amount", "cnt": "name"}
-
-    def test_no_aliases(self):
-        m = _build_alias_map(["name", "partner$caption"])
-        assert m == {}
-
-    def test_field_as_alias(self):
-        m = _build_alias_map(["amountTotal as amt"])
-        assert m == {"amt": "amountTotal"}
+    def test_agg_over_expression_with_alias(self):
+        p = _parse_column_expr("sum(a + b) as total")
+        assert p.alias == "total"
+        assert p.source_fields == {"a", "b"}
 
 
 # ============================================================================
@@ -573,3 +589,209 @@ class TestApplyMaskingWithDisplayNames:
         apply_masking(filtered, fa, display_to_qm=display_to_qm)
         assert filtered[0]["Name"] == "Admin"
         assert filtered[0]["Email"] == "a***@example.com"
+
+
+# ============================================================================
+# Service-level governance verification for calculated / expression fields
+# ============================================================================
+
+
+@pytest.fixture
+def sales_service():
+    svc = SemanticQueryService()
+    svc.register_model(create_fact_sales_model())
+    return svc
+
+
+class TestServiceLevelCalculatedFieldGovernance:
+    """Verify actual query_model behavior, not just validator helpers."""
+
+    def test_calculated_fields_rejects_blocked_source_field(self, sales_service):
+        req = SemanticQueryRequest(
+            columns=["orderStatus"],
+            calculated_fields=[{
+                "name": "netAmount",
+                "expression": "salesAmount + discountAmount",
+            }],
+            field_access=FieldAccessDef(visible=["orderStatus", "salesAmount"]),
+        )
+
+        result = sales_service.query_model("FactSalesModel", req, mode="validate")
+
+        assert result.error is not None
+        assert "discountAmount" in result.error
+
+    # --- v1.3 dependency-aware inline expression tests ---
+
+    def test_inline_arithmetic_expression_rejects_blocked_dependency(self, sales_service):
+        """`a + b as c`: when b is blocked, error names b specifically."""
+        req = SemanticQueryRequest(
+            columns=["salesAmount + discountAmount as totalAmount"],
+            field_access=FieldAccessDef(visible=["salesAmount"]),  # discountAmount blocked
+        )
+
+        result = sales_service.query_model("FactSalesModel", req, mode="validate")
+
+        assert result.error is not None
+        assert "discountAmount" in result.error
+        # Should report the specific blocked field, not the whole expression
+        assert "salesAmount + discountAmount" not in result.error
+
+    def test_inline_aggregate_expression_rejects_blocked_dependency(self, sales_service):
+        """`sum(a + b) as total`: when b is blocked, error names b."""
+        req = SemanticQueryRequest(
+            columns=["sum(salesAmount + discountAmount) as totalAmount"],
+            field_access=FieldAccessDef(visible=["salesAmount"]),  # discountAmount blocked
+        )
+
+        result = sales_service.query_model("FactSalesModel", req, mode="validate")
+
+        assert result.error is not None
+        assert "discountAmount" in result.error
+
+    def test_inline_arithmetic_all_visible_passes(self, sales_service):
+        """`a + b as c`: when both a and b are visible, query passes."""
+        req = SemanticQueryRequest(
+            columns=["salesAmount + discountAmount as totalAmount"],
+            field_access=FieldAccessDef(visible=["salesAmount", "discountAmount"]),
+        )
+
+        result = sales_service.query_model("FactSalesModel", req, mode="validate")
+
+        assert result.error is None
+
+    def test_inline_aggregate_all_visible_passes(self, sales_service):
+        """`sum(a + b) as total`: when both a and b are visible, query passes."""
+        req = SemanticQueryRequest(
+            columns=["sum(salesAmount + discountAmount) as totalAmount"],
+            field_access=FieldAccessDef(visible=["salesAmount", "discountAmount"]),
+        )
+
+        result = sales_service.query_model("FactSalesModel", req, mode="validate")
+
+        assert result.error is None
+
+    # --- orderBy alias back-tracking to expression dependencies ---
+
+    def test_orderby_alias_backtrack_to_expression_blocked(self, sales_service):
+        """orderBy alias → expression deps: blocked dep is reported."""
+        req = SemanticQueryRequest(
+            columns=["salesAmount + discountAmount as total"],
+            order_by=[{"field": "total", "dir": "desc"}],
+            field_access=FieldAccessDef(visible=["salesAmount"]),  # discountAmount blocked
+        )
+
+        result = sales_service.query_model("FactSalesModel", req, mode="validate")
+
+        assert result.error is not None
+        assert "discountAmount" in result.error
+
+    def test_orderby_alias_backtrack_to_expression_passes(self, sales_service):
+        """orderBy alias → expression deps: all visible passes."""
+        req = SemanticQueryRequest(
+            columns=["salesAmount + discountAmount as total"],
+            order_by=[{"field": "total", "dir": "desc"}],
+            field_access=FieldAccessDef(visible=["salesAmount", "discountAmount"]),
+        )
+
+        result = sales_service.query_model("FactSalesModel", req, mode="validate")
+
+        assert result.error is None
+
+    # --- accessor payload full-chain integration test ---
+
+    def test_accessor_payload_expression_rejection(self, sales_service):
+        """Full chain: JSON payload → build_query_request → query_model → rejection."""
+        from foggy.mcp_spi.accessor import build_query_request
+        payload = {
+            "columns": ["orderStatus", "salesAmount + discountAmount as total"],
+            "slice": [],
+            "orderBy": [{"field": "total", "dir": "desc"}],
+            "fieldAccess": {"visible": ["orderStatus", "salesAmount"]},
+        }
+        req = build_query_request(payload)
+        result = sales_service.query_model("FactSalesModel", req, mode="validate")
+
+        assert result.error is not None
+        assert "discountAmount" in result.error
+
+    # --- fail-closed for unparseable expressions ---
+
+    def test_unparseable_expression_fails_closed(self):
+        """Expression with no extractable fields should fail closed."""
+        fa = FieldAccessDef(visible=["name"])
+        result = validate_field_access(
+            columns=["name", "1 + 2 as computed"],
+            slice_items=[],
+            order_by=[],
+            field_access=fa,
+        )
+        # "1 + 2" has no field dependencies — the whole expression
+        # is not in visible set, so it should be rejected (fail-closed)
+        assert not result.valid
+
+
+# ============================================================================
+# Dependency extraction unit tests
+# ============================================================================
+
+class TestExtractFieldDependencies:
+    """Test _extract_field_dependencies() shared primitive."""
+
+    def test_bare_field(self):
+        assert _extract_field_dependencies("name") == {"name"}
+
+    def test_dimension_accessor(self):
+        assert _extract_field_dependencies("partner$caption") == {"partner$caption"}
+
+    def test_arithmetic(self):
+        assert _extract_field_dependencies("a + b") == {"a", "b"}
+
+    def test_multiply(self):
+        assert _extract_field_dependencies("unitPrice * quantity") == {"unitPrice", "quantity"}
+
+    def test_case_when(self):
+        deps = _extract_field_dependencies("case when status = 1 then amount else 0 end")
+        assert "status" in deps
+        assert "amount" in deps
+        assert "case" not in deps
+        assert "when" not in deps
+
+    def test_agg_wrapper(self):
+        assert _extract_field_dependencies("sum(a + b)") == {"a", "b"}
+
+    def test_string_literal_stripped(self):
+        deps = _extract_field_dependencies("case when name = 'active' then 1 end")
+        assert "name" in deps
+        assert "active" not in deps
+
+    def test_no_fields(self):
+        assert _extract_field_dependencies("1 + 2") == set()
+
+    def test_empty(self):
+        assert _extract_field_dependencies("") == set()
+
+    def test_nested_function(self):
+        deps = _extract_field_dependencies("round(a / b, 2)")
+        assert "a" in deps
+        assert "b" in deps
+        assert "round" not in deps
+
+
+class TestExtractFieldDependenciesPublic:
+    """Test the public extract_field_dependencies() API."""
+
+    def test_bare_field(self):
+        assert extract_field_dependencies("name") == {"name"}
+
+    def test_arithmetic_with_alias(self):
+        deps = extract_field_dependencies("a + b as c")
+        assert deps == {"a", "b"}
+
+    def test_agg_over_expression_with_alias(self):
+        deps = extract_field_dependencies("sum(a + b) as total")
+        assert deps == {"a", "b"}
+
+    def test_simple_agg(self):
+        deps = extract_field_dependencies("sum(amount) as total")
+        assert deps == {"amount"}
