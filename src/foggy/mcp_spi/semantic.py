@@ -311,6 +311,22 @@ class FieldAccessDef(BaseModel):
     masking: Dict[str, str] = Field(default_factory=dict)
 
 
+class DeniedColumn(BaseModel):
+    """Physical column denied entry for blacklist-based column governance.
+
+    Aligned with Java ``DeniedPhysicalColumn``.
+
+    * ``schema_name``: database schema (e.g. ``"public"``); ``None`` matches any.
+    * ``table``: physical table name (required).
+    * ``column``: physical column name (required).
+    """
+    model_config = ConfigDict(populate_by_name=True)
+
+    schema_name: Optional[str] = Field(None, alias="schema")
+    table: str
+    column: str
+
+
 class SystemSlice(BaseModel):
     """System-injected slice — **not** subject to visible_fields governance.
 
@@ -328,6 +344,7 @@ class SystemSlice(BaseModel):
 
 class SemanticMetadataRequest(BaseModel):
     """Request for metadata."""
+    model_config = ConfigDict(populate_by_name=True)
 
     model: Optional[str] = None
     include_columns: bool = True
@@ -338,6 +355,12 @@ class SemanticMetadataRequest(BaseModel):
         alias="visibleFields",
         description="When set, only these fields appear in the response. "
                     "None means return all fields (v1.1 compat).",
+    )
+    denied_columns: Optional[List[DeniedColumn]] = Field(
+        None,
+        alias="deniedColumns",
+        description="Physical column blacklist for metadata field trimming. "
+                    "Converted to denied QM fields via mapping cache.",
     )
 
 
@@ -394,6 +417,13 @@ class SemanticQueryRequest(BaseModel):
         None,
         alias="systemSlice",
         description="System-injected slice (ir.rule). Bypasses visible_fields checks.",
+    )
+    # --- v1.3 physical column blacklist ---
+    denied_columns: Optional[List[DeniedColumn]] = Field(
+        None,
+        alias="deniedColumns",
+        description="Physical column blacklist. Converted to denied QM fields "
+                    "via mapping cache before field validation.",
     )
 
 

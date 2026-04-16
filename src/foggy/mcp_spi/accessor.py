@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from foggy.mcp_spi.enums import AccessMode
 from foggy.mcp_spi.semantic import (
+    DeniedColumn,
     FieldAccessDef,
     SemanticMetadataRequest,
     SemanticMetadataResponse,
@@ -90,6 +91,15 @@ def build_query_request(payload: Dict[str, Any]) -> SemanticQueryRequest:
     field_access = FieldAccessDef(**field_access_raw) if isinstance(field_access_raw, dict) else None
     system_slice = payload.get("systemSlice")
 
+    # --- v1.3 physical column blacklist ---
+    denied_columns_raw = payload.get("deniedColumns")
+    denied_columns = None
+    if isinstance(denied_columns_raw, list):
+        denied_columns = [
+            DeniedColumn(**dc) if isinstance(dc, dict) else dc
+            for dc in denied_columns_raw
+        ]
+
     return SemanticQueryRequest(
         columns=payload.get("columns", []),
         slice=payload.get("slice", []),
@@ -108,6 +118,7 @@ def build_query_request(payload: Dict[str, Any]) -> SemanticQueryRequest:
         mismatch_handle_strategy=payload.get("mismatchHandleStrategy", "ABORT"),
         field_access=field_access,
         system_slice=system_slice,
+        denied_columns=denied_columns,
     )
 
 

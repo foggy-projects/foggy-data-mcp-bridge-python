@@ -1,9 +1,11 @@
 """Column governance — field validator (v1.3).
 
 Extracts raw field references from DSL expressions and validates them
-against the ``visible`` whitelist provided by :class:`FieldAccessDef`.
+against the ``visible`` whitelist (:class:`FieldAccessDef`) **and/or**
+the ``denied_qm_fields`` blacklist (resolved from physical
+``denied_columns`` via :class:`PhysicalColumnMapping`).
 
-Design rules (from the execution plan):
+Design rules:
 
 * ``sum(amountTotal) as total`` → extracts ``amountTotal``; alias ``total``
   is **not** validated.
@@ -15,6 +17,11 @@ Design rules (from the execution plan):
 * ``system_slice`` fields are **never** validated.
 * Inline expressions like ``a + b as c`` are parsed into dependency
   fields ``{a, b}`` — each dependency is validated individually.
+* When both whitelist and blacklist are active, any mechanism rejecting
+  a field causes the query to fail (conservative merge).
+* Blacklist checks use both the full QM field name **and** the stripped
+  dimension base name (e.g. ``customer`` from ``customer$type``), aligned
+  with Java ``FieldAccessPermissionStep``.
 """
 
 from __future__ import annotations
@@ -218,6 +225,32 @@ class FieldValidationResult:
     error_message: Optional[str] = None
 
 
+def _strip_dimension_suffix(field_name: str) -> str:
+    """Strip ``$suffix`` from a dimension field name.
+
+    ``"customer$type"`` → ``"customer"``
+    ``"salesAmount"``   → ``"salesAmount"``
+
+    Aligned with Java ``FieldAccessPermissionStep.stripDimensionSuffix()``.
+    """
+    idx = field_name.find("$")
+    return field_name[:idx] if idx > 0 else field_name
+
+
+def _is_field_denied(field_name: str, denied_qm_fields: Set[str]) -> bool:
+    """Check if a field is denied by the blacklist.
+
+    Checks **both** the full field name and the stripped base dimension
+    name, aligned with Java ``FieldAccessPermissionStep.checkField()``.
+    """
+    if field_name in denied_qm_fields:
+        return True
+    base = _strip_dimension_suffix(field_name)
+    if base != field_name and base in denied_qm_fields:
+        return True
+    return False
+
+
 def validate_field_access(
     *,
     columns: List[str],
@@ -225,8 +258,9 @@ def validate_field_access(
     order_by: List[Any],
     calculated_fields: Optional[List[Dict[str, Any]]] = None,
     field_access: Optional[FieldAccessDef] = None,
+    denied_qm_fields: Optional[Set[str]] = None,
 ) -> FieldValidationResult:
-    """Validate that all user-referenced fields are in the visible whitelist.
+    """Validate user-referenced fields against whitelist **and** blacklist.
 
     Parameters
     ----------
@@ -239,20 +273,41 @@ def validate_field_access(
     calculated_fields
         Optional calculated field definitions.
     field_access
-        Column governance definition. ``None`` means no governance (v1.1 compat).
+        Column governance whitelist. ``None`` means no whitelist (v1.1 compat).
+    denied_qm_fields
+        QM field names denied by physical column blacklist (already resolved
+        via :class:`PhysicalColumnMapping`).  ``None`` / empty means no
+        blacklist.
 
     Returns
     -------
     FieldValidationResult
         ``.valid`` is ``True`` when all fields pass; otherwise ``.blocked_fields``
         lists the offending field names.
+
+    Combination semantics (conservative merge):
+    - Whitelist active + field not in whitelist → blocked.
+    - Blacklist active + field in blacklist → blocked.
+    - Both active → **either** mechanism blocking causes rejection.
     """
-    if field_access is None or not field_access.visible:
+    has_whitelist = field_access is not None and bool(field_access.visible)
+    has_blacklist = bool(denied_qm_fields)
+
+    if not has_whitelist and not has_blacklist:
         # No governance — everything passes
         return FieldValidationResult()
 
-    visible_set = set(field_access.visible)
+    visible_set = set(field_access.visible) if has_whitelist else None
+    denied_set = denied_qm_fields or set()
     blocked: List[str] = []
+
+    def _check_field(f: str) -> None:
+        """Check a single field against both whitelist and blacklist."""
+        if visible_set is not None and f not in visible_set:
+            blocked.append(f)
+            return
+        if has_blacklist and _is_field_denied(f, denied_set):
+            blocked.append(f)
 
     # 1. Validate columns (with dependency-aware field extraction)
     alias_deps: Dict[str, Set[str]] = {}   # alias → dependency fields
@@ -265,18 +320,15 @@ def validate_field_access(
             alias_deps[parsed.alias] = deps or {parsed.source_field}
         if deps:
             for dep in deps:
-                if dep not in visible_set:
-                    blocked.append(dep)
+                _check_field(dep)
         else:
             # Opaque expression with no extractable fields: fail-closed
-            if parsed.source_field not in visible_set:
-                blocked.append(parsed.source_field)
+            _check_field(parsed.source_field)
 
     # 2. Validate user slice
     slice_fields = _extract_fields_from_slice(slice_items)
     for f in slice_fields:
-        if f not in visible_set:
-            blocked.append(f)
+        _check_field(f)
 
     # 3. Validate orderBy (with alias back-tracking to dependency fields)
     for ob in order_by:
@@ -291,17 +343,15 @@ def validate_field_access(
         # Back-track alias to dependency fields
         if field_ref in alias_deps:
             for dep in alias_deps[field_ref]:
-                if dep not in visible_set:
-                    blocked.append(dep)
-        elif field_ref not in visible_set:
-            blocked.append(field_ref)
+                _check_field(dep)
+        else:
+            _check_field(field_ref)
 
     # 4. Validate calculatedFields
     if calculated_fields:
         calc_fields = _extract_fields_from_calculated(calculated_fields)
         for f in calc_fields:
-            if f not in visible_set:
-                blocked.append(f)
+            _check_field(f)
 
     # Deduplicate while preserving order
     seen: Set[str] = set()

@@ -32,12 +32,16 @@ from foggy.mcp_spi import (
     DebugInfo,
     QueryMode,
 )
-from foggy.mcp_spi.semantic import FieldAccessDef
+from foggy.mcp_spi.semantic import DeniedColumn, FieldAccessDef
 from foggy.dataset_model.semantic.field_validator import (
     validate_field_access,
     filter_response_columns,
 )
 from foggy.dataset_model.semantic.masking import apply_masking
+from foggy.dataset_model.semantic.physical_column_mapping import (
+    PhysicalColumnMapping,
+    build_physical_column_mapping,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -102,6 +106,8 @@ class SemanticQueryService(SemanticServiceResolver):
         self._dialect = dialect
         self._formula_registry: SqlFormulaRegistry = get_default_registry()
         self._hierarchy_registry = get_default_hierarchy_registry()
+        # v1.3: physical column mapping cache (model_name → PhysicalColumnMapping)
+        self._mapping_cache: Dict[str, PhysicalColumnMapping] = {}
 
     def _qi(self, identifier: str) -> str:
         """Quote an SQL identifier using the configured dialect.
@@ -113,6 +119,21 @@ class SemanticQueryService(SemanticServiceResolver):
         # ANSI SQL standard: double-quote for identifiers
         escaped = identifier.replace('"', '""')
         return f'"{escaped}"'
+
+    def get_physical_column_mapping(self, model_name: str) -> Optional[PhysicalColumnMapping]:
+        """Get or lazily build the physical column mapping for a model.
+
+        The mapping is cached per model name and invalidated when models
+        are registered/unregistered.
+        """
+        if model_name in self._mapping_cache:
+            return self._mapping_cache[model_name]
+        model = self.get_model(model_name)
+        if model is None:
+            return None
+        mapping = build_physical_column_mapping(model)
+        self._mapping_cache[model_name] = mapping
+        return mapping
 
     def register_model(self, model: DbTableModelImpl, namespace: Optional[str] = None) -> None:
         """Register a table model with the service.
@@ -133,11 +154,14 @@ class SemanticQueryService(SemanticServiceResolver):
             model.name = key
 
         self._models[key] = model
+        # Invalidate mapping cache for this model
+        self._mapping_cache.pop(key, None)
 
         # Also register bare name as fallback (don't overwrite existing)
         bare_name = key.split(":", 1)[1] if ":" in key else key
         if bare_name != key and bare_name not in self._models:
             self._models[bare_name] = model
+            self._mapping_cache.pop(bare_name, None)
 
         logger.info(f"Registered model: {key}")
 
@@ -182,8 +206,9 @@ class SemanticQueryService(SemanticServiceResolver):
         return list(self._models.keys())
 
     def invalidate_model_cache(self) -> None:
-        """Invalidate all cached query results."""
+        """Invalidate all cached query results and physical column mappings."""
         self._cache.clear()
+        self._mapping_cache.clear()
         logger.debug("Cache invalidated")
 
     # ==================== SemanticServiceResolver Implementation ====================
@@ -225,15 +250,25 @@ class SemanticQueryService(SemanticServiceResolver):
         if not table_model:
             return SemanticQueryResponse.from_error(f"Model not found: {model}")
 
-        # --- v1.2 column governance: validate user fields ---
+        # --- v1.3: resolve denied_columns to denied QM fields ---
         field_access = request.field_access
-        if field_access is not None and field_access.visible:
+        denied_qm_fields = None
+        if request.denied_columns:
+            mapping = self.get_physical_column_mapping(model)
+            if mapping:
+                denied_qm_fields = mapping.to_denied_qm_fields(request.denied_columns)
+
+        # --- v1.2/v1.3 column governance: validate user fields ---
+        has_whitelist = field_access is not None and bool(field_access.visible)
+        has_blacklist = bool(denied_qm_fields)
+        if has_whitelist or has_blacklist:
             validation = validate_field_access(
                 columns=request.columns,
                 slice_items=request.slice,
                 order_by=request.order_by,
                 calculated_fields=request.calculated_fields,
                 field_access=field_access,
+                denied_qm_fields=denied_qm_fields,
             )
             if not validation.valid:
                 return SemanticQueryResponse.from_error(validation.error_message)
@@ -1196,6 +1231,34 @@ class SemanticQueryService(SemanticServiceResolver):
         if not table_model:
             return SemanticQueryResponse.from_error(f"Model not found: {model}")
 
+        # --- v1.3: resolve denied_columns → denied QM fields ---
+        field_access = request.field_access
+        denied_qm_fields = None
+        if request.denied_columns:
+            mapping = self.get_physical_column_mapping(model)
+            if mapping:
+                denied_qm_fields = mapping.to_denied_qm_fields(request.denied_columns)
+
+        # --- v1.2/v1.3: validate user fields ---
+        has_whitelist = field_access is not None and bool(field_access.visible)
+        has_blacklist = bool(denied_qm_fields)
+        if has_whitelist or has_blacklist:
+            validation = validate_field_access(
+                columns=request.columns,
+                slice_items=request.slice,
+                order_by=request.order_by,
+                calculated_fields=request.calculated_fields,
+                field_access=field_access,
+                denied_qm_fields=denied_qm_fields,
+            )
+            if not validation.valid:
+                return SemanticQueryResponse.from_error(validation.error_message)
+
+        # --- v1.2: merge system_slice ---
+        if request.system_slice:
+            merged_slice = list(request.slice) + list(request.system_slice)
+            request = request.model_copy(update={"slice": merged_slice})
+
         try:
             build_result = self._build_query(table_model, request)
         except Exception as e:
@@ -1308,6 +1371,7 @@ class SemanticQueryService(SemanticServiceResolver):
         self,
         model_names: Optional[List[str]] = None,
         visible_fields: Optional[List[str]] = None,
+        denied_columns: Optional[List[DeniedColumn]] = None,
     ) -> Dict[str, Any]:
         """Build V3 metadata package — aligned with Java SemanticServiceV3Impl.
 
@@ -1322,13 +1386,18 @@ class SemanticQueryService(SemanticServiceResolver):
             v1.2 column governance: when set, only fields whose ``fieldName``
             is in this list appear in the ``fields`` dict. ``None`` means no
             filtering (v1.1 compat).
+        denied_columns
+            v1.3 physical column blacklist: when set, denied columns are
+            resolved per-model to denied QM fields which are then merged
+            with ``visible_fields`` for consistent trimming.
 
         Structure:
             {
                 "prompt": "usage instructions...",
                 "version": "v3",
                 "fields": { fieldName -> fieldInfo },
-                "models": { modelName -> modelInfo }
+                "models": { modelName -> modelInfo },
+                "physicalTables": [{"table": "...", "role": "..."}]  // v1.3
             }
         """
         target_models = model_names or list(self._models.keys())
@@ -1345,8 +1414,8 @@ class SemanticQueryService(SemanticServiceResolver):
             models_info[model_name] = {
                 "name": model.alias or model.name,
                 "factTable": model.source_table,
-                "purpose": model.description or "数据查询和分析",
-                "scenarios": ["数据查询", "统计分析", "报表生成"],
+                "purpose": model.description or "Data querying and analysis",
+                "scenarios": ["Data Querying", "Statistical Analysis", "Report Generation"],
             }
             ai_desc = getattr(model, 'ai_description', None)
             if ai_desc:
@@ -1367,7 +1436,7 @@ class SemanticQueryService(SemanticServiceResolver):
                     field_info: Dict[str, Any] = {
                         "name": f"{dim_caption}(ID)",
                         "fieldName": id_fn,
-                        "meta": f"维度ID | {join_def.primary_key}",
+                        "meta": f"Dimension ID | {join_def.primary_key}",
                         "type": "INTEGER",
                         "filterType": "dimension",
                         "filterable": True,
@@ -1382,16 +1451,16 @@ class SemanticQueryService(SemanticServiceResolver):
                     fields[id_fn] = field_info
                 fields[id_fn]["models"][model_name] = {
                     "description": f"{dim_caption}(ID)",
-                    "usage": "用于精确查询、排序",
+                        "usage": "Used for exact filtering and sorting",
                 }
 
                 # dim$caption
                 cap_fn = f"{dim_name}$caption"
                 if cap_fn not in fields:
                     fields[cap_fn] = {
-                        "name": f"{dim_caption}(名称)",
+                        "name": f"{dim_caption} (Caption)",
                         "fieldName": cap_fn,
-                        "meta": "维度名称 | TEXT",
+                        "meta": "Dimension Caption | TEXT",
                         "type": "TEXT",
                         "filterType": "dimension",
                         "filterable": True,
@@ -1400,8 +1469,8 @@ class SemanticQueryService(SemanticServiceResolver):
                         "models": {},
                     }
                 fields[cap_fn]["models"][model_name] = {
-                    "description": f"{dim_caption}显示名称",
-                    "usage": "用于展示、模糊查询",
+                    "description": f"{dim_caption} display name",
+                    "usage": "Used for display and fuzzy search",
                 }
 
                 # dim$property fields
@@ -1412,7 +1481,7 @@ class SemanticQueryService(SemanticServiceResolver):
                         fields[prop_fn] = {
                             "name": prop.caption or prop_name,
                             "fieldName": prop_fn,
-                            "meta": f"维度属性 | {prop.data_type}",
+                            "meta": f"Dimension Property | {prop.data_type}",
                             "type": prop.data_type.upper(),
                             "filterType": "text",
                             "filterable": True,
@@ -1441,7 +1510,7 @@ class SemanticQueryService(SemanticServiceResolver):
                     fields[dim_name] = {
                         "name": dim.alias or dim_name,
                         "fieldName": dim_name,
-                        "meta": f"属性 | {dim.data_type.value}",
+                        "meta": f"Attribute | {dim.data_type.value}",
                         "type": dim.data_type.value.upper(),
                         "filterType": "text",
                         "filterable": dim.filterable,
@@ -1463,7 +1532,7 @@ class SemanticQueryService(SemanticServiceResolver):
                     fields[col_name] = {
                         "name": col_def.alias or col_name,
                         "fieldName": col_name,
-                        "meta": f"属性 | {col_type}",
+                        "meta": f"Attribute | {col_type}",
                         "type": col_type.upper(),
                         "filterType": "text",
                         "filterable": True,
@@ -1483,7 +1552,7 @@ class SemanticQueryService(SemanticServiceResolver):
                     fields[measure_name] = {
                         "name": measure.alias or measure_name,
                         "fieldName": measure_name,
-                        "meta": f"度量 | 数值 | 默认聚合:{agg_name}",
+                        "meta": f"Measure | Number | Default Aggregation: {agg_name}",
                         "type": "NUMBER",
                         "filterType": "number",
                         "filterable": True,
@@ -1494,32 +1563,69 @@ class SemanticQueryService(SemanticServiceResolver):
                         "models": {},
                     }
                 fields[measure_name]["models"][model_name] = {
-                    "description": f"{measure.alias or measure_name} (聚合方式: {agg_name})",
+                    "description": f"{measure.alias or measure_name} (Aggregation: {agg_name})",
                 }
 
-        # --- v1.2 column governance: filter fields by visible_fields ---
-        if visible_fields is not None:
-            visible_set = set(visible_fields)
-            fields = {k: v for k, v in fields.items() if k in visible_set}
+        # --- v1.3: collect physical tables (deduplicated across models) ---
+        physical_tables: List[Dict[str, str]] = []
+        pt_seen: set = set()
+        for model_name in target_models:
+            mapping = self.get_physical_column_mapping(model_name)
+            if mapping:
+                for pt in mapping.get_physical_tables():
+                    t = pt["table"]
+                    if t not in pt_seen:
+                        pt_seen.add(t)
+                        physical_tables.append(pt)
 
-        return {
+        # --- v1.2/v1.3 column governance: compute effective field set ---
+        effective_visible: Optional[set] = None
+
+        if visible_fields is not None:
+            effective_visible = set(visible_fields)
+
+        if denied_columns:
+            # Resolve denied physical columns per-model and collect denied QM fields
+            all_denied_qm: set = set()
+            for model_name in target_models:
+                mapping = self.get_physical_column_mapping(model_name)
+                if mapping:
+                    all_denied_qm.update(mapping.to_denied_qm_fields(denied_columns))
+
+            if all_denied_qm:
+                if effective_visible is not None:
+                    # Both whitelist and blacklist: intersection
+                    effective_visible -= all_denied_qm
+                else:
+                    # Only blacklist: invert to whitelist
+                    all_qm = set(fields.keys())
+                    effective_visible = all_qm - all_denied_qm
+
+        if effective_visible is not None:
+            fields = {k: v for k, v in fields.items() if k in effective_visible}
+
+        result: Dict[str, Any] = {
             "prompt": (
-                "## 使用说明 (V3版本)\n"
-                "- 字段名直接使用 fields 中的 fieldName\n"
-                "- 维度用 xxx$id(查询/过滤) 或 xxx$caption(展示)\n"
-                "- 度量默认带聚合，可用内联表达式如 sum(fieldName)\n"
-                "- 标记 hierarchical=true 的维度支持层级操作符: "
-                "selfAndDescendantsOf(值及其所有下级), selfAndAncestorsOf(值及其所有上级)\n"
+                "## Usage Notes (V3)\n"
+                "- Use the fieldName values from fields directly\n"
+                "- Use xxx$id for query/filtering or xxx$caption for display\n"
+                "- Measures already carry default aggregation; inline expressions such as sum(fieldName) are supported\n"
+                "- Fields marked hierarchical=true support hierarchy operators: "
+                "selfAndDescendantsOf(value and all descendants), selfAndAncestorsOf(value and all ancestors)\n"
             ),
             "version": "v3",
             "fields": fields,
             "models": models_info,
         }
+        if physical_tables:
+            result["physicalTables"] = physical_tables
+        return result
 
     def get_metadata_v3_markdown(
         self,
         model_names: Optional[List[str]] = None,
         visible_fields: Optional[List[str]] = None,
+        denied_columns: Optional[List[DeniedColumn]] = None,
     ) -> str:
         """Build V3 metadata as markdown — aligned with Java default format.
 
@@ -1536,9 +1642,28 @@ class SemanticQueryService(SemanticServiceResolver):
         target_models = [(n, self._models[n]) for n in target_names if n in self._models]
 
         if not target_models:
-            return "# 暂无可用数据模型\n"
+            return "# No data models available\n"
 
+        # --- v1.3: merge denied_columns into effective visible set ---
         visible_set = set(visible_fields) if visible_fields is not None else None
+
+        if denied_columns:
+            all_denied_qm: set = set()
+            for name, _ in target_models:
+                mapping = self.get_physical_column_mapping(name)
+                if mapping:
+                    all_denied_qm.update(mapping.to_denied_qm_fields(denied_columns))
+            if all_denied_qm:
+                if visible_set is not None:
+                    visible_set -= all_denied_qm
+                else:
+                    # Need to compute all QM fields to invert blacklist
+                    all_qm: set = set()
+                    for name, mdl in target_models:
+                        mapping = self.get_physical_column_mapping(name)
+                        if mapping:
+                            all_qm.update(mapping.get_all_qm_field_names())
+                    visible_set = all_qm - all_denied_qm
 
         if len(target_models) == 1:
             return self._build_single_model_markdown(
@@ -1551,31 +1676,31 @@ class SemanticQueryService(SemanticServiceResolver):
 
     @staticmethod
     def _get_column_type_description(column_type) -> str:
-        """Map ColumnType enum to Chinese description (aligned with Java getDataTypeDescription)."""
+        """Map ColumnType enum to English description (aligned with Java getDataTypeDescription)."""
         if column_type is None:
-            return "文本"
+            return "Text"
         type_name = column_type.value.upper() if hasattr(column_type, 'value') else str(column_type).upper()
         mapping = {
-            "STRING": "文本",
-            "TEXT": "文本",
-            "INTEGER": "文本",   # Java maps INTEGER properties to 文本 by default
-            "LONG": "文本",
-            "FLOAT": "数值",
-            "DOUBLE": "数值",
-            "DECIMAL": "数值",
-            "MONEY": "金额",
-            "NUMBER": "数值",
-            "BOOLEAN": "布尔",
-            "BOOL": "布尔",
-            "DATE": "日期(yyyy-MM-dd)",
-            "DAY": "日期(yyyy-MM-dd)",
-            "DATETIME": "日期时间",
-            "TIMESTAMP": "日期时间",
-            "TIME": "文本",
-            "DICT": "字典",
-            "JSON": "文本",
+            "STRING": "Text",
+            "TEXT": "Text",
+            "INTEGER": "Text",   # Java maps INTEGER properties to Text by default
+            "LONG": "Text",
+            "FLOAT": "Number",
+            "DOUBLE": "Number",
+            "DECIMAL": "Number",
+            "MONEY": "Currency",
+            "NUMBER": "Number",
+            "BOOLEAN": "Boolean",
+            "BOOL": "Boolean",
+            "DATE": "Date (yyyy-MM-dd)",
+            "DAY": "Date (yyyy-MM-dd)",
+            "DATETIME": "Datetime",
+            "TIMESTAMP": "Datetime",
+            "TIME": "Text",
+            "DICT": "Dictionary",
+            "JSON": "Text",
         }
-        return mapping.get(type_name, "文本")
+        return mapping.get(type_name, "Text")
 
     def _build_single_model_markdown(
         self,
@@ -1602,13 +1727,13 @@ class SemanticQueryService(SemanticServiceResolver):
 
         lines.append(f"# {model_name} - {alias}")
         lines.append("")
-        lines.append("## 模型信息")
-        lines.append(f"- 表名: {model.source_table}")
+        lines.append("## Model Information")
+        lines.append(f"- Table: {model.source_table}")
         # Primary key (aligned with Java: jdbcModel.getIdColumn())
         if model.primary_key:
-            lines.append(f"- 主键: {', '.join(model.primary_key)}")
+            lines.append(f"- Primary Key: {', '.join(model.primary_key)}")
         if model.description:
-            lines.append(f"- 说明: {model.description}")
+            lines.append(f"- Description: {model.description}")
         lines.append("")
 
         # Dimension JOIN fields
@@ -1626,7 +1751,7 @@ class SemanticQueryService(SemanticServiceResolver):
                 if _visible(id_field):
                     dim_rows.append(f"| {id_field} | {dc}(ID) | INTEGER | {hier_label} | {jd.key_description or jd.description or ''} |")
                 if _visible(caption_field):
-                    dim_rows.append(f"| {caption_field} | {dc}(名称) | TEXT | - | {dc}显示名称 |")
+                    dim_rows.append(f"| {caption_field} | {dc} (Caption) | TEXT | - | {dc} display name |")
                 for prop in jd.properties:
                     pn = prop.get_name()
                     prop_field = f"{jd.name}${pn}"
@@ -1634,9 +1759,9 @@ class SemanticQueryService(SemanticServiceResolver):
                     if _visible(prop_field):
                         dim_rows.append(f"| {prop_field} | {prop.caption or pn} | {prop.data_type} | - | {prop.description or ''} |")
             if dim_rows:
-                lines.append("## 维度字段")
-                lines.append("| 字段名 | 名称 | 类型 | 层级 | 说明 |")
-                lines.append("|--------|------|------|------|------|")
+                lines.append("## Dimension Fields")
+                lines.append("| Field Name | Label | Type | Hierarchy | Description |")
+                lines.append("|------------|-------|------|-----------|-------------|")
                 lines.extend(dim_rows)
                 lines.append("")
 
@@ -1649,9 +1774,9 @@ class SemanticQueryService(SemanticServiceResolver):
                 if name not in dimension_field_names and _visible(name)
             }
             if filtered_columns:
-                lines.append("## 属性字段")
-                lines.append("| 字段名 | 名称 | 类型 | 说明 |")
-                lines.append("|--------|------|------|------|")
+                lines.append("## Attribute Fields")
+                lines.append("| Field Name | Label | Type | Description |")
+                lines.append("|------------|-------|------|-------------|")
                 for col_name, col in filtered_columns.items():
                     col_caption = col.alias or col_name
                     col_type = self._get_column_type_description(col.column_type)
@@ -1670,17 +1795,17 @@ class SemanticQueryService(SemanticServiceResolver):
                 m_desc = measure.description or ""
                 measure_rows.append(f"| {m_name} | {m_alias} | NUMBER | {agg} | {m_desc} |")
             if measure_rows:
-                lines.append("## 度量字段")
-                lines.append("| 字段名 | 名称 | 类型 | 聚合 | 说明 |")
-                lines.append("|--------|------|------|------|------|")
+                lines.append("## Measure Fields")
+                lines.append("| Field Name | Label | Type | Aggregation | Description |")
+                lines.append("|------------|-------|------|-------------|-------------|")
                 lines.extend(measure_rows)
                 lines.append("")
 
-        lines.append("## 使用提示")
-        lines.append("- 维度用 `xxx$id`(查询/过滤), `xxx$caption`(展示), `xxx$property`(维度属性)")
-        lines.append("- 度量支持内联聚合: `sum(salesAmount) as total`")
-        lines.append("- 系统自动处理 groupBy，通常无需手动指定")
-        lines.append("- 层级维度支持 `selfAndDescendantsOf`(值及其所有下级) 和 `selfAndAncestorsOf`(值及其所有上级) 操作符")
+        lines.append("## Usage Tips")
+        lines.append("- Use `xxx$id` for query/filtering, `xxx$caption` for display, and `xxx$property` for dimension properties")
+        lines.append("- Measures support inline aggregation: `sum(salesAmount) as total`")
+        lines.append("- The system handles groupBy automatically in most cases")
+        lines.append("- Hierarchical dimensions support `selfAndDescendantsOf` (value and all descendants) and `selfAndAncestorsOf` (value and all ancestors)")
 
         return "\n".join(lines)
 
@@ -1702,11 +1827,11 @@ class SemanticQueryService(SemanticServiceResolver):
         def _visible(field_name: str) -> bool:
             return visible_set is None or field_name in visible_set
 
-        lines.append("# 数据模型语义索引 V3")
+        lines.append("# Semantic Model Index V3")
         lines.append("")
 
         # Model index
-        lines.append("## 模型索引")
+        lines.append("## Model Index")
         for model_name, model in models:
             alias = model.alias or model_name
             desc = model.description or ""
@@ -1714,9 +1839,9 @@ class SemanticQueryService(SemanticServiceResolver):
         lines.append("")
 
         # Field index
-        lines.append("## 字段索引")
+        lines.append("## Field Index")
         lines.append("")
-        lines.append("> 查询时使用缩进行中的「字段名」，而非标题中的业务名。")
+        lines.append("> Use the indented `fieldName` values in queries, not the business labels in section titles.")
         lines.append("")
 
         for model_name, model in models:
@@ -1731,15 +1856,15 @@ class SemanticQueryService(SemanticServiceResolver):
                     dc = jd.caption or jd.name
                     dim_obj = model.dimensions.get(jd.name)
                     is_hier = dim_obj is not None and dim_obj.supports_hierarchy_operators()
-                    hier_hint = " 🔗层级" if is_hier else ""
+                    hier_hint = " 🔗 hierarchical" if is_hier else ""
                     sub_lines: List[str] = []
                     id_field = f"{jd.name}$id"
                     if _visible(id_field):
-                        id_ops = " *(支持 selfAndDescendantsOf / selfAndAncestorsOf)*" if is_hier else ""
-                        sub_lines.append(f"    - [field:{id_field}] | ID, 用于查询/过滤{id_ops}")
+                        id_ops = " *(supports selfAndDescendantsOf / selfAndAncestorsOf)*" if is_hier else ""
+                        sub_lines.append(f"    - [field:{id_field}] | ID, used for query/filtering{id_ops}")
                     cap_field = f"{jd.name}$caption"
                     if _visible(cap_field):
-                        sub_lines.append(f"    - [field:{cap_field}] | 名称, 用于展示")
+                        sub_lines.append(f"    - [field:{cap_field}] | Caption, used for display")
                     for prop in jd.properties:
                         pn = prop.get_name()
                         prop_field = f"{jd.name}${pn}"
@@ -1749,7 +1874,7 @@ class SemanticQueryService(SemanticServiceResolver):
                         dim_lines.append(f"- {dc}{hier_hint}")
                         dim_lines.extend(sub_lines)
                 if dim_lines:
-                    lines.append("**维度**")
+                    lines.append("**Dimensions**")
                     lines.extend(dim_lines)
 
             # Fact table properties (use model.columns, NOT model.dimensions)
@@ -1764,7 +1889,7 @@ class SemanticQueryService(SemanticServiceResolver):
                     prop_lines.append(f"    - [field:{col_name}] | {col_type}")
                 if prop_lines:
                     lines.append("")
-                    lines.append("**属性**")
+                    lines.append("**Attributes**")
                     lines.extend(prop_lines)
 
             # Measures
@@ -1779,16 +1904,16 @@ class SemanticQueryService(SemanticServiceResolver):
                     measure_lines.append(f"    - [field:{m_name}] | {agg}")
                 if measure_lines:
                     lines.append("")
-                    lines.append("**度量**")
+                    lines.append("**Measures**")
                     lines.extend(measure_lines)
 
             lines.append("")
 
         # Usage
-        lines.append("## 使用提示")
-        lines.append("- 维度用 `xxx$id`(查询/过滤), `xxx$caption`(展示)")
-        lines.append("- 度量支持内联聚合: `sum(fieldName) as alias`")
-        lines.append("- 系统自动处理 groupBy，通常无需手动指定")
+        lines.append("## Usage Tips")
+        lines.append("- Use `xxx$id` for query/filtering and `xxx$caption` for display")
+        lines.append("- Measures support inline aggregation: `sum(fieldName) as alias`")
+        lines.append("- The system handles groupBy automatically in most cases")
 
         return "\n".join(lines)
 
