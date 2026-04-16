@@ -207,7 +207,52 @@ P1 后续补充范围：
 1. orderBy / filter 中直接写表达式（非 alias 回溯）
 2. slice 中表达式类 field 值的依赖提取
 
+## v1.3 扩展：denied_columns + physicalTables + 映射缓存（2026-04-16）
+
+### 新增能力
+
+在 field_access（白名单）基础上，补齐 Java 对齐的三项能力：
+
+1. **denied_columns**（物理列黑名单）：`DeniedColumn(schema, table, column)` DTO + 查询入参 + metadata 入参
+2. **PhysicalColumnMapping**（双向映射缓存）：QM 字段 ↔ 物理 table.column 正反向映射
+3. **metadata physicalTables**：输出 QM 涉及的 fact 表 + dimension 表列表
+
+### 代码链路
+
+- `semantic.py` → `DeniedColumn` DTO, `SemanticQueryRequest.denied_columns`, `SemanticMetadataRequest.denied_columns`
+- `accessor.py` → `build_query_request()` 解析 `deniedColumns`
+- `physical_column_mapping.py` → `build_physical_column_mapping()`, `PhysicalColumnMapping.to_denied_qm_fields()`
+- `field_validator.py` → `validate_field_access(denied_qm_fields=...)`, `_is_field_denied()`, `_strip_dimension_suffix()`
+- `service.py` → `_apply_query_governance()`, `_resolve_effective_visible()`, `get_metadata_v3(physicalTables + denied_columns)`, `get_metadata_v3_markdown(denied_columns)`
+
+### 组合语义
+
+- `field_access`（白名单）+ `denied_columns`（黑名单）：保守合并，任一拒绝即拒绝
+- `system_slice`：不参与字段校验，校验通过后合并到 WHERE
+- 黑名单检查使用全名 + 维度基名（`customer` 匹配 `customer$type`）
+
+### 测试证据
+
+- `tests/test_physical_column_governance.py` — **78 个测试**
+- 覆盖：DTO / 映射缓存 / denied 转换 / 白名单+黑名单组合 / system_slice 绕过 / Service 集成 / Accessor payload / metadata physicalTables / metadata 字段裁剪 / 映射缓存生命周期
+
+### 测试结果
+
+```
+pytest tests/test_physical_column_governance.py -v
+78 passed in 0.23s
+
+pytest tests/ -q
+1770 passed in 2.30s
+```
+
+### 残余缺口
+
+- Calculated field 传递依赖解析：未在映射构建时做传递展开（对当前使用场景无影响）
+- masking 不在本轮范围
+
 ## 关联文档
 
 - [P0-引擎计算字段列权限能力整改目标-需求.md](D:/foggy-projects/foggy-data-mcp/docs/v1.3/P0-引擎计算字段列权限能力整改目标-需求.md)
 - [python-engine-calculated-field-permission-verification.md](D:/foggy-projects/foggy-data-mcp/docs/v1.3/python-engine-calculated-field-permission-verification.md)
+- [P0-Python引擎物理列权限与映射缓存对齐Java-progress.md](D:/foggy-projects/foggy-data-mcp/docs/v1.3/P0-Python引擎物理列权限与映射缓存对齐Java-progress.md)
