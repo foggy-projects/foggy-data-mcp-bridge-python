@@ -211,6 +211,81 @@ class SemanticQueryService(SemanticServiceResolver):
         self._mapping_cache.clear()
         logger.debug("Cache invalidated")
 
+    # ==================== Governance Helpers ====================
+
+    def _apply_query_governance(
+        self,
+        model_name: str,
+        request: SemanticQueryRequest,
+    ) -> Tuple[Optional[SemanticQueryResponse], SemanticQueryRequest]:
+        """Validate field governance and merge system_slice.
+
+        Returns ``(error_response, updated_request)``.  When ``error_response``
+        is not ``None``, the caller should return it immediately.  Otherwise
+        the returned ``updated_request`` has ``system_slice`` merged into
+        ``slice`` and is ready for query building.
+        """
+        field_access = request.field_access
+        denied_qm_fields = None
+        if request.denied_columns:
+            mapping = self.get_physical_column_mapping(model_name)
+            if mapping:
+                denied_qm_fields = mapping.to_denied_qm_fields(request.denied_columns)
+
+        has_whitelist = field_access is not None and bool(field_access.visible)
+        has_blacklist = bool(denied_qm_fields)
+        if has_whitelist or has_blacklist:
+            validation = validate_field_access(
+                columns=request.columns,
+                slice_items=request.slice,
+                order_by=request.order_by,
+                calculated_fields=request.calculated_fields,
+                field_access=field_access,
+                denied_qm_fields=denied_qm_fields,
+            )
+            if not validation.valid:
+                return SemanticQueryResponse.from_error(validation.error_message), request
+
+        if request.system_slice:
+            merged_slice = list(request.slice) + list(request.system_slice)
+            request = request.model_copy(update={"slice": merged_slice})
+
+        return None, request
+
+    def _resolve_effective_visible(
+        self,
+        model_names: List[str],
+        visible_fields: Optional[List[str]],
+        denied_columns: Optional[List['DeniedColumn']],
+    ) -> Optional[set]:
+        """Merge ``visible_fields`` whitelist with ``denied_columns`` blacklist.
+
+        Returns an effective visible set, or ``None`` when no governance applies.
+        Used by both JSON and markdown metadata builders.
+        """
+        effective: Optional[set] = set(visible_fields) if visible_fields is not None else None
+
+        if not denied_columns:
+            return effective
+
+        all_denied_qm: set = set()
+        all_qm: set = set()
+        for name in model_names:
+            mapping = self.get_physical_column_mapping(name)
+            if mapping:
+                all_denied_qm.update(mapping.to_denied_qm_fields(denied_columns))
+                all_qm.update(mapping.get_all_qm_field_names())
+
+        if not all_denied_qm:
+            return effective
+
+        if effective is not None:
+            effective -= all_denied_qm
+        else:
+            effective = all_qm - all_denied_qm
+
+        return effective
+
     # ==================== SemanticServiceResolver Implementation ====================
 
     def get_metadata(
@@ -250,34 +325,10 @@ class SemanticQueryService(SemanticServiceResolver):
         if not table_model:
             return SemanticQueryResponse.from_error(f"Model not found: {model}")
 
-        # --- v1.3: resolve denied_columns to denied QM fields ---
-        field_access = request.field_access
-        denied_qm_fields = None
-        if request.denied_columns:
-            mapping = self.get_physical_column_mapping(model)
-            if mapping:
-                denied_qm_fields = mapping.to_denied_qm_fields(request.denied_columns)
-
-        # --- v1.2/v1.3 column governance: validate user fields ---
-        has_whitelist = field_access is not None and bool(field_access.visible)
-        has_blacklist = bool(denied_qm_fields)
-        if has_whitelist or has_blacklist:
-            validation = validate_field_access(
-                columns=request.columns,
-                slice_items=request.slice,
-                order_by=request.order_by,
-                calculated_fields=request.calculated_fields,
-                field_access=field_access,
-                denied_qm_fields=denied_qm_fields,
-            )
-            if not validation.valid:
-                return SemanticQueryResponse.from_error(validation.error_message)
-
-        # --- v1.2: merge system_slice into request slice ---
-        if request.system_slice:
-            # system_slice bypasses field governance — merge directly
-            merged_slice = list(request.slice) + list(request.system_slice)
-            request = request.model_copy(update={"slice": merged_slice})
+        # --- v1.2/v1.3: governance check + system_slice merge ---
+        governance_error, request = self._apply_query_governance(model, request)
+        if governance_error is not None:
+            return governance_error
 
         # Build query
         try:
@@ -320,10 +371,8 @@ class SemanticQueryService(SemanticServiceResolver):
                 warnings=build_result.warnings,
             )
 
-        # --- v1.2 column governance: post-execution ---
-        # Build display_name → qm_field_name mapping from columns_info.
-        # Items keys are SQL aliases (display names like "Email"), but
-        # field_access uses QM field names (like "email").
+        # --- v1.2 column governance: post-execution filtering + masking ---
+        field_access = request.field_access
         display_to_qm: Optional[Dict[str, str]] = None
         if field_access is not None and (field_access.visible or field_access.masking):
             display_to_qm = {}
@@ -334,12 +383,10 @@ class SemanticQueryService(SemanticServiceResolver):
                     display_to_qm[disp] = qm
 
         if field_access is not None and field_access.visible:
-            # Filter result columns to visible only
             response.items = filter_response_columns(
                 response.items, field_access, display_to_qm=display_to_qm,
             )
         if field_access is not None and field_access.masking:
-            # Apply masking to remaining visible columns
             apply_masking(
                 response.items, field_access, display_to_qm=display_to_qm,
             )
@@ -1231,33 +1278,10 @@ class SemanticQueryService(SemanticServiceResolver):
         if not table_model:
             return SemanticQueryResponse.from_error(f"Model not found: {model}")
 
-        # --- v1.3: resolve denied_columns → denied QM fields ---
-        field_access = request.field_access
-        denied_qm_fields = None
-        if request.denied_columns:
-            mapping = self.get_physical_column_mapping(model)
-            if mapping:
-                denied_qm_fields = mapping.to_denied_qm_fields(request.denied_columns)
-
-        # --- v1.2/v1.3: validate user fields ---
-        has_whitelist = field_access is not None and bool(field_access.visible)
-        has_blacklist = bool(denied_qm_fields)
-        if has_whitelist or has_blacklist:
-            validation = validate_field_access(
-                columns=request.columns,
-                slice_items=request.slice,
-                order_by=request.order_by,
-                calculated_fields=request.calculated_fields,
-                field_access=field_access,
-                denied_qm_fields=denied_qm_fields,
-            )
-            if not validation.valid:
-                return SemanticQueryResponse.from_error(validation.error_message)
-
-        # --- v1.2: merge system_slice ---
-        if request.system_slice:
-            merged_slice = list(request.slice) + list(request.system_slice)
-            request = request.model_copy(update={"slice": merged_slice})
+        # --- v1.2/v1.3: governance check + system_slice merge ---
+        governance_error, request = self._apply_query_governance(model, request)
+        if governance_error is not None:
+            return governance_error
 
         try:
             build_result = self._build_query(table_model, request)
@@ -1566,11 +1590,11 @@ class SemanticQueryService(SemanticServiceResolver):
                     "description": f"{measure.alias or measure_name} (Aggregation: {agg_name})",
                 }
 
-        # --- v1.3: collect physical tables (deduplicated across models) ---
+        # --- v1.3: collect physical tables (deduplicated, single pass) ---
         physical_tables: List[Dict[str, str]] = []
         pt_seen: set = set()
-        for model_name in target_models:
-            mapping = self.get_physical_column_mapping(model_name)
+        for mn in target_models:
+            mapping = self.get_physical_column_mapping(mn)
             if mapping:
                 for pt in mapping.get_physical_tables():
                     t = pt["table"]
@@ -1578,29 +1602,10 @@ class SemanticQueryService(SemanticServiceResolver):
                         pt_seen.add(t)
                         physical_tables.append(pt)
 
-        # --- v1.2/v1.3 column governance: compute effective field set ---
-        effective_visible: Optional[set] = None
-
-        if visible_fields is not None:
-            effective_visible = set(visible_fields)
-
-        if denied_columns:
-            # Resolve denied physical columns per-model and collect denied QM fields
-            all_denied_qm: set = set()
-            for model_name in target_models:
-                mapping = self.get_physical_column_mapping(model_name)
-                if mapping:
-                    all_denied_qm.update(mapping.to_denied_qm_fields(denied_columns))
-
-            if all_denied_qm:
-                if effective_visible is not None:
-                    # Both whitelist and blacklist: intersection
-                    effective_visible -= all_denied_qm
-                else:
-                    # Only blacklist: invert to whitelist
-                    all_qm = set(fields.keys())
-                    effective_visible = all_qm - all_denied_qm
-
+        # --- v1.2/v1.3: governance trimming ---
+        effective_visible = self._resolve_effective_visible(
+            target_models, visible_fields, denied_columns,
+        )
         if effective_visible is not None:
             fields = {k: v for k, v in fields.items() if k in effective_visible}
 
@@ -1644,26 +1649,11 @@ class SemanticQueryService(SemanticServiceResolver):
         if not target_models:
             return "# No data models available\n"
 
-        # --- v1.3: merge denied_columns into effective visible set ---
-        visible_set = set(visible_fields) if visible_fields is not None else None
-
-        if denied_columns:
-            all_denied_qm: set = set()
-            for name, _ in target_models:
-                mapping = self.get_physical_column_mapping(name)
-                if mapping:
-                    all_denied_qm.update(mapping.to_denied_qm_fields(denied_columns))
-            if all_denied_qm:
-                if visible_set is not None:
-                    visible_set -= all_denied_qm
-                else:
-                    # Need to compute all QM fields to invert blacklist
-                    all_qm: set = set()
-                    for name, mdl in target_models:
-                        mapping = self.get_physical_column_mapping(name)
-                        if mapping:
-                            all_qm.update(mapping.get_all_qm_field_names())
-                    visible_set = all_qm - all_denied_qm
+        # --- v1.2/v1.3: governance trimming ---
+        target_names_only = [n for n, _ in target_models]
+        visible_set = self._resolve_effective_visible(
+            target_names_only, visible_fields, denied_columns,
+        )
 
         if len(target_models) == 1:
             return self._build_single_model_markdown(

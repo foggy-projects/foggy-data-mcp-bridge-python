@@ -52,34 +52,26 @@ class PhysicalColumnMapping:
     forward and reverse maps are frozen and safe to share across threads.
     """
 
-    _qm_to_physical: Dict[str, List[PhysicalColumnRef]] = field(default_factory=dict)
-    _physical_to_qm: Dict[str, List[str]] = field(default_factory=dict)
-    _physical_tables: List[Dict[str, str]] = field(default_factory=list)
-    _all_qm_fields: Set[str] = field(default_factory=set)
-
-    # -- forward queries --
+    qm_to_physical: Dict[str, List[PhysicalColumnRef]] = field(default_factory=dict)
+    physical_to_qm: Dict[str, List[str]] = field(default_factory=dict)
+    physical_tables: List[Dict[str, str]] = field(default_factory=list)
+    all_qm_fields: Set[str] = field(default_factory=set)
 
     def get_physical_columns(self, qm_field: str) -> List[PhysicalColumnRef]:
-        """Return physical columns a QM field depends on (defensive copy)."""
-        return list(self._qm_to_physical.get(qm_field, []))
-
-    # -- reverse queries --
+        """Return physical columns a QM field depends on."""
+        return list(self.qm_to_physical.get(qm_field, []))
 
     def get_qm_fields(self, table: str, column: str) -> List[str]:
         """Return QM fields that map to a given physical column."""
-        return list(self._physical_to_qm.get(f"{table}.{column}", []))
+        return list(self.physical_to_qm.get(f"{table}.{column}", []))
 
     def get_all_qm_field_names(self) -> Set[str]:
         """Return all QM field names known to this mapping."""
-        return set(self._all_qm_fields)
-
-    # -- physical tables --
+        return set(self.all_qm_fields)
 
     def get_physical_tables(self) -> List[Dict[str, str]]:
         """Return deduplicated list of ``{"table": ..., "role": ...}``."""
-        return list(self._physical_tables)
-
-    # -- denied column resolution --
+        return list(self.physical_tables)
 
     def to_denied_qm_fields(self, denied_columns: List[DeniedColumn]) -> Set[str]:
         """Convert physical denied columns to a set of denied QM field names.
@@ -92,7 +84,7 @@ class PhysicalColumnMapping:
             if not dc.table or not dc.column:
                 continue
             key = f"{dc.table}.{dc.column}"
-            qm_fields = self._physical_to_qm.get(key, [])
+            qm_fields = self.physical_to_qm.get(key, [])
             denied.update(qm_fields)
         return denied
 
@@ -184,8 +176,8 @@ def build_physical_column_mapping(model: DbTableModelImpl) -> PhysicalColumnMapp
             _add_mapping(col_name, fact_table, col_def.name)
 
     return PhysicalColumnMapping(
-        _qm_to_physical=qm_to_physical,
-        _physical_to_qm=physical_to_qm,
-        _physical_tables=physical_tables,
-        _all_qm_fields=all_qm_fields,
+        qm_to_physical=qm_to_physical,
+        physical_to_qm=physical_to_qm,
+        physical_tables=physical_tables,
+        all_qm_fields=all_qm_fields,
     )
