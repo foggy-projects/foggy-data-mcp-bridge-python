@@ -4,6 +4,7 @@
 基于 Java DbUpdater 迁移
 """
 
+import logging
 from abc import ABC, abstractmethod
 from typing import List, Optional, Any, TYPE_CHECKING
 from enum import IntEnum
@@ -11,6 +12,8 @@ from enum import IntEnum
 if TYPE_CHECKING:
     from foggy.dataset.table.sql_table import SqlTable
     from foggy.dataset.table.sql_column import SqlColumn
+
+_logger = logging.getLogger(__name__)
 
 
 class ExecutionMode(IntEnum):
@@ -168,7 +171,7 @@ class JdbcUpdater(DbUpdater):
                     raise
 
         if errors:
-            print(f"Execution completed with {len(errors)} errors")
+            _logger.warning("Execution completed with %d errors", len(errors))
 
     def add_index(self, table: 'SqlTable', column: 'SqlColumn') -> None:
         """添加索引"""
@@ -213,7 +216,7 @@ class JdbcUpdater(DbUpdater):
                     raise
 
         if errors:
-            print(f"Execution completed with {len(errors)} errors")
+            _logger.warning("Execution completed with %d errors", len(errors))
 
     async def _execute_script_async(self, script: str) -> None:
         """异步执行单个脚本"""
