@@ -86,6 +86,37 @@ class DimensionJoinDef(BaseModel):
         return None
 
 
+class ExplicitJoinConditionDef(BaseModel):
+    """Explicit QM join condition between two registered models."""
+
+    left_model: str = Field(..., description="Left/source model name")
+    left_field: str = Field(..., description="Left/source semantic field name")
+    right_model: str = Field(..., description="Right/target model name")
+    right_field: str = Field(..., description="Right/target semantic field name")
+
+    model_config = {"extra": "allow"}
+
+
+class ExplicitJoinDef(BaseModel):
+    """Explicit QM join between two fact-like models."""
+
+    join_type: str = Field(default="LEFT", description="Join type (LEFT/INNER/RIGHT)")
+    left_model: str = Field(..., description="Left/source model name")
+    right_model: str = Field(..., description="Right/target model name")
+    left_alias: str = Field(..., description="SQL alias of left/source model")
+    right_alias: str = Field(..., description="SQL alias of right/target model")
+    right_table_name: str = Field(..., description="Physical table name of right/target model")
+    right_schema_name: Optional[str] = Field(default=None, description="Schema name of right/target model")
+    conditions: List[ExplicitJoinConditionDef] = Field(default_factory=list, description="ON conditions")
+
+    model_config = {"extra": "allow"}
+
+    def get_right_table_expr(self) -> str:
+        if self.right_schema_name:
+            return f"{self.right_schema_name}.{self.right_table_name}"
+        return self.right_table_name
+
+
 class DbModelDimensionImpl(BaseModel):
     """Dimension implementation for semantic models.
 
@@ -294,6 +325,31 @@ class DbTableModelImpl(BaseModel):
         description="Dimension table JOIN definitions (star schema)",
     )
 
+    explicit_joins: List[ExplicitJoinDef] = Field(
+        default_factory=list,
+        description="Explicit multi-model joins declared by a QM",
+    )
+
+    field_model_map: Dict[str, str] = Field(
+        default_factory=dict,
+        description="QM field -> source model name mapping for explicit joins",
+    )
+
+    model_alias_map: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Source model name -> SQL alias mapping",
+    )
+
+    model_table_map: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Source model name -> physical table name mapping",
+    )
+
+    model_schema_map: Dict[str, Optional[str]] = Field(
+        default_factory=dict,
+        description="Source model name -> physical schema name mapping",
+    )
+
     # Primary key
     primary_key: List[str] = Field(default_factory=list, description="Primary key columns")
 
@@ -393,6 +449,43 @@ class DbTableModelImpl(BaseModel):
                 return dj
         return None
 
+    def get_field_model_name(self, field_name: str) -> str:
+        """Return the source model name for a QM field."""
+        return self.field_model_map.get(field_name, self.name)
+
+    def get_table_alias_for_model(self, model_name: Optional[str] = None) -> str:
+        """Return SQL table alias for the given source model."""
+        source_model = model_name or self.name
+        return self.model_alias_map.get(source_model, "t")
+
+    def get_table_expr_for_model(self, model_name: Optional[str] = None) -> str:
+        """Return physical table expression for the given source model."""
+        source_model = model_name or self.name
+        table_name = self.model_table_map.get(source_model, self.source_table)
+        schema_name = self.model_schema_map.get(source_model, self.source_schema)
+        if schema_name:
+            return f"{schema_name}.{table_name}"
+        return table_name
+
+    def resolve_field_for_model(
+        self,
+        field_name: str,
+        source_model_name: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Resolve a field against an explicit source model override."""
+        if source_model_name is None or source_model_name == self.get_field_model_name(field_name):
+            return self.resolve_field(field_name)
+
+        original = self.field_model_map.get(field_name)
+        self.field_model_map[field_name] = source_model_name
+        try:
+            return self.resolve_field(field_name)
+        finally:
+            if original is None:
+                self.field_model_map.pop(field_name, None)
+            else:
+                self.field_model_map[field_name] = original
+
     def resolve_field(self, field_name: str) -> Optional[Dict[str, Any]]:
         """Resolve a V3 field name to SQL column expression.
 
@@ -407,6 +500,9 @@ class DbTableModelImpl(BaseModel):
             Dict with {sql_expr, alias_label, table_alias, is_measure, aggregation, join_def}
             or None if not found.
         """
+        source_model_name = self.get_field_model_name(field_name)
+        table_alias = self.get_table_alias_for_model(source_model_name)
+
         # Check for $ separator → dimension field
         if "$" in field_name:
             parts = field_name.split("$", 1)
@@ -418,12 +514,13 @@ class DbTableModelImpl(BaseModel):
                 dim = self.get_dimension(dim_name)
                 if dim:
                     return {
-                        "sql_expr": f"t.{dim.column}",
+                        "sql_expr": f"{table_alias}.{dim.column}",
                         "alias_label": dim.alias or dim_name,
-                        "table_alias": "t",
+                        "table_alias": table_alias,
                         "is_measure": False,
                         "aggregation": None,
                         "join_def": None,
+                        "source_model": source_model_name,
                     }
                 return None
 
@@ -437,6 +534,7 @@ class DbTableModelImpl(BaseModel):
                     "is_measure": False,
                     "aggregation": None,
                     "join_def": join_def,
+                    "source_model": source_model_name,
                 }
             elif suffix == "caption":
                 sql_expr = _resolve_caption_sql(join_def, ta)
@@ -447,6 +545,7 @@ class DbTableModelImpl(BaseModel):
                     "is_measure": False,
                     "aggregation": None,
                     "join_def": join_def,
+                    "source_model": source_model_name,
                 }
             else:
                 # Dimension property: product$categoryName
@@ -459,6 +558,7 @@ class DbTableModelImpl(BaseModel):
                         "is_measure": False,
                         "aggregation": None,
                         "join_def": join_def,
+                        "source_model": source_model_name,
                     }
                 return None
 
@@ -467,36 +567,39 @@ class DbTableModelImpl(BaseModel):
         if measure:
             agg = measure.aggregation.value.upper() if measure.aggregation else None
             return {
-                "sql_expr": f"t.{measure.column or measure.name}",
+                "sql_expr": f"{table_alias}.{measure.column or measure.name}",
                 "alias_label": measure.alias or measure.name,
-                "table_alias": "t",
+                "table_alias": table_alias,
                 "is_measure": True,
                 "aggregation": agg,
                 "join_def": None,
+                "source_model": source_model_name,
             }
 
         # Try simple dimension (on fact table)
         dim = self.get_dimension(field_name)
         if dim:
             return {
-                "sql_expr": f"t.{dim.column}",
+                "sql_expr": f"{table_alias}.{dim.column}",
                 "alias_label": dim.alias or dim.name,
-                "table_alias": "t",
+                "table_alias": table_alias,
                 "is_measure": False,
                 "aggregation": None,
                 "join_def": None,
+                "source_model": source_model_name,
             }
 
         # Try property (fact table own columns from TM properties section)
         col_def = self.columns.get(field_name)
         if col_def:
             return {
-                "sql_expr": f"t.{col_def.name}",
+                "sql_expr": f"{table_alias}.{col_def.name}",
                 "alias_label": col_def.alias or col_def.comment or col_def.name,
-                "table_alias": "t",
+                "table_alias": table_alias,
                 "is_measure": False,
                 "aggregation": None,
                 "join_def": None,
+                "source_model": source_model_name,
             }
 
         return None

@@ -12,7 +12,11 @@ import logging
 
 from pydantic import BaseModel
 
-from foggy.dataset_model.impl.model import DbTableModelImpl, DbModelDimensionImpl, DbModelMeasureImpl
+from foggy.dataset_model.impl.model import (
+    DbTableModelImpl,
+    DbModelDimensionImpl,
+    DbModelMeasureImpl,
+)
 from foggy.dataset_model.engine.query import SqlQueryBuilder
 from foggy.dataset_model.engine.formula import get_default_registry, SqlFormulaRegistry
 from foggy.dataset_model.engine.hierarchy import (
@@ -429,10 +433,8 @@ class SemanticQueryService(SemanticServiceResolver):
         builder = SqlQueryBuilder()
 
         # 1. FROM clause
-        table_name = model.source_table
-        if model.source_schema:
-            table_name = f"{model.source_schema}.{model.source_table}"
-        builder.from_table(table_name, alias="t")
+        table_name = model.get_table_expr_for_model(model.name)
+        builder.from_table(table_name, alias=model.get_table_alias_for_model(model.name))
 
         # Build JoinGraph from model's dimension_joins (supports multi-hop in future)
         join_graph = JoinGraph(root="t")
@@ -448,14 +450,73 @@ class SemanticQueryService(SemanticServiceResolver):
 
         # Track JOINs to add (deduplicated by dimension name)
         joined_dims: Dict[str, DimensionJoinDef] = {}
+        explicit_joins_added: set[tuple[str, str, str]] = set()
 
         def ensure_join(join_def: DimensionJoinDef):
             """Add LEFT JOIN if not already added."""
             if join_def.name not in joined_dims:
+                ensure_explicit_joins_for_field(join_def.name)
                 joined_dims[join_def.name] = join_def
                 ta = join_def.get_alias()
-                on_cond = f"t.{join_def.foreign_key} = {ta}.{join_def.primary_key}"
+                root_alias = model.get_table_alias_for_model(model.get_field_model_name(join_def.name))
+                on_cond = f"{root_alias}.{join_def.foreign_key} = {ta}.{join_def.primary_key}"
                 builder.left_join(join_def.table_name, alias=ta, on_condition=on_cond)
+
+        def ensure_explicit_joins_for_field(field_name: str) -> None:
+            field_model_name = model.get_field_model_name(field_name)
+            if field_model_name == model.name:
+                return
+            for explicit_join in model.explicit_joins:
+                if explicit_join.right_model != field_model_name:
+                    continue
+                key = (
+                    explicit_join.join_type,
+                    explicit_join.left_model,
+                    explicit_join.right_model,
+                )
+                if key in explicit_joins_added:
+                    continue
+                on_clauses: List[str] = []
+                for condition in explicit_join.conditions:
+                    left_resolved = model.resolve_field_for_model(
+                        condition.left_field,
+                        condition.left_model,
+                    )
+                    right_resolved = model.resolve_field_for_model(
+                        condition.right_field,
+                        condition.right_model,
+                    )
+                    if left_resolved is None or right_resolved is None:
+                        raise ValueError(
+                            f"Failed to resolve explicit join condition "
+                            f"{condition.left_field} = {condition.right_field}"
+                        )
+                    on_clauses.append(
+                        f"{left_resolved['sql_expr']} = {right_resolved['sql_expr']}"
+                    )
+                join_method = {
+                    "LEFT": builder.left_join,
+                    "INNER": builder.inner_join,
+                }.get(explicit_join.join_type.upper())
+                if join_method is None:
+                    join_method = lambda table_name, alias, on_condition: builder.join(
+                        explicit_join.join_type.upper(),
+                        table_name,
+                        alias=alias,
+                        on_condition=on_condition,
+                    )
+                join_method(
+                    explicit_join.get_right_table_expr(),
+                    alias=explicit_join.right_alias,
+                    on_condition=" AND ".join(on_clauses),
+                )
+                explicit_joins_added.add(key)
+
+        def ensure_runtime_joins(field_name: str) -> None:
+            ensure_explicit_joins_for_field(field_name)
+            resolved = model.resolve_field(field_name)
+            if resolved and resolved["join_def"]:
+                ensure_join(resolved["join_def"])
 
         # 2. SELECT columns
         has_aggregation = False
@@ -489,10 +550,8 @@ class SemanticQueryService(SemanticServiceResolver):
 
                 resolved = model.resolve_field(col_name)
                 if resolved:
+                    ensure_runtime_joins(col_name)
                     # Auto-JOIN if needed
-                    if resolved["join_def"]:
-                        ensure_join(resolved["join_def"])
-
                     label = resolved["alias_label"]
                     sql_expr = resolved["sql_expr"]
 
@@ -550,12 +609,12 @@ class SemanticQueryService(SemanticServiceResolver):
             for col_name in request.group_by:
                 resolved = model.resolve_field(col_name)
                 if resolved:
-                    if resolved["join_def"]:
-                        ensure_join(resolved["join_def"])
+                    ensure_runtime_joins(col_name)
                     builder.group_by(resolved["sql_expr"])
                 else:
                     dim = model.get_dimension(col_name)
-                    builder.group_by(f"t.{dim.column}" if dim else f"t.{col_name}")
+                    alias = model.get_table_alias_for_model(model.get_field_model_name(col_name))
+                    builder.group_by(f"{alias}.{dim.column}" if dim else f"{alias}.{col_name}")
         elif has_aggregation and selected_dims:
             for dim_expr in selected_dims:
                 builder.group_by(dim_expr)
@@ -579,8 +638,7 @@ class SemanticQueryService(SemanticServiceResolver):
                     continue
                 resolved = model.resolve_field(column)
                 if resolved:
-                    if resolved["join_def"]:
-                        ensure_join(resolved["join_def"])
+                    ensure_runtime_joins(column)
                     if resolved["is_measure"]:
                         builder.order_by(self._qi(resolved['alias_label']), direction)
                     else:
@@ -781,10 +839,12 @@ class SemanticQueryService(SemanticServiceResolver):
             return resolved["sql_expr"]
         dim = model.get_dimension(field_name)
         if dim:
-            return f"t.{dim.column}"
+            alias = model.get_table_alias_for_model(model.get_field_model_name(field_name))
+            return f"{alias}.{dim.column}"
         measure = model.get_measure(field_name)
         if measure:
-            return f"t.{measure.column or measure.name}"
+            alias = model.get_table_alias_for_model(model.get_field_model_name(field_name))
+            return f"{alias}.{measure.column or measure.name}"
         return field_name
 
     def _resolve_expression_fields(self, expression: str, model: DbTableModelImpl, ensure_join=None) -> str:
@@ -828,10 +888,12 @@ class SemanticQueryService(SemanticServiceResolver):
                 return resolved["sql_expr"]
             dim = model.get_dimension(token)
             if dim:
-                return f"t.{dim.column}"
+                alias = model.get_table_alias_for_model(model.get_field_model_name(token))
+                return f"{alias}.{dim.column}"
             measure = model.get_measure(token)
             if measure:
-                return f"t.{measure.column or measure.name}"
+                alias = model.get_table_alias_for_model(model.get_field_model_name(token))
+                return f"{alias}.{measure.column or measure.name}"
             return token
 
         return re.sub(r'\b(\w+\$\w+|\w+)\b', replace_field, expression)
@@ -958,7 +1020,8 @@ class SemanticQueryService(SemanticServiceResolver):
         else:
             # Fallback to fact table
             dim = model.get_dimension(column)
-            col_expr = f"t.{dim.column}" if dim else f"t.{column}"
+            alias = model.get_table_alias_for_model(model.get_field_model_name(column))
+            col_expr = f"{alias}.{dim.column}" if dim else f"{alias}.{column}"
 
         # Check for $field value reference: {"value": {"$field": "otherField"}}
         # Generates field-to-field comparison: col_a > col_b (no bind param)
@@ -971,7 +1034,8 @@ class SemanticQueryService(SemanticServiceResolver):
                     ensure_join(ref_resolved["join_def"])
             else:
                 ref_dim = model.get_dimension(ref_field)
-                ref_expr = f"t.{ref_dim.column}" if ref_dim else f"t.{ref_field}"
+                ref_alias = model.get_table_alias_for_model(model.get_field_model_name(ref_field))
+                ref_expr = f"{ref_alias}.{ref_dim.column}" if ref_dim else f"{ref_alias}.{ref_field}"
 
             # Map operator to SQL
             op_map = {"=": "=", "eq": "=", "!=": "<>", "<>": "<>", "neq": "<>",

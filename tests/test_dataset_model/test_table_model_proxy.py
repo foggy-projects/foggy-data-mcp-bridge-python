@@ -143,6 +143,13 @@ class TestTableModelProxy:
         result = proxy.product
         assert isinstance(result, DimensionProxy)
 
+    def test_fact_field_can_be_used_in_join_on(self):
+        proxy = TableModelProxy("M")
+        ref = proxy.orderId
+        assert isinstance(ref, DimensionProxy)
+        assert ref.field_ref == "orderId"
+        assert ref.model_name == "M"
+
     def test_left_join(self):
         p1 = TableModelProxy("A")
         p2 = TableModelProxy("B")
@@ -163,6 +170,13 @@ class TestTableModelProxy:
         p2 = TableModelProxy("B")
         builder = p1.right_join(p2)
         assert builder.join_type == "RIGHT"
+
+    def test_camel_case_join_methods(self):
+        p1 = TableModelProxy("A")
+        p2 = TableModelProxy("B")
+        assert p1.leftJoin(p2).join_type == "LEFT"
+        assert p1.innerJoin(p2).join_type == "INNER"
+        assert p1.rightJoin(p2).join_type == "RIGHT"
 
     def test_join_on(self):
         p1 = TableModelProxy("A")
@@ -236,3 +250,19 @@ class TestJoinBuilder:
         builder = JoinBuilder(p1, p2)
         result = builder.on("a", "b")
         assert result is builder
+
+    def test_and_adds_second_condition(self):
+        p1 = TableModelProxy("A")
+        p2 = TableModelProxy("B")
+        builder = p1.left_join(p2).on(p1.orderId, p2.orderId).and_(p1.orderLineNo, p2.orderLineNo)
+        assert len(builder.conditions) == 2
+        assert builder.conditions[0].left_field_ref == "orderId"
+        assert builder.conditions[0].right_field_ref == "orderId"
+        assert builder.conditions[1].left_field_ref == "orderLineNo"
+        assert builder.conditions[1].right_field_ref == "orderLineNo"
+
+    def test_keyword_and_member_works(self):
+        p1 = TableModelProxy("A")
+        p2 = TableModelProxy("B")
+        builder = getattr(p1.leftJoin(p2).on(p1.orderId, p2.orderId), "and")(p1.orderLineNo, p2.orderLineNo)
+        assert len(builder.conditions) == 2

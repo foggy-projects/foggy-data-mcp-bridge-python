@@ -29,7 +29,10 @@ from foggy.dataset_model.impl.model import (
     DbModelMeasureImpl,
     DimensionJoinDef,
     DimensionPropertyDef,
+    ExplicitJoinDef,
+    ExplicitJoinConditionDef,
 )
+from foggy.dataset_model.proxy import ColumnRef, DimensionProxy, JoinBuilder, TableModelProxy
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +86,9 @@ def _extract_allowed_fields(column_groups: List[Dict[str, Any]]) -> set:
             # V1 fallback: { name: 'department' }
             if field is None:
                 field = item.get("name")
-            if isinstance(field, str) and field:
+            if isinstance(field, (ColumnRef, DimensionProxy)):
+                refs.add(field.field_ref)
+            elif isinstance(field, str) and field:
                 refs.add(field)
     return refs
 
@@ -127,6 +132,159 @@ def _apply_column_group_filter(
     model.measures = {
         k: v for k, v in model.measures.items() if k in base_names
     }
+
+
+def _collect_field_model_map(
+    column_groups: List[Dict[str, Any]],
+    base_model_name: str,
+) -> Dict[str, str]:
+    """Build QM field -> source model mapping from evaluated columnGroups."""
+    field_model_map: Dict[str, str] = {}
+    for group in column_groups:
+        items = group.get("items") or []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            field = item.get("ref")
+            if isinstance(field, (ColumnRef, DimensionProxy)):
+                field_model_map[field.field_ref] = field.model_name
+            elif isinstance(field, str) and field:
+                field_model_map.setdefault(field, base_model_name)
+    return field_model_map
+
+
+def _merge_explicit_join_fields(
+    alias_model: DbTableModelImpl,
+    tm_models: Dict[str, DbTableModelImpl],
+    allowed_refs: set,
+) -> None:
+    """Merge referenced fields from joined models into the QM alias model."""
+    for ref in allowed_refs:
+        source_model_name = alias_model.field_model_map.get(ref)
+        if not source_model_name or source_model_name == alias_model.name:
+            continue
+        source_model = tm_models.get(source_model_name)
+        if source_model is None:
+            continue
+
+        base_name = ref.split("$", 1)[0]
+
+        if base_name in source_model.dimensions and base_name not in alias_model.dimensions:
+            alias_model.dimensions[base_name] = source_model.dimensions[base_name].model_copy(deep=True)
+
+        if base_name in source_model.columns and base_name not in alias_model.columns:
+            alias_model.columns[base_name] = source_model.columns[base_name].model_copy(deep=True)
+
+        if base_name in source_model.measures and base_name not in alias_model.measures:
+            alias_model.measures[base_name] = source_model.measures[base_name].model_copy(deep=True)
+
+        join_def = source_model.get_dimension_join(base_name)
+        if join_def and all(existing.name != join_def.name for existing in alias_model.dimension_joins):
+            alias_model.dimension_joins.append(join_def.model_copy(deep=True))
+
+
+def _build_explicit_joins(
+    joins: List[Any],
+    tm_models: Dict[str, DbTableModelImpl],
+    base_model_name: str,
+) -> List[ExplicitJoinDef]:
+    """Convert evaluated JoinBuilder objects into runtime explicit joins."""
+    explicit_joins: List[ExplicitJoinDef] = []
+    alias_counter = 1
+    alias_map: Dict[str, str] = {base_model_name: "t"}
+
+    for join in joins:
+        if not isinstance(join, JoinBuilder) or not join.has_conditions():
+            continue
+
+        right_model = tm_models.get(join.right.model_name)
+        if right_model is None:
+            logger.warning(
+                "QM explicit join references unknown right model '%s'",
+                join.right.model_name,
+            )
+            continue
+
+        left_alias = alias_map.setdefault(join.left.model_name, "t")
+        right_alias = alias_map.setdefault(join.right.model_name, f"j{alias_counter}")
+        if right_alias == f"j{alias_counter}":
+            alias_counter += 1
+
+        explicit_joins.append(
+            ExplicitJoinDef(
+                join_type=join.join_type,
+                left_model=join.left.model_name,
+                right_model=join.right.model_name,
+                left_alias=left_alias,
+                right_alias=right_alias,
+                right_table_name=right_model.source_table,
+                right_schema_name=right_model.source_schema,
+                conditions=[
+                    ExplicitJoinConditionDef(
+                        left_model=condition.left_model_name,
+                        left_field=condition.left_field_ref,
+                        right_model=condition.right_model_name,
+                        right_field=condition.right_field_ref,
+                    )
+                    for condition in join.get_model_condition_pairs()
+                ],
+            )
+        )
+
+    return explicit_joins
+
+
+def _apply_explicit_join_metadata(
+    alias_model: DbTableModelImpl,
+    tm_models: Dict[str, DbTableModelImpl],
+    base_model_name: str,
+    column_groups: Optional[List[Dict[str, Any]]],
+    joins: Optional[List[Any]],
+) -> None:
+    """Attach explicit multi-model join metadata to a QM alias model."""
+    alias_model.field_model_map = {}
+    alias_model.model_alias_map = {base_model_name: "t"}
+    alias_model.model_table_map = {base_model_name: alias_model.source_table}
+    alias_model.model_schema_map = {base_model_name: alias_model.source_schema}
+    alias_model.explicit_joins = []
+
+    if column_groups and isinstance(column_groups, list):
+        alias_model.field_model_map.update(
+            _collect_field_model_map(column_groups, base_model_name)
+        )
+
+    if joins and isinstance(joins, list):
+        explicit_joins = _build_explicit_joins(joins, tm_models, base_model_name)
+        alias_model.explicit_joins = explicit_joins
+        for join in explicit_joins:
+            alias_model.model_alias_map[join.left_model] = join.left_alias
+            alias_model.model_alias_map[join.right_model] = join.right_alias
+            alias_model.model_table_map[join.right_model] = join.right_table_name
+            alias_model.model_schema_map[join.right_model] = join.right_schema_name
+            alias_model.model_table_map.setdefault(
+                join.left_model,
+                tm_models[join.left_model].source_table,
+            )
+            alias_model.model_schema_map.setdefault(
+                join.left_model,
+                tm_models[join.left_model].source_schema,
+            )
+
+    for field_name in list(alias_model.dimensions.keys()):
+        alias_model.field_model_map.setdefault(field_name, base_model_name)
+    for field_name in list(alias_model.columns.keys()):
+        alias_model.field_model_map.setdefault(field_name, base_model_name)
+    for field_name in list(alias_model.measures.keys()):
+        alias_model.field_model_map.setdefault(field_name, base_model_name)
+    for join_def in alias_model.dimension_joins:
+        alias_model.field_model_map.setdefault(join_def.name, base_model_name)
+        alias_model.field_model_map.setdefault(f"{join_def.name}$id", base_model_name)
+        alias_model.field_model_map.setdefault(f"{join_def.name}$caption", base_model_name)
+        for prop in join_def.properties:
+            alias_model.field_model_map.setdefault(
+                f"{join_def.name}${prop.get_name()}",
+                base_model_name,
+            )
 
 
 class TableModelLoader(ABC):
@@ -564,11 +722,11 @@ def load_models_from_directory(model_dir: str, namespace: Optional[str] = None) 
             ast = parser.parse_program()
 
             # Provide loadTableModel() built-in so QM can reference TMs.
-            # _TmRefProxy ensures that property accesses like ``emp.department``
-            # resolve to the field name string instead of None.
-            def load_table_model(name: str) -> _TmRefProxy:
-                """Stub for QM's loadTableModel() — returns a proxy that captures field refs."""
-                return _TmRefProxy({"__tm_ref__": name, "name": name})
+            def load_table_model(name: str):
+                """Return a real TableModelProxy for V2 QM evaluation."""
+                if name not in tm_models:
+                    return _TmRefProxy({"__tm_ref__": name, "name": name})
+                return TableModelProxy(name)
 
             evaluator = ExpressionEvaluator(
                 context={
@@ -592,7 +750,9 @@ def load_models_from_directory(model_dir: str, namespace: Optional[str] = None) 
             # Resolve the referenced TM
             model_ref = qm_def.get("model", {})
             tm_ref_name = None
-            if isinstance(model_ref, _TmRefProxy):
+            if isinstance(model_ref, TableModelProxy):
+                tm_ref_name = model_ref.model_name
+            elif isinstance(model_ref, _TmRefProxy):
                 tm_ref_name = model_ref._internal_get("__tm_ref__") or model_ref._internal_get("name")
             elif isinstance(model_ref, dict):
                 tm_ref_name = model_ref.get("__tm_ref__") or model_ref.get("name")
@@ -616,9 +776,18 @@ def load_models_from_directory(model_dir: str, namespace: Optional[str] = None) 
                 # should be exposed.  This prevents the Python engine from leaking
                 # TM dimensions/measures that the QM deliberately excluded.
                 column_groups = qm_def.get("columnGroups")
+                joins = qm_def.get("joins")
+                _apply_explicit_join_metadata(
+                    alias_model,
+                    tm_models,
+                    tm_ref_name,
+                    column_groups if isinstance(column_groups, list) else None,
+                    joins if isinstance(joins, list) else None,
+                )
                 if column_groups and isinstance(column_groups, list):
                     allowed = _extract_allowed_fields(column_groups)
                     if allowed:
+                        _merge_explicit_join_fields(alias_model, tm_models, allowed)
                         _apply_column_group_filter(alias_model, allowed)
                         logger.debug(
                             f"QM '{alias_model.name}': filtered to {len(allowed)} refs "

@@ -1574,6 +1574,7 @@ class FsscriptParser:
             TokenType.RETURN, TokenType.IF, TokenType.ELSE,
             TokenType.FOR, TokenType.WHILE, TokenType.SWITCH,
             TokenType.CASE, TokenType.BREAK, TokenType.CONTINUE,
+            TokenType.AND, TokenType.OR,
             TokenType.FUNCTION, TokenType.VAR, TokenType.LET,
             TokenType.CONST, TokenType.EXPORT, TokenType.IMPORT,
             TokenType.FROM, TokenType.AS, TokenType.IN, TokenType.OF,

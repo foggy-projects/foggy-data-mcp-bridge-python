@@ -6,7 +6,7 @@ Aligned with Java TableModelProxy + DimensionProxy + ColumnRef.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 
 @dataclass(frozen=True)
@@ -44,6 +44,16 @@ class ColumnRef:
         return None
 
 
+@dataclass(frozen=True)
+class JoinConditionRef:
+    """Single ON condition between two semantic fields."""
+
+    left_model_name: str
+    left_field_ref: str
+    right_model_name: str
+    right_field_ref: str
+
+
 class DimensionProxy:
     """Enables chained dimension access: proxy.product.category$id
 
@@ -70,6 +80,14 @@ class DimensionProxy:
     def _field_ref(self) -> str:
         return ".".join(self._path_segments)
 
+    @property
+    def field_ref(self) -> str:
+        return self._field_ref
+
+    @property
+    def model_name(self) -> str:
+        return self._model_proxy.model_name
+
     def __repr__(self) -> str:
         return (
             f"DimensionProxy({self._model_proxy.model_name!r}, "
@@ -89,18 +107,130 @@ class JoinBuilder:
     join_type: str = "LEFT"
     on_left_key: Optional[str] = None
     on_right_key: Optional[str] = None
+    conditions: List[JoinConditionRef] = None
 
-    def on(self, left_ref: ColumnRef | str, right_ref: ColumnRef | str) -> JoinBuilder:
+    def __post_init__(self) -> None:
+        if self.conditions is None:
+            self.conditions = []
+
+    @staticmethod
+    def _normalize_ref(ref, model: TableModelProxy) -> Tuple[str, str]:
+        if isinstance(ref, ColumnRef):
+            return ref.model_name, ref.field_ref
+        if isinstance(ref, DimensionProxy):
+            return ref.model_name, ref.field_ref
+        return model.model_name, ref
+
+    def _append_condition(
+        self,
+        left_ref: ColumnRef | str,
+        right_ref: ColumnRef | str,
+    ) -> None:
+        left_model_name, left_field_ref = self._normalize_ref(left_ref, self.left)
+        right_model_name, right_field_ref = self._normalize_ref(right_ref, self.right)
+        self.conditions.append(
+            JoinConditionRef(
+                left_model_name=left_model_name,
+                left_field_ref=left_field_ref,
+                right_model_name=right_model_name,
+                right_field_ref=right_field_ref,
+            )
+        )
+        self.on_left_key = left_field_ref
+        self.on_right_key = right_field_ref
+
+    def on(self, left_ref, right_ref) -> JoinBuilder:
         """Set JOIN condition.
 
         Args can be ColumnRef or string field names.
         """
-        self.on_left_key = (
-            left_ref.field_ref if isinstance(left_ref, ColumnRef) else left_ref
+        self.conditions = []
+        self._append_condition(left_ref, right_ref)
+        return self
+
+    def and_(self, left_ref, right_ref) -> JoinBuilder:
+        """Append an additional AND condition."""
+        self._append_condition(left_ref, right_ref)
+        return self
+
+    def and__(self, left_ref, right_ref) -> JoinBuilder:
+        """Compatibility helper for attribute names that cannot use a keyword."""
+        return self.and_(left_ref, right_ref)
+
+    def and_join(self, left_ref, right_ref) -> JoinBuilder:
+        """Explicit alias for chained ON conditions."""
+        return self.and_(left_ref, right_ref)
+
+    def andClause(self, left_ref, right_ref) -> JoinBuilder:
+        """CamelCase compatibility alias."""
+        return self.and_(left_ref, right_ref)
+
+    def __getattr__(self, name: str):
+        if name == "and":
+            return self.and_
+        raise AttributeError(name)
+
+    @property
+    def on_conditions(self) -> List[JoinConditionRef]:
+        return list(self.conditions)
+
+    def get_condition_pairs(self) -> List[Tuple[str, str]]:
+        return [(c.left_field_ref, c.right_field_ref) for c in self.conditions]
+
+    def get_model_condition_pairs(self) -> List[JoinConditionRef]:
+        return list(self.conditions)
+
+    def has_conditions(self) -> bool:
+        return bool(self.conditions)
+
+    def primary_condition(self) -> Optional[JoinConditionRef]:
+        if self.conditions:
+            return self.conditions[0]
+        return None
+
+    def clone(self) -> JoinBuilder:
+        cloned = JoinBuilder(self.left, self.right, self.join_type)
+        cloned.conditions = list(self.conditions)
+        cloned.on_left_key = self.on_left_key
+        cloned.on_right_key = self.on_right_key
+        return cloned
+
+    def __iter__(self):
+        return iter(self.conditions)
+
+    def __len__(self) -> int:
+        return len(self.conditions)
+
+    def __bool__(self) -> bool:
+        return bool(self.conditions)
+
+    def __repr__(self) -> str:
+        return (
+            f"JoinBuilder(left={self.left!r}, right={self.right!r}, "
+            f"join_type={self.join_type!r}, conditions={self.conditions!r})"
         )
-        self.on_right_key = (
-            right_ref.field_ref if isinstance(right_ref, ColumnRef) else right_ref
-        )
+
+    def andAlso(self, left_ref, right_ref) -> JoinBuilder:
+        """Legacy-friendly alias."""
+        return self.and_(left_ref, right_ref)
+
+    def andThen(self, left_ref, right_ref) -> JoinBuilder:
+        """Legacy-friendly alias."""
+        return self.and_(left_ref, right_ref)
+
+    def and_condition(self, left_ref, right_ref) -> JoinBuilder:
+        """Snake-case alias."""
+        return self.and_(left_ref, right_ref)
+
+    def add_condition(self, left_ref, right_ref) -> JoinBuilder:
+        """Low-level alias."""
+        return self.and_(left_ref, right_ref)
+
+    def on_many(self, *pairs: Tuple[object, object]) -> JoinBuilder:
+        """Set multiple ON conditions at once."""
+        self.conditions = []
+        for left_ref, right_ref in pairs:
+            self._append_condition(left_ref, right_ref)
         return self
 
 
@@ -139,7 +269,6 @@ class TableModelProxy:
         if "$" in name:
             return ColumnRef(self._model_name, name)
 
-        # Return DimensionProxy for chained access
         return DimensionProxy(self, [name])
 
     def left_join(self, other: TableModelProxy) -> JoinBuilder:
@@ -150,6 +279,15 @@ class TableModelProxy:
 
     def right_join(self, other: TableModelProxy) -> JoinBuilder:
         return JoinBuilder(self, other, "RIGHT")
+
+    def leftJoin(self, other: TableModelProxy) -> JoinBuilder:
+        return self.left_join(other)
+
+    def innerJoin(self, other: TableModelProxy) -> JoinBuilder:
+        return self.inner_join(other)
+
+    def rightJoin(self, other: TableModelProxy) -> JoinBuilder:
+        return self.right_join(other)
 
     def __repr__(self) -> str:
         if self._alias:

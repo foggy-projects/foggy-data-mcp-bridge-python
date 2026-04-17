@@ -923,28 +923,44 @@ export const queryModel = {
         assert qm.resolve_field("product.category$categoryId") is None
         assert qm.resolve_field("store.region$province") is None
 
-    def test_multi_fact_join_qm_is_not_loaded_yet_for_order_payment(self, caplog):
-        """Python loader does not support the V2 multi-fact JOIN QM path yet."""
+    def test_multi_fact_join_qm_loads_for_order_payment(self):
+        """Python loader should load V2 single-condition multi-fact JOIN QMs."""
         ecommerce_dir = Path("src") / "foggy" / "demo" / "models" / "ecommerce"
-
-        with caplog.at_level("WARNING"):
-            models = load_models_from_directory(str(ecommerce_dir))
+        models = load_models_from_directory(str(ecommerce_dir))
 
         model_names = {m.name for m in models}
         assert "FactOrderModel" in model_names
         assert "FactPaymentModel" in model_names
-        assert "OrderPaymentJoinQueryModel" not in model_names
-        assert "Unknown dict method 'leftjoin'" in caplog.text
+        assert "OrderPaymentJoinQueryModel" in model_names
 
-    def test_multi_fact_join_qm_is_not_loaded_yet_for_sales_return(self, caplog):
-        """Python parser/evaluator still rejects chained JOIN.and(...) QM syntax."""
+        qm = next(m for m in models if m.name == "OrderPaymentJoinQueryModel")
+        assert qm.get_field_model_name("orderId") == "FactOrderModel"
+        assert qm.get_field_model_name("paymentId") == "FactPaymentModel"
+        assert qm.model_alias_map["FactOrderModel"] == "t"
+        assert qm.model_alias_map["FactPaymentModel"] == "j1"
+        assert len(qm.explicit_joins) == 1
+        join_def = qm.explicit_joins[0]
+        assert join_def.right_model == "FactPaymentModel"
+        assert [(c.left_field, c.right_field) for c in join_def.conditions] == [("orderId", "orderId")]
+
+    def test_multi_fact_join_qm_loads_for_sales_return(self):
+        """Python loader should load chained JOIN.and(...) multi-condition QMs."""
         ecommerce_dir = Path("src") / "foggy" / "demo" / "models" / "ecommerce"
-
-        with caplog.at_level("WARNING"):
-            models = load_models_from_directory(str(ecommerce_dir))
+        models = load_models_from_directory(str(ecommerce_dir))
 
         model_names = {m.name for m in models}
         assert "FactSalesModel" in model_names
         assert "FactReturnModel" in model_names
-        assert "SalesReturnJoinQueryModel" not in model_names
-        assert "Expected IDENTIFIER, but got AND" in caplog.text
+        assert "SalesReturnJoinQueryModel" in model_names
+
+        qm = next(m for m in models if m.name == "SalesReturnJoinQueryModel")
+        assert qm.get_field_model_name("orderId") == "FactSalesModel"
+        assert qm.get_field_model_name("returnId") == "FactReturnModel"
+        assert qm.get_field_model_name("returnAmount") == "FactReturnModel"
+        assert len(qm.explicit_joins) == 1
+        join_def = qm.explicit_joins[0]
+        assert join_def.right_model == "FactReturnModel"
+        assert [(c.left_field, c.right_field) for c in join_def.conditions] == [
+            ("orderId", "orderId"),
+            ("orderLineNo", "orderLineNo"),
+        ]

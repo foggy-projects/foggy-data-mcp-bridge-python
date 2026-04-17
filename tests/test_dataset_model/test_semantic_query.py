@@ -8,6 +8,7 @@ Aligned with Java tests:
 """
 
 import pytest
+from pathlib import Path
 
 from foggy.dataset_model.semantic.service import SemanticQueryService, QueryBuildResult
 from foggy.dataset_model.impl.model import (
@@ -18,8 +19,12 @@ from foggy.dataset_model.impl.model import (
     DimensionPropertyDef,
 )
 from foggy.dataset_model.definitions.base import DbColumnDef, ColumnType
-from foggy.demo.models.ecommerce_models import create_fact_sales_model, create_fact_order_model
+from foggy.demo.models.ecommerce_models import (
+    create_fact_sales_model,
+    create_fact_order_model,
+)
 from foggy.mcp_spi import SemanticQueryRequest
+from foggy.dataset_model.impl.loader import load_models_from_directory
 
 
 # ==================== Fixtures ====================
@@ -54,6 +59,16 @@ def multi_model_service(
     svc = SemanticQueryService()
     svc.register_model(sales_model)
     svc.register_model(order_model)
+    return svc
+
+
+@pytest.fixture
+def ecommerce_join_service() -> SemanticQueryService:
+    """Service with ecommerce TM+QM models loaded from FSScript demo files."""
+    svc = SemanticQueryService()
+    models = load_models_from_directory(str(Path("src") / "foggy" / "demo" / "models" / "ecommerce"))
+    for model in models:
+        svc.register_model(model)
     return svc
 
 
@@ -479,6 +494,45 @@ class TestAggregationQuery:
         request = SemanticQueryRequest(columns=["salesAmount"], limit=50)
         sql = _build_sql(service, "FactSalesModel", request)
         assert "LIMIT 50" in sql
+
+
+class TestMultiFactJoinQuery:
+    """Test explicit multi-fact JOIN QM SQL generation."""
+
+    def test_order_payment_join_sql_uses_physical_columns(self, ecommerce_join_service: SemanticQueryService):
+        request = SemanticQueryRequest(
+            columns=["orderId", "paymentId", "payAmount"],
+            limit=20,
+        )
+        sql = _build_sql(ecommerce_join_service, "OrderPaymentJoinQueryModel", request)
+        assert "FROM fact_order AS t" in sql
+        assert "LEFT JOIN fact_payment AS j1" in sql
+        assert "t.order_id = j1.order_id" in sql
+        assert "j1.payment_id" in sql
+        assert "SUM(j1.pay_amount)" in sql
+
+    def test_sales_return_join_sql_uses_multi_condition_on_physical_columns(self, ecommerce_join_service: SemanticQueryService):
+        request = SemanticQueryRequest(
+            columns=["orderId", "orderLineNo", "returnId", "returnAmount"],
+            limit=20,
+        )
+        sql = _build_sql(ecommerce_join_service, "SalesReturnJoinQueryModel", request)
+        assert "FROM fact_sales AS t" in sql
+        assert "LEFT JOIN fact_return AS j1" in sql
+        assert "t.order_id = j1.order_id" in sql
+        assert "t.order_line_no = j1.order_line_no" in sql
+        assert "SUM(j1.return_amount)" in sql
+
+    def test_multi_fact_join_dimension_field_keeps_base_alias_and_adds_join(self, ecommerce_join_service: SemanticQueryService):
+        request = SemanticQueryRequest(
+            columns=["product$brand", "returnAmount"],
+            limit=20,
+        )
+        sql = _build_sql(ecommerce_join_service, "SalesReturnJoinQueryModel", request)
+        assert "LEFT JOIN fact_return AS j1" in sql
+        assert "LEFT JOIN dim_product AS dp" in sql
+        assert "t.product_key = dp.product_key" in sql
+        assert "SUM(j1.return_amount)" in sql
 
 
 # ==================== TestMetadataV3 ====================
