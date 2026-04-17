@@ -4,11 +4,21 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from foggy.mcp.routers.mcp_rpc import create_mcp_router
+from foggy.mcp_spi.semantic import DeniedColumn
 from foggy.mcp_spi import SemanticQueryResponse
 
 
 class _FakeSemanticService:
-    def get_metadata_v3(self, model_names=None):
+    def __init__(self):
+        self.metadata_v3_calls = []
+        self.metadata_markdown_calls = []
+
+    def get_metadata_v3(self, model_names=None, visible_fields=None, denied_columns=None):
+        self.metadata_v3_calls.append({
+            "model_names": model_names,
+            "visible_fields": visible_fields,
+            "denied_columns": denied_columns,
+        })
         assert model_names == ["OdooResCompanyQueryModel"]
         return {
             "fields": {
@@ -28,7 +38,12 @@ class _FakeSemanticService:
             },
         }
 
-    def get_metadata_v3_markdown(self, model_names=None):
+    def get_metadata_v3_markdown(self, model_names=None, visible_fields=None, denied_columns=None):
+        self.metadata_markdown_calls.append({
+            "model_names": model_names,
+            "visible_fields": visible_fields,
+            "denied_columns": denied_columns,
+        })
         assert model_names == ["OdooResCompanyQueryModel"]
         return "# OdooResCompanyQueryModel - Company Directory"
 
@@ -47,11 +62,11 @@ class _FakeAccessor:
         return self.response
 
 
-def _make_client(accessor=None) -> TestClient:
+def _make_client(accessor=None, semantic_service=None) -> TestClient:
     app = FastAPI()
     app.include_router(
         create_mcp_router(
-            semantic_service=_FakeSemanticService(),
+            semantic_service=semantic_service or _FakeSemanticService(),
             accessor=accessor or _FakeAccessor(),
         ),
         prefix="/mcp/analyst",
@@ -109,6 +124,98 @@ def test_describe_model_internal_defaults_to_markdown():
     assert body["result"]["content"][0]["text"].startswith("# OdooResCompanyQueryModel")
 
 
+def test_describe_model_internal_forwards_denied_columns_to_metadata_service():
+    service = _FakeSemanticService()
+    client = _make_client(semantic_service=service)
+
+    response = client.post(
+        "/mcp/analyst/rpc",
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "dataset.describe_model_internal",
+                "arguments": {
+                    "model": "OdooResCompanyQueryModel",
+                    "format": "json",
+                    "deniedColumns": [{"table": "res_company", "column": "name"}],
+                },
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert all(isinstance(item, DeniedColumn) for item in service.metadata_v3_calls[0]["denied_columns"])
+    assert service.metadata_v3_calls == [{
+        "model_names": ["OdooResCompanyQueryModel"],
+        "visible_fields": None,
+        "denied_columns": [DeniedColumn(table="res_company", column="name")],
+    }]
+
+
+def test_get_metadata_forwards_visible_fields_and_denied_columns():
+    service = _FakeSemanticService()
+    client = _make_client(semantic_service=service)
+
+    response = client.post(
+        "/mcp/analyst/rpc",
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "dataset.get_metadata",
+                "arguments": {
+                    "format": "markdown",
+                    "visibleFields": ["name"],
+                    "deniedColumns": [{"table": "res_company", "column": "secret_code"}],
+                },
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert all(isinstance(item, DeniedColumn) for item in service.metadata_markdown_calls[0]["denied_columns"])
+    assert service.metadata_markdown_calls == [{
+        "model_names": None,
+        "visible_fields": ["name"],
+        "denied_columns": [DeniedColumn(table="res_company", column="secret_code")],
+    }]
+
+
+def test_get_metadata_expands_grouped_denied_columns():
+    service = _FakeSemanticService()
+    client = _make_client(semantic_service=service)
+
+    response = client.post(
+        "/mcp/analyst/rpc",
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "dataset.get_metadata",
+                "arguments": {
+                    "format": "json",
+                    "deniedColumns": [{"table": "res_company", "columns": ["name", "secret_code"]}],
+                },
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert all(isinstance(item, DeniedColumn) for item in service.metadata_v3_calls[0]["denied_columns"])
+    assert service.metadata_v3_calls == [{
+        "model_names": None,
+        "visible_fields": None,
+        "denied_columns": [
+            DeniedColumn(table="res_company", column="name"),
+            DeniedColumn(table="res_company", column="secret_code"),
+        ],
+    }]
+
+
 def test_query_model_success_returns_result_status_success():
     accessor = _FakeAccessor(
         SemanticQueryResponse.from_legacy(
@@ -144,6 +251,89 @@ def test_query_model_success_returns_result_status_success():
     assert accessor.calls == [{
         "model": "OdooResCompanyQueryModel",
         "payload": {"columns": ["id", "name"]},
+        "mode": "execute",
+    }]
+
+
+def test_query_model_merges_top_level_governance_into_payload():
+    accessor = _FakeAccessor(
+        SemanticQueryResponse.from_legacy(
+            data=[],
+            columns_info=[{"name": "id", "dataType": "INTEGER"}],
+            total=0,
+            sql="SELECT 1",
+        )
+    )
+    client = _make_client(accessor=accessor)
+
+    response = client.post(
+        "/mcp/analyst/rpc",
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "dataset.query_model",
+                "arguments": {
+                    "model": "OdooResCompanyQueryModel",
+                    "payload": {"columns": ["id"]},
+                    "deniedColumns": [{"table": "res_company", "column": "name"}],
+                    "systemSlice": [{"field": "company_id", "op": "eq", "value": 1}],
+                },
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert accessor.calls == [{
+        "model": "OdooResCompanyQueryModel",
+        "payload": {
+            "columns": ["id"],
+            "deniedColumns": [{"table": "res_company", "column": "name"}],
+            "systemSlice": [{"field": "company_id", "op": "eq", "value": 1}],
+        },
+        "mode": "execute",
+    }]
+
+
+def test_query_model_expands_grouped_denied_columns_before_forwarding():
+    accessor = _FakeAccessor(
+        SemanticQueryResponse.from_legacy(
+            data=[],
+            columns_info=[{"name": "id", "dataType": "INTEGER"}],
+            total=0,
+            sql="SELECT 1",
+        )
+    )
+    client = _make_client(accessor=accessor)
+
+    response = client.post(
+        "/mcp/analyst/rpc",
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "dataset.query_model",
+                "arguments": {
+                    "model": "OdooResCompanyQueryModel",
+                    "payload": {"columns": ["id"]},
+                    "deniedColumns": [{"table": "res_company", "columns": ["name", "secret_code"]}],
+                },
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert accessor.calls == [{
+        "model": "OdooResCompanyQueryModel",
+        "payload": {
+            "columns": ["id"],
+            "deniedColumns": [
+                {"table": "res_company", "column": "name"},
+                {"table": "res_company", "column": "secret_code"},
+            ],
+        },
         "mode": "execute",
     }]
 

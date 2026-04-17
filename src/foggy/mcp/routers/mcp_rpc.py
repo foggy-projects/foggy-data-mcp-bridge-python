@@ -18,6 +18,7 @@ import asyncio
 import uuid
 
 from foggy.mcp_spi import LocalDatasetAccessor, SemanticMetadataRequest, MetadataFormat
+from foggy.mcp_spi.semantic import DeniedColumn
 from foggy.dataset_model.semantic import SemanticQueryService
 
 
@@ -122,6 +123,68 @@ def _build_text_content(text: str) -> list[dict[str, str]]:
     }]
 
 
+def _normalize_denied_columns(raw_denied_columns: Any) -> Optional[list[dict[str, Any]]]:
+    """Normalize deniedColumns from Odoo grouped form to flat engine form.
+
+    Odoo v1.3 sends grouped entries like:
+        [{"table": "hr_employee", "columns": ["gender", "marital"]}]
+
+    Python semantic service expects flat entries like:
+        [{"table": "hr_employee", "column": "gender"}, ...]
+    """
+    if not isinstance(raw_denied_columns, list):
+        return None
+
+    normalized: list[dict[str, Any]] = []
+    for item in raw_denied_columns:
+        if not isinstance(item, dict):
+            continue
+
+        table = item.get("table")
+        schema = item.get("schema")
+        column = item.get("column")
+        if table and column:
+            entry = {"table": table, "column": column}
+            if schema:
+                entry["schema"] = schema
+            normalized.append(entry)
+            continue
+
+        columns = item.get("columns")
+        if not table or not isinstance(columns, list):
+            continue
+        for col in columns:
+            if not col:
+                continue
+            entry = {"table": table, "column": col}
+            if schema:
+                entry["schema"] = schema
+            normalized.append(entry)
+
+    return normalized
+
+
+def _build_denied_column_models(raw_denied_columns: Any) -> Optional[list[DeniedColumn]]:
+    normalized = _normalize_denied_columns(raw_denied_columns)
+    if normalized is None:
+        return None
+    return [DeniedColumn(**item) for item in normalized]
+
+
+def _normalize_query_error_text(error_text: str) -> str:
+    """Normalize engine business failures to the Odoo-facing wording contract."""
+    if not error_text:
+        return error_text
+
+    stripped = error_text.strip()
+    lowered = stripped.lower()
+    if stripped.startswith("查询被拒绝") or stripped.startswith("查询执行失败"):
+        return stripped
+    if "column governance" in lowered or "not accessible" in lowered:
+        return f"查询被拒绝：{stripped}"
+    return stripped
+
+
 def create_mcp_router(
     semantic_service: SemanticQueryService = None,
     accessor: LocalDatasetAccessor = None,
@@ -213,12 +276,20 @@ def create_mcp_router(
                     fmt = tool_args.get("format", "markdown")
                     # v1.2 column governance: optional visible_fields filter
                     visible_fields = tool_args.get("visibleFields")
+                    # v1.3 physical-column governance
+                    denied_columns = _build_denied_column_models(tool_args.get("deniedColumns"))
 
                     if fmt == MetadataFormat.JSON:
-                        v3_data = svc.get_metadata_v3(visible_fields=visible_fields)
+                        v3_data = svc.get_metadata_v3(
+                            visible_fields=visible_fields,
+                            denied_columns=denied_columns,
+                        )
                         text = json.dumps(v3_data, ensure_ascii=False, indent=2)
                     else:
-                        text = svc.get_metadata_v3_markdown(visible_fields=visible_fields)
+                        text = svc.get_metadata_v3_markdown(
+                            visible_fields=visible_fields,
+                            denied_columns=denied_columns,
+                        )
 
                     return McpJsonRpcResponse(
                         id=request.id,
@@ -240,9 +311,13 @@ def create_mcp_router(
 
                     svc = _get_service()
                     fmt = tool_args.get("format", "markdown")
+                    denied_columns = _build_denied_column_models(tool_args.get("deniedColumns"))
 
                     if fmt == MetadataFormat.JSON:
-                        v3_data = svc.get_metadata_v3(model_names=[model_name])
+                        v3_data = svc.get_metadata_v3(
+                            model_names=[model_name],
+                            denied_columns=denied_columns,
+                        )
                         if model_name not in (v3_data.get("models") or {}):
                             return McpJsonRpcResponse(
                                 id=request.id,
@@ -253,7 +328,10 @@ def create_mcp_router(
                         # Use V3 markdown format — aligned with Java LocalDatasetAccessor
                         # (default format="markdown"). Markdown is ~40-60% fewer tokens
                         # and expands JOIN dimensions as {dim}$id / {dim}$caption.
-                        text = svc.get_metadata_v3_markdown(model_names=[model_name])
+                        text = svc.get_metadata_v3_markdown(
+                            model_names=[model_name],
+                            denied_columns=denied_columns,
+                        )
 
                     if text.startswith("# 暂无可用数据模型"):
                         return McpJsonRpcResponse(
@@ -289,6 +367,17 @@ def create_mcp_router(
                     # Payload is passed through as-is (Java camelCase field names)
                     payload = tool_args["payload"]
                     mode = tool_args.get("mode", "execute")
+                    normalized_denied_columns = _normalize_denied_columns(
+                        tool_args.get("deniedColumns")
+                    )
+                    if isinstance(payload, dict):
+                        if "deniedColumns" not in payload and normalized_denied_columns is not None:
+                            payload = dict(payload)
+                            payload["deniedColumns"] = normalized_denied_columns
+                        if "systemSlice" not in payload and "systemSlice" in tool_args:
+                            if payload is tool_args["payload"]:
+                                payload = dict(payload)
+                            payload["systemSlice"] = tool_args["systemSlice"]
 
                     _acc = _get_accessor()
                     if hasattr(_acc, 'query_model_async'):
@@ -302,7 +391,9 @@ def create_mcp_router(
                             id=request.id,
                             result={
                                 "status": "failed",
-                                "content": _build_text_content(response.error),
+                                "content": _build_text_content(
+                                    _normalize_query_error_text(response.error)
+                                ),
                             }
                         )
 
