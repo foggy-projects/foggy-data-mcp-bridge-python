@@ -888,3 +888,63 @@ export const queryModel = {
         assert "company" in qm.dimensions
         assert "parent" in qm.dimensions
         assert "workLocation" in qm.dimensions
+
+    def test_auto_expand_qm_root_dimension_properties_keep_distinct_alias_labels(self):
+        """Python QM path resolves root dimension properties independently, without alias reuse."""
+        ecommerce_dir = Path("src") / "foggy" / "demo" / "models" / "ecommerce"
+        models = load_models_from_directory(str(ecommerce_dir))
+        qm = next(m for m in models if m.name == "FactSalesAutoExpandQueryModel")
+
+        product_fields = {
+            "product$id": "商品(ID)",
+            "product$caption": "商品",
+            "product$productId": "商品ID",
+            "product$brand": "品牌",
+            "product$unitPrice": "商品售价",
+        }
+
+        resolved = {field: qm.resolve_field(field) for field in product_fields}
+
+        assert all(info is not None for info in resolved.values())
+        assert {field: info["alias_label"] for field, info in resolved.items()} == product_fields
+        assert len({info["alias_label"] for info in resolved.values()}) == len(product_fields)
+
+    def test_auto_expand_qm_does_not_load_nested_dimension_refs_yet(self):
+        """Current Python loader filters root dims only and does not surface nested snowflake refs."""
+        ecommerce_dir = Path("src") / "foggy" / "demo" / "models" / "ecommerce"
+        models = load_models_from_directory(str(ecommerce_dir))
+        qm = next(m for m in models if m.name == "FactSalesAutoExpandQueryModel")
+
+        assert "product" in qm.dimensions
+        assert "store" in qm.dimensions
+        assert "productCategory" not in qm.dimensions
+        assert "storeRegion" not in qm.dimensions
+
+        assert qm.resolve_field("product.category$categoryId") is None
+        assert qm.resolve_field("store.region$province") is None
+
+    def test_multi_fact_join_qm_is_not_loaded_yet_for_order_payment(self, caplog):
+        """Python loader does not support the V2 multi-fact JOIN QM path yet."""
+        ecommerce_dir = Path("src") / "foggy" / "demo" / "models" / "ecommerce"
+
+        with caplog.at_level("WARNING"):
+            models = load_models_from_directory(str(ecommerce_dir))
+
+        model_names = {m.name for m in models}
+        assert "FactOrderModel" in model_names
+        assert "FactPaymentModel" in model_names
+        assert "OrderPaymentJoinQueryModel" not in model_names
+        assert "Unknown dict method 'leftjoin'" in caplog.text
+
+    def test_multi_fact_join_qm_is_not_loaded_yet_for_sales_return(self, caplog):
+        """Python parser/evaluator still rejects chained JOIN.and(...) QM syntax."""
+        ecommerce_dir = Path("src") / "foggy" / "demo" / "models" / "ecommerce"
+
+        with caplog.at_level("WARNING"):
+            models = load_models_from_directory(str(ecommerce_dir))
+
+        model_names = {m.name for m in models}
+        assert "FactSalesModel" in model_names
+        assert "FactReturnModel" in model_names
+        assert "SalesReturnJoinQueryModel" not in model_names
+        assert "Expected IDENTIFIER, but got AND" in caplog.text
