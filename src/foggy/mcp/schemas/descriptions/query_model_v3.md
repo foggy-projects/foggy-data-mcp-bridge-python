@@ -25,13 +25,24 @@
 ### columns (必填)
 支持内联聚合表达式，系统自动处理groupBy：
 ```json
-["product$categoryName", "sum(salesAmount) as totalSales", "count(orderId) as orderCount"]
+[
+  "product$categoryName",
+  "sum(salesAmount) as totalSales",
+  "sum(if(orderStatus == 'COMPLETED', salesAmount, 0)) as completedSales",
+  "avg(if(orderStatus == 'COMPLETED', salesAmount, null)) as avgCompletedSales",
+  "count(if(orderStatus == 'COMPLETED', 1, null)) as completedCount"
+]
 ```
 聚合函数：`sum`、`avg`、`count`、`max`、`min`、`group_concat`、`countd`(去重计数)、`stddev_pop`、`stddev_samp`、`var_pop`、`var_samp`
 
 **重要**：
 - 当使用聚合表达式后，系统自动推断 groupBy，通常无需手动指定
-- columns 仅支持简单的 `agg(field) as alias`，复杂计算用 calculatedFields
+- columns 支持 `agg(field) as alias`，也支持条件聚合写法 `sum/avg/count(if(...)) as alias`
+- 条件聚合里的条件表达式使用 DSL 语法：相等判断写 `==`，多条件写 `&&` / `||`
+- Python 引擎会把 `if(...)` 统一降级为标准 SQL `CASE WHEN ... THEN ... ELSE ... END`
+- 不支持直接在 DSL 中输出原始 `CASE WHEN ...` 片段
+- 不新增 `count_if / sum_if / avg_if` 契约；条件聚合统一使用 `sum/avg/count(if(...))`
+- 超出上述范围的复杂表达式继续使用 calculatedFields
 
 ### calculatedFields (可选)
 需要指定agg或复杂表达式时使用：

@@ -40,11 +40,19 @@ from foggy.mcp_spi.semantic import DeniedColumn, FieldAccessDef
 from foggy.dataset_model.semantic.field_validator import (
     validate_field_access,
     filter_response_columns,
+    validate_query_fields,
 )
 from foggy.dataset_model.semantic.masking import apply_masking
 from foggy.dataset_model.semantic.physical_column_mapping import (
     PhysicalColumnMapping,
     build_physical_column_mapping,
+)
+from foggy.dataset_model.semantic.error_sanitizer import sanitize_engine_error
+from foggy.dataset_model.semantic.inline_expression import (
+    find_matching_paren,
+    parse_inline_aggregate,
+    skip_string_literal,
+    split_top_level_commas,
 )
 
 
@@ -256,6 +264,42 @@ class SemanticQueryService(SemanticServiceResolver):
 
         return None, request
 
+    def _sanitize_error(
+        self,
+        model_name: Optional[str],
+        raw_error: Optional[str],
+    ) -> Optional[str]:
+        """Apply :func:`sanitize_engine_error` with the model's physical
+        column mapping when available.
+
+        Safe to call with ``None`` / empty error — returns as-is.  Used to
+        make sure any error text reaching callers is in QM vocabulary and
+        does not leak physical column or alias names (BUG-007 v1.3).
+        """
+        if not raw_error:
+            return raw_error
+        mapping: Optional[PhysicalColumnMapping] = None
+        if model_name:
+            try:
+                mapping = self.get_physical_column_mapping(model_name)
+            except Exception:  # pragma: no cover — mapping build is best-effort
+                mapping = None
+        return sanitize_engine_error(
+            raw_error, model_name=model_name, mapping=mapping,
+        )
+
+    def _sanitize_response_error(
+        self,
+        model_name: Optional[str],
+        response: SemanticQueryResponse,
+    ) -> SemanticQueryResponse:
+        """In-place rewrite of ``response.error`` via :meth:`_sanitize_error`.
+
+        Returns the same response (for call-site convenience)."""
+        if response is not None and response.error:
+            response.error = self._sanitize_error(model_name, response.error)
+        return response
+
     def _resolve_effective_visible(
         self,
         model_names: List[str],
@@ -334,6 +378,13 @@ class SemanticQueryService(SemanticServiceResolver):
         if governance_error is not None:
             return governance_error
 
+        invalid_field = validate_query_fields(table_model, request)
+        if invalid_field is not None:
+            return SemanticQueryResponse.from_error(
+                invalid_field.message,
+                error_detail=invalid_field.to_public_dict(),
+            )
+
         # Build query
         try:
             build_result = self._build_query(table_model, request)
@@ -368,12 +419,19 @@ class SemanticQueryService(SemanticServiceResolver):
             )
         except Exception as e:
             logger.exception(f"Failed to execute query for model {model}")
-            return SemanticQueryResponse.from_legacy(
-                data=[],
-                sql=build_result.sql,
-                error=f"Query execution failed: {str(e)}",
-                warnings=build_result.warnings,
+            return self._sanitize_response_error(
+                model,
+                SemanticQueryResponse.from_legacy(
+                    data=[],
+                    sql=build_result.sql,
+                    error=f"Query execution failed: {str(e)}",
+                    warnings=build_result.warnings,
+                ),
             )
+
+        # Sanitize any executor-surfaced error (e.g. PostgreSQL column
+        # not-exist + physical HINT) before the response leaves the engine.
+        self._sanitize_response_error(model, response)
 
         # --- v1.2 column governance: post-execution filtering + masking ---
         field_access = request.field_access
@@ -682,14 +740,6 @@ class SemanticQueryService(SemanticServiceResolver):
             "select_expr": select_expr,
         }
 
-    # Regex for inline aggregate: "sum(fieldName) as alias" or "count_distinct(field)"
-    _INLINE_AGG_RE = re.compile(
-        r'^(sum|avg|count|min|max|count_distinct|countd|group_concat|'
-        r'stddev_pop|stddev_samp|var_pop|var_samp)\s*\(\s*([^)]+)\s*\)'
-        r'(?:\s+as\s+(\w+))?$',
-        re.IGNORECASE,
-    )
-
     def _parse_inline_expression(
         self,
         col_name: str,
@@ -700,40 +750,24 @@ class SemanticQueryService(SemanticServiceResolver):
 
         Returns column info dict if parsed, None if not an inline expression.
         """
-        m = self._INLINE_AGG_RE.match(col_name.strip())
-        if not m:
+        parsed = parse_inline_aggregate(col_name)
+        if not parsed:
             return None
 
-        func_name = m.group(1).upper()
-        field_name = m.group(2).strip()
-        alias = m.group(3)
-
-        # Map function names
-        AGG_MAP = {
-            "COUNTD": "COUNT_DISTINCT",
-            "COUNT_DISTINCT": "COUNT_DISTINCT",
-        }
-        agg = AGG_MAP.get(func_name, func_name)
-
-        # Resolve the inner field
-        resolved = model.resolve_field(field_name)
-        if resolved:
-            sql_col = resolved["sql_expr"]
-            if resolved["join_def"] and ensure_join:
-                ensure_join(resolved["join_def"])
-            default_alias = alias or f"{func_name.lower()}_{field_name}"
-        else:
-            # Unknown field — use as raw column on fact table
-            sql_col = f"t.{field_name}"
-            default_alias = alias or f"{func_name.lower()}_{field_name}"
+        agg = parsed.aggregation
+        sql_col = self._resolve_expression_fields(
+            parsed.inner_expression,
+            model,
+            ensure_join,
+        )
 
         if agg == "COUNT_DISTINCT":
-            select_expr = f"COUNT(DISTINCT {sql_col}) AS {self._qi(default_alias)}"
+            select_expr = f"COUNT(DISTINCT {sql_col}) AS {self._qi(parsed.alias)}"
         else:
-            select_expr = f"{agg}({sql_col}) AS {self._qi(default_alias)}"
+            select_expr = f"{agg}({sql_col}) AS {self._qi(parsed.alias)}"
 
         return {
-            "name": default_alias,
+            "name": parsed.alias,
             "fieldName": col_name,
             "expression": sql_col,
             "aggregation": agg,
@@ -847,6 +881,76 @@ class SemanticQueryService(SemanticServiceResolver):
             return f"{alias}.{measure.column or measure.name}"
         return field_name
 
+    def _render_expression(self, expression: str, model: DbTableModelImpl, ensure_join=None) -> str:
+        """Render an expression to SQL, lowering IF(...) to CASE WHEN recursively."""
+        result: List[str] = []
+        i = 0
+        length = len(expression)
+        while i < length:
+            ch = expression[i]
+            if ch in ("'", '"'):
+                end = skip_string_literal(expression, i)
+                result.append(expression[i:end])
+                i = end
+                continue
+            if ch == "&" and i + 1 < length and expression[i + 1] == "&":
+                result.append(" AND ")
+                i += 2
+                continue
+            if ch == "|" and i + 1 < length and expression[i + 1] == "|":
+                result.append(" OR ")
+                i += 2
+                continue
+            if ch == "=" and i + 1 < length and expression[i + 1] == "=":
+                result.append(" = ")
+                i += 2
+                continue
+            if ch.isalpha() or ch == "_":
+                start = i
+                i += 1
+                while i < length and (expression[i].isalnum() or expression[i] in ("_", "$")):
+                    i += 1
+                token = expression[start:i]
+                j = i
+                while j < length and expression[j].isspace():
+                    j += 1
+                if j < length and expression[j] == "(":
+                    close = find_matching_paren(expression, j)
+                    if close < 0:
+                        raise ValueError(f"Unclosed function call in expression: {expression}")
+                    func_name = token.upper()
+                    if func_name not in self._ALLOWED_FUNCTIONS and func_name not in self._SQL_KEYWORDS:
+                        raise ValueError(
+                            f"Function '{token}' is not in the allowed function whitelist. "
+                            f"Allowed functions: {sorted(self._ALLOWED_FUNCTIONS)}"
+                        )
+                    args = split_top_level_commas(expression[j + 1:close])
+                    if func_name == "IF":
+                        if len(args) != 3:
+                            raise ValueError(f"IF(...) expects 3 arguments, got {len(args)} in: {expression}")
+                        cond_sql = self._render_expression(args[0], model, ensure_join).strip()
+                        then_sql = self._render_expression(args[1], model, ensure_join).strip()
+                        else_sql = self._render_expression(args[2], model, ensure_join).strip()
+                        result.append(
+                            f"CASE WHEN {cond_sql} THEN {then_sql} ELSE {else_sql} END"
+                        )
+                    else:
+                        rendered_args = [
+                            self._render_expression(arg, model, ensure_join).strip()
+                            for arg in args
+                        ]
+                        result.append(f"{func_name}({', '.join(rendered_args)})")
+                    i = close + 1
+                    continue
+                if token.upper() in self._SQL_KEYWORDS:
+                    result.append(token)
+                else:
+                    result.append(self._resolve_single_field(token, model, ensure_join))
+                continue
+            result.append(ch)
+            i += 1
+        return "".join(result)
+
     def _resolve_expression_fields(self, expression: str, model: DbTableModelImpl, ensure_join=None) -> str:
         """Replace semantic field names in an expression with SQL column references.
 
@@ -861,42 +965,7 @@ class SemanticQueryService(SemanticServiceResolver):
         # Pure window functions (no arguments): return as-is
         if self._PURE_WINDOW_RE.match(stripped):
             return stripped
-
-        keywords = self._SQL_KEYWORDS
-        allowed_funcs = self._ALLOWED_FUNCTIONS
-
-        # Validate function calls in expression against whitelist
-        func_calls = re.findall(r'\b(\w+)\s*\(', expression)
-        for func_name in func_calls:
-            if func_name.upper() not in allowed_funcs and func_name.upper() not in keywords:
-                raise ValueError(
-                    f"Function '{func_name}' is not in the allowed function whitelist. "
-                    f"Allowed functions: {sorted(allowed_funcs)}"
-                )
-
-        def replace_field(match: re.Match) -> str:
-            token = match.group(0)
-            if token.upper() in keywords:
-                return token
-            # Try numeric literal (don't resolve)
-            if token.isdigit():
-                return token
-            resolved = model.resolve_field(token)
-            if resolved:
-                if resolved["join_def"] and ensure_join:
-                    ensure_join(resolved["join_def"])
-                return resolved["sql_expr"]
-            dim = model.get_dimension(token)
-            if dim:
-                alias = model.get_table_alias_for_model(model.get_field_model_name(token))
-                return f"{alias}.{dim.column}"
-            measure = model.get_measure(token)
-            if measure:
-                alias = model.get_table_alias_for_model(model.get_field_model_name(token))
-                return f"{alias}.{measure.column or measure.name}"
-            return token
-
-        return re.sub(r'\b(\w+\$\w+|\w+)\b', replace_field, expression)
+        return self._render_expression(expression, model, ensure_join)
 
     def _build_calculated_field_sql(
         self,
@@ -1377,12 +1446,18 @@ class SemanticQueryService(SemanticServiceResolver):
             )
         except Exception as e:
             logger.exception(f"Failed to execute query for model {model}")
-            return SemanticQueryResponse.from_legacy(
-                data=[],
-                sql=build_result.sql,
-                error=f"Query execution failed: {str(e)}",
-                warnings=build_result.warnings,
+            return self._sanitize_response_error(
+                model,
+                SemanticQueryResponse.from_legacy(
+                    data=[],
+                    sql=build_result.sql,
+                    error=f"Query execution failed: {str(e)}",
+                    warnings=build_result.warnings,
+                ),
             )
+
+        # Sanitize any executor-surfaced error before returning (BUG-007 v1.3)
+        self._sanitize_response_error(model, response)
 
         # Add debug info
         duration_ms = (time.time() - start_time) * 1000

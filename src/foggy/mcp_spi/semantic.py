@@ -128,6 +128,7 @@ class SemanticQueryResponse(BaseModel):
     warnings: Optional[List[str]] = None
     debug: Optional[DebugInfo] = None
     truncation_info: Optional[Dict[str, Any]] = Field(None, alias="truncationInfo")
+    error_detail: Optional[Dict[str, Any]] = Field(None, alias="error")
 
     # Internal-only error field — excluded from JSON serialization
     _error: Optional[str] = PrivateAttr(default=None)
@@ -172,9 +173,14 @@ class SemanticQueryResponse(BaseModel):
         return result
 
     @classmethod
-    def from_error(cls, error_msg: str, warnings: Optional[List[str]] = None) -> "SemanticQueryResponse":
+    def from_error(
+        cls,
+        error_msg: str,
+        warnings: Optional[List[str]] = None,
+        error_detail: Optional[Dict[str, Any]] = None,
+    ) -> "SemanticQueryResponse":
         """Create an error response (internal use)."""
-        resp = cls(warnings=warnings)
+        resp = cls(warnings=warnings, error_detail=error_detail)
         resp._error = error_msg
         return resp
 

@@ -1,10 +1,7 @@
 """Tests for inline aggregate expression support.
 
-In Java, columns like "sum(salesAmount) as totalSales" are parsed as inline
-aggregate expressions. This tests whether SemanticQueryService handles these.
-
-Since the Python implementation does not yet have an inline expression parser,
-tests that require it are marked with xfail.
+Python now supports Java-aligned inline aggregate expressions, including
+conditional aggregates such as ``sum(if(...))`` that lower to ``CASE WHEN``.
 """
 
 import pytest
@@ -28,6 +25,11 @@ def _build_sql(service: SemanticQueryService, request: SemanticQueryRequest) -> 
     assert response.error is None, f"Unexpected error: {response.error}"
     assert response.sql is not None, "Expected SQL in response"
     return response.sql
+
+
+def _normalize_sql_whitespace(sql: str) -> str:
+    """Collapse repeated whitespace so assertions focus on SQL semantics."""
+    return " ".join(sql.split())
 
 
 class TestInlineExpression:
@@ -114,3 +116,64 @@ class TestInlineExpression:
         select_part = sql.split("FROM")[0].upper()
         assert "SUM(" in select_part
         assert "SALES_AMOUNT" in select_part
+
+    def test_sum_if_constant_lowered_to_case_when(self, service):
+        request = SemanticQueryRequest(
+            columns=["orderStatus", "sum(if(orderStatus == 'COMPLETED', 1, 0)) as completedRows"]
+        )
+        sql = _build_sql(service, request)
+        select_part = _normalize_sql_whitespace(sql.split("FROM")[0]).upper()
+        assert "SUM(CASE WHEN" in select_part
+        assert "THEN 1 ELSE 0 END" in select_part
+        assert "T.ORDER_STATUS = 'COMPLETED'" in select_part
+
+    def test_sum_if_measure_lowered_to_case_when(self, service):
+        request = SemanticQueryRequest(
+            columns=["orderStatus", "sum(if(orderStatus == 'COMPLETED', salesAmount, 0)) as completedSales"]
+        )
+        sql = _build_sql(service, request)
+        select_part = _normalize_sql_whitespace(sql.split("FROM")[0]).upper()
+        assert "SUM(CASE WHEN" in select_part
+        assert "THEN T.SALES_AMOUNT ELSE 0 END" in select_part
+        assert "T.ORDER_STATUS = 'COMPLETED'" in select_part
+
+    def test_avg_if_null_lowered_to_case_when(self, service):
+        request = SemanticQueryRequest(
+            columns=["orderStatus", "avg(if(orderStatus == 'COMPLETED', salesAmount, null)) as avgCompletedSales"]
+        )
+        sql = _build_sql(service, request)
+        select_part = _normalize_sql_whitespace(sql.split("FROM")[0]).upper()
+        assert "AVG(CASE WHEN" in select_part
+        assert "THEN T.SALES_AMOUNT ELSE NULL END" in select_part
+
+    def test_count_if_null_lowered_to_case_when(self, service):
+        request = SemanticQueryRequest(
+            columns=["orderStatus", "count(if(orderStatus == 'COMPLETED', 1, null)) as completedCount"]
+        )
+        sql = _build_sql(service, request)
+        select_part = _normalize_sql_whitespace(sql.split("FROM")[0]).upper()
+        assert "COUNT(CASE WHEN" in select_part
+        assert "THEN 1 ELSE NULL END" in select_part
+
+    def test_if_expression_supports_multi_conditions(self, service):
+        request = SemanticQueryRequest(
+            columns=[
+                "orderStatus",
+                "sum(if(orderStatus == 'COMPLETED' && paymentMethod == 'ALIPAY', salesAmount, 0)) as completedAlipaySales",
+            ]
+        )
+        sql = _build_sql(service, request)
+        select_part = _normalize_sql_whitespace(sql.split("FROM")[0]).upper()
+        assert "CASE WHEN T.ORDER_STATUS = 'COMPLETED' AND T.PAYMENT_METHOD = 'ALIPAY'" in select_part
+
+    def test_if_expression_keeps_join_field_access(self, service):
+        request = SemanticQueryRequest(
+            columns=[
+                "product$categoryName",
+                "sum(if(product$categoryName == '电子产品', salesAmount, 0)) as electronicsSales",
+            ]
+        )
+        sql = _build_sql(service, request)
+        normalized_sql = _normalize_sql_whitespace(sql)
+        assert "LEFT JOIN dim_product" in normalized_sql
+        assert "dp.category_name = '电子产品'" in normalized_sql

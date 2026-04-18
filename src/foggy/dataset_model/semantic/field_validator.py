@@ -225,6 +225,25 @@ class FieldValidationResult:
     error_message: Optional[str] = None
 
 
+@dataclass
+class InvalidQueryFieldDetail:
+    """Recoverable invalid-field error detail for user/LLM repair."""
+    error_code: str
+    message: str
+    model: str
+    invalid_field: str
+    suggestions: List[str] = field(default_factory=list)
+
+    def to_public_dict(self) -> Dict[str, Any]:
+        return {
+            "errorCode": self.error_code,
+            "message": self.message,
+            "model": self.model,
+            "invalidField": self.invalid_field,
+            "suggestions": list(self.suggestions),
+        }
+
+
 def _strip_dimension_suffix(field_name: str) -> str:
     """Strip ``$suffix`` from a dimension field name.
 
@@ -409,3 +428,229 @@ def filter_response_columns(
         {k: v for k, v in row.items() if _map.get(k, k) in visible_set}
         for row in items
     ]
+
+
+def validate_query_fields(model: Any, request: Any) -> Optional[InvalidQueryFieldDetail]:
+    """Surface recoverable invalid-field errors before SQL build, so upstream callers
+    (users / LLMs) get a repair hint instead of a raw database error."""
+    schema_fields = _collect_model_schema_fields(model)
+    if not schema_fields:
+        return None
+
+    # Single pass over calculated_fields feeds three downstream consumers:
+    #   - schema_fields (calc names are valid references)
+    #   - dynamic_fields (skip validation for calc-defined names)
+    #   - calc_exprs (dependency validation for order_by + calc expressions)
+    dynamic_fields: Set[str] = set()
+    calc_exprs: List[tuple[str, str]] = []
+    for cf in request.calculated_fields or []:
+        name = cf.get("name") if isinstance(cf, dict) else getattr(cf, "name", None)
+        if not name:
+            continue
+        schema_fields.add(name)
+        dynamic_fields.add(name)
+        expr = cf.get("expression") if isinstance(cf, dict) else getattr(cf, "expression", None)
+        if expr:
+            calc_exprs.append((name, expr))
+    calc_map = dict(calc_exprs)
+
+    for col_expr in request.columns or []:
+        parsed = _parse_column_expr(col_expr)
+        if parsed.alias:
+            dynamic_fields.add(parsed.alias)
+        if parsed.source_fields:
+            for dep in parsed.source_fields:
+                detail = _check_query_field(model, dep, schema_fields, dynamic_fields)
+                if detail:
+                    return detail
+        elif parsed.source_field:
+            detail = _check_query_field(model, parsed.source_field, schema_fields, dynamic_fields)
+            if detail:
+                return detail
+
+    for item in request.group_by or []:
+        field_name = getattr(item, "field", None) if not isinstance(item, dict) else item.get("field")
+        detail = _check_query_field(model, field_name, schema_fields, dynamic_fields)
+        if detail:
+            return detail
+
+    for item in request.slice or []:
+        detail = _validate_slice_item(model, item, schema_fields, dynamic_fields)
+        if detail:
+            return detail
+
+    for item in request.order_by or []:
+        field_name = item.get("field") if isinstance(item, dict) else getattr(item, "field", None)
+        if not field_name:
+            continue
+        if field_name in dynamic_fields:
+            continue
+        expr = calc_map.get(field_name)
+        if expr:
+            for dep in _extract_field_dependencies(expr):
+                detail = _check_query_field(model, dep, schema_fields, dynamic_fields)
+                if detail:
+                    return detail
+            continue
+        detail = _check_query_field(model, field_name, schema_fields, dynamic_fields)
+        if detail:
+            return detail
+
+    for _, expr in calc_exprs:
+        for dep in _extract_field_dependencies(expr):
+            detail = _check_query_field(model, dep, schema_fields, dynamic_fields)
+            if detail:
+                return detail
+
+    return None
+
+
+def _collect_model_schema_fields(model: Any) -> Set[str]:
+    fields: Set[str] = set()
+
+    for name in getattr(model, "measures", {}) or {}:
+        fields.add(name)
+    for name in getattr(model, "dimensions", {}) or {}:
+        fields.add(name)
+    for name in getattr(model, "columns", {}) or {}:
+        fields.add(name)
+
+    dimension_joins = getattr(model, "dimension_joins", None) or {}
+    if isinstance(dimension_joins, dict):
+        iterable = dimension_joins.items()
+    else:
+        iterable = []
+        for join_def in dimension_joins:
+            dim_name = getattr(join_def, "name", None)
+            if dim_name:
+                iterable.append((dim_name, join_def))
+
+    for dim_name, join_def in iterable:
+        fields.add(f"{dim_name}$id")
+        fields.add(f"{dim_name}$caption")
+        for prop in getattr(join_def, "properties", []) or []:
+            prop_name = prop.get_name() if hasattr(prop, "get_name") else getattr(prop, "name", None)
+            if prop_name:
+                fields.add(f"{dim_name}${prop_name}")
+
+    return fields
+
+
+def _validate_slice_item(
+    model: Any,
+    item: Any,
+    schema_fields: Set[str],
+    dynamic_fields: Set[str],
+) -> Optional[InvalidQueryFieldDetail]:
+    if item is None:
+        return None
+
+    field_name = item.get("field") if isinstance(item, dict) else getattr(item, "field", None)
+    detail = _check_query_field(model, field_name, schema_fields, dynamic_fields)
+    if detail:
+        return detail
+
+    for key in ("conditions", "children", "filters", "$or", "$and", "or", "and"):
+        nested = item.get(key) if isinstance(item, dict) else getattr(item, key, None)
+        if isinstance(nested, list):
+            for child in nested:
+                detail = _validate_slice_item(model, child, schema_fields, dynamic_fields)
+                if detail:
+                    return detail
+    return None
+
+
+def _check_query_field(
+    model: Any,
+    field_name: Optional[str],
+    schema_fields: Set[str],
+    dynamic_fields: Set[str],
+) -> Optional[InvalidQueryFieldDetail]:
+    if not field_name:
+        return None
+    if field_name in dynamic_fields or field_name in schema_fields:
+        return None
+    if hasattr(model, "resolve_field") and model.resolve_field(field_name) is not None:
+        return None
+
+    suggestions = _suggest_fields(field_name, schema_fields)
+    message = f"Field '{field_name}' not found in model '{model.name}'."
+    if suggestions:
+        message += f" Did you mean '{suggestions[0]}'?"
+    return InvalidQueryFieldDetail(
+        error_code="INVALID_QUERY_FIELD",
+        message=message,
+        model=model.name,
+        invalid_field=field_name,
+        suggestions=suggestions,
+    )
+
+
+def _suggest_fields(invalid_field: str, schema_fields: Set[str]) -> List[str]:
+    scored: List[tuple[int, str]] = []
+    for candidate in schema_fields:
+        score = _field_similarity_score(invalid_field, candidate)
+        if score > 0:
+            scored.append((score, candidate))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return [candidate for _, candidate in scored[:3]]
+
+
+def _field_similarity_score(invalid_field: str, candidate: str) -> int:
+    invalid_norm = _normalize_field_name(invalid_field)
+    candidate_norm = _normalize_field_name(candidate)
+    invalid_tail = _tail_field_name(invalid_field)
+    candidate_tail = _tail_field_name(candidate)
+
+    if invalid_norm == candidate_norm:
+        return 1000
+
+    score = 0
+    if invalid_tail.lower() == candidate_tail.lower():
+        score += 800
+    if candidate_norm.endswith(invalid_tail.lower()):
+        score += 500
+    if invalid_tail.lower() in candidate_tail.lower() or candidate_tail.lower() in invalid_tail.lower():
+        score += 200
+
+    distance = _levenshtein_distance(invalid_norm, candidate_norm)
+    max_len = max(len(invalid_norm), len(candidate_norm))
+    score += max(0, 200 - distance * 40)
+    if max_len > 0:
+        ratio = 1.0 - (distance / max_len)
+        if ratio >= 0.55:
+            score += round(ratio * 100)
+
+    return score if score >= 220 else 0
+
+
+def _normalize_field_name(field_name: str) -> str:
+    return re.sub(r"[$_\-\s]", "", field_name).lower()
+
+
+def _tail_field_name(field_name: str) -> str:
+    if "$" not in field_name:
+        return field_name
+    return field_name.rsplit("$", 1)[1]
+
+
+def _levenshtein_distance(left: str, right: str) -> int:
+    if left == right:
+        return 0
+    if not left:
+        return len(right)
+    if not right:
+        return len(left)
+
+    prev = list(range(len(right) + 1))
+    for i, left_ch in enumerate(left, start=1):
+        curr = [i]
+        for j, right_ch in enumerate(right, start=1):
+            cost = 0 if left_ch == right_ch else 1
+            curr.append(min(
+                prev[j] + 1,
+                curr[j - 1] + 1,
+                prev[j - 1] + cost,
+            ))
+        prev = curr
+    return prev[-1]

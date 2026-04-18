@@ -215,6 +215,20 @@ class TestInlineExpressionStep:
         assert len(parsed) == 1
         assert parsed[0]["field"] == "quantity"
 
+    def test_detects_nested_if_expression(self, sales_model):
+        ctx = ModelResultContext(
+            model_name="FactSalesModel",
+            request={"columns": ["sum(if(orderStatus == 'COMPLETED', salesAmount, 0)) as completedSales"]},
+            query_model=sales_model,
+        )
+        step = InlineExpressionStep()
+        step.before_query(ctx)
+        parsed = ctx.ext_data["parsed_inline_expressions"]
+        assert len(parsed) == 1
+        assert parsed[0]["function"] == "SUM"
+        assert parsed[0]["field"] == "if(orderStatus == 'COMPLETED', salesAmount, 0)"
+        assert parsed[0]["alias"] == "completedSales"
+
 
 # ===================================================================
 # TestAutoGroupByStep
@@ -269,6 +283,17 @@ class TestAutoGroupByStep:
             query_model=sales_model,
         )
         # Run inline step first to populate ext_data
+        InlineExpressionStep().before_query(ctx)
+        AutoGroupByStep().before_query(ctx)
+        assert ctx.ext_data.get("auto_group_by") == ["orderId"]
+
+    def test_nested_inline_expression_triggers_group_by(self, sales_model):
+        """Nested inline aggregates should still count as measures for auto groupBy."""
+        ctx = ModelResultContext(
+            model_name="FactSalesModel",
+            request={"columns": ["orderId", "sum(if(orderStatus == 'COMPLETED', salesAmount, 0)) as completedSales"]},
+            query_model=sales_model,
+        )
         InlineExpressionStep().before_query(ctx)
         AutoGroupByStep().before_query(ctx)
         assert ctx.ext_data.get("auto_group_by") == ["orderId"]

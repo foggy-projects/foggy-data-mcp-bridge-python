@@ -1,14 +1,15 @@
-"""QueryFacade pipeline — step-based query execution.
+"""QueryFacade pipeline - step-based query execution.
 
 Aligned with Java QueryFacade + DataSetResultStep.
 """
 
 from __future__ import annotations
 
-import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
+
+from foggy.dataset_model.semantic.inline_expression import parse_inline_aggregate
 
 
 # ---------------------------------------------------------------------------
@@ -87,13 +88,6 @@ class InlineExpressionStep(QueryStep):
     ``context.ext_data['parsed_inline_expressions']``.
     """
 
-    _INLINE_AGG_RE = re.compile(
-        r'^(sum|avg|count|min|max|count_distinct|countd|group_concat|'
-        r'stddev_pop|stddev_samp|var_pop|var_samp)\s*\(\s*([^)]+)\s*\)'
-        r'(?:\s+as\s+(\w+))?$',
-        re.IGNORECASE,
-    )
-
     @property
     def order(self) -> int:
         return 5
@@ -102,16 +96,15 @@ class InlineExpressionStep(QueryStep):
         columns = context.request.get("columns") or []
         parsed: List[Dict[str, Any]] = []
         for col_name in columns:
-            m = self._INLINE_AGG_RE.match(col_name.strip())
-            if m:
-                func_name = m.group(1).upper()
-                field_name = m.group(2).strip()
-                alias = m.group(3)
+            parsed_expr = parse_inline_aggregate(col_name)
+            if parsed_expr:
+                func_name = parsed_expr.function
+                field_name = parsed_expr.inner_expression
                 parsed.append({
                     "original": col_name,
                     "function": func_name,
                     "field": field_name,
-                    "alias": alias or f"{func_name.lower()}_{field_name}",
+                    "alias": parsed_expr.alias,
                 })
         context.ext_data["parsed_inline_expressions"] = parsed
         return True

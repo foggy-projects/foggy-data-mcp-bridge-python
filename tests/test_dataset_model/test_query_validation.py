@@ -41,12 +41,15 @@ class TestQueryValidation:
         assert "not found" in response.error.lower()
 
     def test_validate_unknown_column(self, service):
-        """An unknown column name should produce a warning."""
+        """Unknown columns now fail fast with an INVALID_QUERY_FIELD repair hint
+        instead of silently falling through to the database."""
         request = SemanticQueryRequest(columns=["orderStatus", "totallyBogusColumn"])
         response = service.query_model("FactSalesModel", request, mode="validate")
-        assert response.sql is not None
-        assert len(response.warnings) > 0
-        assert any("totallyBogusColumn" in w for w in response.warnings)
+        assert response.error is not None
+        assert "totallyBogusColumn" in response.error
+        assert response.error_detail is not None
+        assert response.error_detail["errorCode"] == "INVALID_QUERY_FIELD"
+        assert response.error_detail["invalidField"] == "totallyBogusColumn"
 
     def test_validate_no_columns(self, service):
         """Empty columns should select all visible dimensions and measures."""

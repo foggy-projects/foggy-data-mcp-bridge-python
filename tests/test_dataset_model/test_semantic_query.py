@@ -72,6 +72,16 @@ def ecommerce_join_service() -> SemanticQueryService:
     return svc
 
 
+@pytest.fixture
+def odoo_service() -> SemanticQueryService:
+    """Service with Odoo TM+QM models loaded from demo files."""
+    svc = SemanticQueryService()
+    models = load_models_from_directory(str(Path("src") / "foggy" / "demo" / "models" / "odoo"))
+    for model in models:
+        svc.register_model(model)
+    return svc
+
+
 def _build_sql(service: SemanticQueryService, model_name: str, request: SemanticQueryRequest) -> str:
     """Helper: build query in validate mode and return the SQL string."""
     response = service.query_model(model_name, request, mode="validate")
@@ -533,6 +543,103 @@ class TestMultiFactJoinQuery:
         assert "LEFT JOIN dim_product AS dp" in sql
         assert "t.product_key = dp.product_key" in sql
         assert "SUM(j1.return_amount)" in sql
+
+
+class TestInvalidFieldRecovery:
+    """Recoverable invalid-field errors should be raised before SQL build."""
+
+    def test_odoo_invalid_field_suggests_move_type(self, odoo_service: SemanticQueryService):
+        request = SemanticQueryRequest(
+            columns=["move$moveType", "name"],
+            limit=10,
+        )
+        response = odoo_service.query_model("OdooAccountMoveQueryModel", request, mode="validate")
+        self._assert_invalid_field(response, "move$moveType", "moveType")
+
+    def test_odoo_invalid_field_suggests_state(self, odoo_service: SemanticQueryService):
+        request = SemanticQueryRequest(
+            columns=["move$state", "name"],
+            limit=10,
+        )
+        response = odoo_service.query_model("OdooAccountMoveQueryModel", request, mode="validate")
+        self._assert_invalid_field(response, "move$state", "state")
+
+    def test_odoo_invalid_parent_style_field_suggests_state(self, odoo_service: SemanticQueryService):
+        request = SemanticQueryRequest(
+            columns=["parent$state", "name"],
+            limit=10,
+        )
+        response = odoo_service.query_model("OdooAccountMoveQueryModel", request, mode="validate")
+        self._assert_invalid_field(response, "parent$state", "state")
+
+    def test_odoo_invalid_group_by_suggests_move_type(self, odoo_service: SemanticQueryService):
+        request = SemanticQueryRequest(
+            columns=["name", "move$moveType"],
+            group_by=[{"field": "move$moveType"}],
+            limit=10,
+        )
+        response = odoo_service.query_model("OdooAccountMoveQueryModel", request, mode="validate")
+        self._assert_invalid_field(response, "move$moveType", "moveType")
+
+    def test_odoo_invalid_slice_suggests_move_type(self, odoo_service: SemanticQueryService):
+        request = SemanticQueryRequest(
+            columns=["name"],
+            slice=[{"field": "move$moveType", "operator": "=", "value": "out_invoice"}],
+            limit=10,
+        )
+        response = odoo_service.query_model("OdooAccountMoveQueryModel", request, mode="validate")
+        self._assert_invalid_field(response, "move$moveType", "moveType")
+
+    def test_odoo_invalid_order_by_suggests_move_type(self, odoo_service: SemanticQueryService):
+        request = SemanticQueryRequest(
+            columns=["name"],
+            order_by=[{"field": "move$moveType", "direction": "asc"}],
+            limit=10,
+        )
+        response = odoo_service.query_model("OdooAccountMoveQueryModel", request, mode="validate")
+        self._assert_invalid_field(response, "move$moveType", "moveType")
+
+    def test_odoo_invalid_nested_slice_suggests_move_type(self, odoo_service: SemanticQueryService):
+        request = SemanticQueryRequest(
+            columns=["name"],
+            slice=[{
+                "$or": [
+                    {"field": "move$moveType", "operator": "=", "value": "out_invoice"},
+                    {"field": "moveType", "operator": "=", "value": "out_invoice"},
+                ]
+            }],
+            limit=10,
+        )
+        response = odoo_service.query_model("OdooAccountMoveQueryModel", request, mode="validate")
+        self._assert_invalid_field(response, "move$moveType", "moveType")
+
+    def test_odoo_invalid_calculated_field_dependency_suggests_move_type(
+        self,
+        odoo_service: SemanticQueryService,
+    ):
+        request = SemanticQueryRequest(
+            columns=["name", "badMoveType"],
+            calculated_fields=[{
+                "name": "badMoveType",
+                "expression": "COALESCE(move$moveType, moveType)",
+            }],
+            limit=10,
+        )
+        response = odoo_service.query_model("OdooAccountMoveQueryModel", request, mode="validate")
+        self._assert_invalid_field(response, "move$moveType", "moveType")
+
+    def _assert_invalid_field(self, response, invalid_field: str, expected_suggestion: str):
+        assert response.error is not None
+        assert f"Field '{invalid_field}' not found in model 'OdooAccountMoveQueryModel'." in response.error
+        assert f"Did you mean '{expected_suggestion}'?" in response.error
+        assert response.error_detail is not None
+        assert response.error_detail["errorCode"] == "INVALID_QUERY_FIELD"
+        assert response.error_detail["model"] == "OdooAccountMoveQueryModel"
+        assert response.error_detail["invalidField"] == invalid_field
+        assert expected_suggestion in response.error_detail["suggestions"]
+        assert "column t.move$movetype does not exist" not in response.error.lower()
+        assert "column t.move$state does not exist" not in response.error.lower()
+        assert "column t.parent$state does not exist" not in response.error.lower()
 
 
 # ==================== TestMetadataV3 ====================
