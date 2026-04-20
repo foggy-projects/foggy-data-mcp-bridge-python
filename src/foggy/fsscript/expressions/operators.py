@@ -1,7 +1,8 @@
 """Operator expressions (binary and unary)."""
 
+from decimal import Decimal, InvalidOperation
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, Optional
 from pydantic import Field
 
 from foggy.fsscript.expressions.base import Expression, ExpressionVisitor
@@ -38,6 +39,12 @@ class BinaryOperator(str, Enum):
 
     # Type check
     INSTANCEOF = "instanceof"
+
+    # Membership (SQL-style `v in (...)` / `v not in (...)`)
+    # 契约对齐 Java `foggy-fsscript` 8.1.11.beta
+    # `IN.java` / `NOT_IN.java` 的 containsMember + looseEquals 语义。
+    IN = "in"
+    NOT_IN = "not in"
 
 
 class UnaryOperator(str, Enum):
@@ -114,6 +121,12 @@ class BinaryExpression(Expression):
         # Type check
         elif op == BinaryOperator.INSTANCEOF:
             return _check_instanceof(left_val, right_val)
+
+        # Membership (SQL-style)
+        elif op == BinaryOperator.IN:
+            return _check_in(left_val, right_val)
+        elif op == BinaryOperator.NOT_IN:
+            return not _check_in(left_val, right_val)
 
         return None
 
@@ -393,6 +406,119 @@ def _check_instanceof(left_val: Any, right_val: Any) -> bool:
     if name and name in _INSTANCEOF_MAP:
         return _INSTANCEOF_MAP[name](left_val)
 
+    return False
+
+
+# ---------------------------------------------------------------------------
+# in / not in helpers
+#
+# 契约对齐 Java `foggy-fsscript` 8.1.11.beta:
+#   - IN.java#containsMember(ee, left, right)          -> _check_in
+#   - IN.java#toIterable(v)                            -> _to_haystack
+#   - IN.java#looseEquals(a, b) + toBigDecimal(n)      -> _loose_equal
+#
+# Python 特有的偏差（已加护栏、见 tests/test_fsscript/test_in_operator.py）：
+#   - `bool` 是 `int` 的子类；Java 侧 Boolean 与 Number 不会混淆。
+#     我们在 _loose_equal 的数值归一路径显式排除 bool，避免
+#     `True in (1, 2)` / `1 in (True, False)` 意外为真。
+# ---------------------------------------------------------------------------
+
+
+def _to_haystack(value: Any) -> Optional[Iterable[Any]]:
+    """Normalize the right-hand operand to an iterable.
+
+    对齐 Java `IN.toIterable`:
+    - None             -> None（调用方按 False 处理）
+    - dict             -> keys()
+    - list/tuple/set/frozenset/str -> 原样可迭代
+    - 其他可迭代对象   -> `list(it)` 一次性物化（避免生成器耗尽）
+    - 标量             -> `[value]` 单元素集合
+    """
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return list(value.keys())
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return value
+    if isinstance(value, str):
+        # 字符串作为 haystack：沿用 Python 原生 `in` 子串语义。
+        # Java singleton 路径下 `"a" in "a"` 也为 true，语义一致。
+        return value
+    # 其他任意可迭代对象统一物化一次。
+    if hasattr(value, "__iter__"):
+        try:
+            return list(value)
+        except TypeError:
+            pass
+    # 标量 wrap 为单元素集合，对齐 Java Collections.singletonList。
+    return [value]
+
+
+def _loose_equal(a: Any, b: Any) -> bool:
+    """Loose equality used by `in` / `not in`.
+
+    对齐 Java `IN.looseEquals`：
+    - None 仅等于 None
+    - 两侧都是 Number（且都不是 bool）时按 Decimal 值比较
+    - bool 与 Number 的跨类比较判为不等（Python 特有护栏，Java 无此陷阱）
+    - 其他走 Python `==`
+    """
+    if a is None and b is None:
+        return True
+    if a is None or b is None:
+        return False
+
+    a_is_bool = isinstance(a, bool)
+    b_is_bool = isinstance(b, bool)
+    a_is_num = isinstance(a, (int, float, Decimal)) and not a_is_bool
+    b_is_num = isinstance(b, (int, float, Decimal)) and not b_is_bool
+
+    # bool 与 Number 跨类比较：强制不等（Python `True == 1` 会误判）
+    if a_is_bool and b_is_num:
+        return False
+    if b_is_bool and a_is_num:
+        return False
+
+    # Number 之间：Decimal 值比较，打平 int / float / Decimal 类型差异
+    if a_is_num and b_is_num:
+        try:
+            da = a if isinstance(a, Decimal) else Decimal(str(a))
+            db = b if isinstance(b, Decimal) else Decimal(str(b))
+            return da == db
+        except (InvalidOperation, ValueError):
+            return a == b
+
+    try:
+        return a == b
+    except Exception:
+        return False
+
+
+def _check_in(left: Any, right: Any) -> bool:
+    """`left in right` membership test.
+
+    对齐 Java `IN.containsMember`：
+    - right 为 None          -> False
+    - right 展开为 haystack 后逐项 `_loose_equal(left, item)`
+    - 任一命中返回 True；否则 False
+    """
+    haystack = _to_haystack(right)
+    if haystack is None:
+        return False
+    # str haystack：使用 Python 原生子串语义（包含 startswith/substring）。
+    # 只在左值是 str 时走子串；否则走逐字符 loose_equal（防止 "a" in "abc" 的
+    # 元素各自去做 Number 归一）。
+    if isinstance(haystack, str):
+        if isinstance(left, str):
+            return left in haystack
+        # 非字符串左值与字符串 haystack：逐字符 loose 对比
+        for ch in haystack:
+            if _loose_equal(left, ch):
+                return True
+        return False
+    for item in haystack:
+        if _loose_equal(left, item):
+            return True
     return False
 
 

@@ -113,33 +113,108 @@ class FDialect(ABC):
     def translate_function(self, func_name: str, args: List[str]) -> str:
         """Translate a function call to the dialect-specific SQL.
 
-        Different databases use different names for equivalent functions.
-        E.g., NVL → IFNULL (MySQL/SQLite), NVL → COALESCE (PostgreSQL),
-              LENGTH → LEN (SQL Server).
+        Lookup order (mirrors Java ``FDialect.buildFunctionCall`` →
+        ``translateFunction`` cascade in
+        ``foggy-dataset/src/main/java/.../db/dialect/FDialect.java``):
 
-        Subclasses should override _get_function_mappings() to provide
-        their mapping table. The base implementation falls through to
-        the original function name if no mapping is found.
+        1. ``build_function_call(func_name, args)`` — complex translations
+           that need argument re-ordering, format-string rewriting, or
+           alternative SQL forms (e.g. ``DATE_FORMAT`` → ``TO_CHAR`` on
+           Postgres, or ``YEAR(col)`` → ``EXTRACT(YEAR FROM col)``).  A
+           dialect returns ``None`` here to signal "fall through".
+        2. ``_get_function_mappings()`` — simple name rewrite (e.g. ``NVL``
+           → ``IFNULL`` / ``COALESCE`` / ``ISNULL``).
+        3. Default ``FUNC_NAME(args)`` emission, preserving the original
+           case as passed in.
 
         Args:
             func_name: Function name (case-insensitive)
-            args: Function arguments as SQL expressions
+            args: Function arguments as already-rendered SQL expressions
 
         Returns:
-            Translated SQL expression, e.g. "IFNULL(col, 0)"
+            Translated SQL expression, e.g. ``"IFNULL(col, 0)"`` or
+            ``"TO_CHAR(col, 'YYYY-MM')"``.
         """
+        if func_name is None:
+            return None
+        # 1. Dialect-specific complex translation
+        complex_sql = self.build_function_call(func_name, args)
+        if complex_sql is not None:
+            return complex_sql
+
+        # 2. Simple rename
         upper_name = func_name.upper()
         mappings = self._get_function_mappings()
         translated = mappings.get(upper_name, upper_name)
         return f"{translated}({', '.join(args)})"
 
+    def build_function_call(self, func_name: str, args: List[str]) -> Optional[str]:
+        """Build a dialect-specific SQL expression for a function call.
+
+        Override in subclasses to provide translations that cannot be
+        expressed as a simple rename.  Return ``None`` to signal
+        "no special handling — let translate_function fall through to
+        the rename table".
+
+        Mirrors Java ``FDialect.buildFunctionCall`` (default returns
+        ``null`` / ``None``).
+
+        Args:
+            func_name: Function name (case-insensitive)
+            args: Function arguments as already-rendered SQL expressions
+
+        Returns:
+            A fully-formed SQL call string, or ``None`` to fall through.
+        """
+        return None
+
+    _FUNCTION_MAPPINGS: dict = {}
+
     def _get_function_mappings(self) -> dict:
         """Return a dict of function name mappings for this dialect.
 
-        Override in subclasses. Keys and values are UPPER CASE.
-        E.g., {"NVL": "IFNULL", "LENGTH": "LEN"}
+        Override ``_FUNCTION_MAPPINGS`` class attribute in subclasses.
+        Keys and values are UPPER CASE. E.g., ``{"NVL": "IFNULL"}``.
         """
-        return {}
+        return self._FUNCTION_MAPPINGS
+
+    @staticmethod
+    def _translate_mysql_date_format(
+        mysql_fmt_literal: str,
+        format_map: dict,
+    ) -> str:
+        """Rewrite a MySQL ``DATE_FORMAT`` format literal using ``format_map``.
+
+        The input is a SQL string literal like ``"'%Y-%m-%d'"`` (single-
+        quoted, as emitted by upstream string-literal normalization).
+        Only ``%X`` placeholders are substituted; other characters
+        (including outer quotes, dashes, spaces) pass through verbatim.
+        Unknown placeholders are left literal so any downstream SQL
+        error still points at the original symbol.
+
+        Shared between PostgresDialect / SqlServerDialect; each passes
+        its own ``format_map``.
+        """
+        if len(mysql_fmt_literal) >= 2 and \
+                mysql_fmt_literal[0] == "'" and mysql_fmt_literal[-1] == "'":
+            inner = mysql_fmt_literal[1:-1]
+            quoted = True
+        else:
+            inner = mysql_fmt_literal
+            quoted = False
+        out: List[str] = []
+        i = 0
+        n = len(inner)
+        while i < n:
+            if inner[i] == "%" and i + 1 < n:
+                tok = inner[i : i + 2]
+                out.append(format_map.get(tok, tok))
+                i += 2
+                continue
+            out.append(inner[i])
+            i += 1
+        translated = "".join(out)
+        return f"'{translated}'" if quoted else translated
 
     def get_create_table_sql(
         self,

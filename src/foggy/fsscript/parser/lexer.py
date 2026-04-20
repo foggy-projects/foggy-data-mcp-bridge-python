@@ -2,10 +2,18 @@
 
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Any, Generator, Optional
+from typing import TYPE_CHECKING, Any, Generator, Optional
 
 from foggy.fsscript.parser.tokens import KEYWORDS, SourceLocation, Token, TokenType
 from foggy.fsscript.parser.errors import LexerError
+
+if TYPE_CHECKING:
+    # Type-only import to avoid circular dependency at runtime.
+    # `dialect.py` itself only depends on `tokens.py`; this guard makes it
+    # explicit that lexer.py never needs FsscriptDialect at runtime — it only
+    # consumes the materialized keyword dict via `dialect.effective_keywords()`,
+    # which the parser passes in.
+    from foggy.fsscript.parser.dialect import FsscriptDialect
 
 
 class LexerState(Enum):
@@ -43,10 +51,20 @@ class FsscriptLexer:
     def __init__(
         self,
         source: str,
-        config: Optional[LexerConfig] = None
+        config: Optional[LexerConfig] = None,
+        dialect: Optional["FsscriptDialect"] = None,
     ):
         self.source = source
         self.config = config or LexerConfig()
+
+        # Dialect: per-instance keyword override.
+        # `None` keeps the historical fast path of pointing directly at the
+        # module-level KEYWORDS constant (zero copy, no merge cost). A non-None
+        # dialect materializes its merged dict once at __init__.
+        if dialect is None:
+            self._keywords: dict[str, TokenType] = KEYWORDS
+        else:
+            self._keywords = dialect.effective_keywords()
 
         # Position tracking
         self._pos = 0
@@ -329,8 +347,9 @@ class FsscriptLexer:
 
         name = ''.join(result)
 
-        # Check if it's a keyword
-        token_type = KEYWORDS.get(name.lower())
+        # Check if it's a keyword (per-dialect; falls back to KEYWORDS when
+        # no dialect was supplied — see __init__).
+        token_type = self._keywords.get(name.lower())
         if token_type:
             return self._make_token(token_type, name)
 

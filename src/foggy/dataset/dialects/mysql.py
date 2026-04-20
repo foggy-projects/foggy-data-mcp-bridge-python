@@ -95,15 +95,19 @@ class MySqlDialect(FDialect):
         """Get SQL to extract value from JSON."""
         return f"JSON_EXTRACT({json_expr}, '{path}')"
 
-    def _get_function_mappings(self) -> dict:
-        """MySQL function mappings: NVL→IFNULL, SUBSTR→SUBSTRING."""
-        return {
-            "NVL": "IFNULL",
-            "COALESCE": "COALESCE",
-            "SUBSTR": "SUBSTRING",
-            "LEN": "LENGTH",
-            "ISNULL": "IFNULL",
-        }
+    # MySQL function mappings.  MySQL is the de-facto baseline, so
+    # most functions pass through unchanged; only aliases from other
+    # dialects need remapping.  Note: MySQL has native ``POW`` and
+    # ``POWER`` as synonyms, so we deliberately do NOT remap ``POW``
+    # here (mirrors Java ``MysqlDialect`` — POW stays POW).
+    _FUNCTION_MAPPINGS: dict = {
+        "NVL": "IFNULL",
+        "COALESCE": "COALESCE",
+        "SUBSTR": "SUBSTRING",
+        "LEN": "LENGTH",
+        "ISNULL": "IFNULL",
+        "TRUNC": "TRUNCATE",  # Postgres alias
+    }
 
     def get_insert_on_duplicate_key_update_sql(
         self,

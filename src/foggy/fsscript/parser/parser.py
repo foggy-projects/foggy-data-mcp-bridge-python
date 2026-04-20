@@ -1,9 +1,14 @@
 """FSScript Parser - Parses token stream into AST."""
 
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
 
 from foggy.fsscript.parser.tokens import Token, TokenType
 from foggy.fsscript.parser.lexer import FsscriptLexer
+
+if TYPE_CHECKING:
+    # Type-only import; real `dialect` instance is imported by callers and
+    # passed in at construction time. Keeps parser <-> dialect coupling minimal.
+    from foggy.fsscript.parser.dialect import FsscriptDialect
 from foggy.fsscript.parser.errors import (
     ParseError,
     UnexpectedTokenError,
@@ -137,10 +142,25 @@ class FsscriptParser:
     - Error recovery
     """
 
-    def __init__(self, source: str):
-        """Initialize parser with source code."""
+    def __init__(
+        self,
+        source: str,
+        dialect: Optional["FsscriptDialect"] = None,
+    ):
+        """Initialize parser with source code.
+
+        Args:
+            source: FSScript source text.
+            dialect: Optional :class:`FsscriptDialect` controlling per-instance
+                keyword handling. ``None`` (default) preserves historical
+                FSScript behavior. See :mod:`foggy.fsscript.parser.dialect`.
+        """
         self.source = source
-        self._lexer = FsscriptLexer(source)
+        # Retained so nested parsers (e.g. for ${...} expressions inside
+        # template strings) inherit the same dialect rather than silently
+        # falling back to the default keyword set.
+        self._dialect = dialect
+        self._lexer = FsscriptLexer(source, dialect=dialect)
         self._current_token: Optional[Token] = None
         self._previous_token: Optional[Token] = None
         self._advance()
@@ -948,6 +968,31 @@ class FsscriptParser:
                                 TokenType.EOF):
                 break
 
+            # SQL 风格 `x not in (...)` —— 2-token lookahead。
+            # NOT 本身没有中缀优先级（只作前缀逻辑非），默认会让外层循环退出；
+            # 这里需要识别 NOT + IN 的组合，按 IN 的优先级（11）处理。
+            if current.type == TokenType.NOT:
+                IN_PREC = PRECEDENCE.get(TokenType.IN, 11)
+                if IN_PREC <= min_prec:
+                    break
+                saved = self._save_state()
+                self._advance()  # 试探消费 NOT
+                if self._check(TokenType.IN):
+                    not_token = saved["current_token"]
+                    self._advance()  # 消费 IN
+                    right = self._parse_in_rhs(IN_PREC)
+                    left = BinaryExpression(
+                        left=left,
+                        operator=BinaryOperator.NOT_IN,
+                        right=right,
+                        line=not_token.line,
+                        column=not_token.column,
+                    )
+                    continue
+                # 不是 NOT IN —— 回滚，让循环退出把 NOT 留给外层处理
+                self._restore_state(saved)
+                break
+
             prec = PRECEDENCE.get(current.type, -1)
             if prec <= min_prec:
                 break
@@ -1082,10 +1127,17 @@ class FsscriptParser:
             TokenType.AND_AND: BinaryOperator.AND,
             TokenType.OR_OR: BinaryOperator.OR,
             TokenType.INSTANCEOF: BinaryOperator.INSTANCEOF,
+            TokenType.IN: BinaryOperator.IN,
         }
 
         if token.type in op_map:
-            right = self._parse_expression_with_precedence(prec)
+            # SQL 风格 `v in (1, 2, 3)` / `v in [1,2,3]` 右操作数走 _parse_in_rhs，
+            # 以便在 `in` / `not in` 上下文里把 `(a, b, c)` 识别成数组字面量；
+            # 不改动全局 `(...)` 语义（箭头参数 / 分组表达式）。
+            if token.type == TokenType.IN:
+                right = self._parse_in_rhs(prec)
+            else:
+                right = self._parse_expression_with_precedence(prec)
             return BinaryExpression(
                 left=left,
                 operator=op_map[token.type],
@@ -1127,6 +1179,48 @@ class FsscriptParser:
             )
 
         raise InvalidSyntaxError(f"Unknown infix operator: {token.type.name}")
+
+    def _parse_in_rhs(self, prec: int) -> Expression:
+        """Parse the right-hand side of `in` / `not in`.
+
+        支持三种形态，与 Java `foggy-fsscript` `IN.resolveHaystack` 对齐：
+          - `(a, b, c)` —— 括号内逗号列表，直接产出 `ArrayExpression`
+          - `(expr)`    —— 单值括号，透明透传（等价于 `expr`）
+          - `()`        —— 空括号，视作空 `ArrayExpression`（对齐 Java 空集合）
+          - `[a, b, c]` —— 原生数组字面量，走 `_parse_prefix` → `_parse_array_literal`
+          - 其他        —— 标识符 / 调用 / 成员访问等任意表达式，按常规优先级
+        """
+        if self._check(TokenType.LPAREN):
+            lparen = self._advance()  # 消费 (
+            # 空括号 `()`
+            if self._check(TokenType.RPAREN):
+                self._advance()
+                return ArrayExpression(
+                    elements=[],
+                    line=lparen.line,
+                    column=lparen.column,
+                )
+            first = self.parse_expression()
+            # `(expr, expr, ...)` —— 逗号列表 → ArrayExpression
+            if self._check(TokenType.COMMA):
+                elements = [first]
+                while self._match(TokenType.COMMA):
+                    # 允许尾随逗号 `(a, b,)`（与 Python/JS array 习惯一致）
+                    if self._check(TokenType.RPAREN):
+                        break
+                    elements.append(self.parse_expression())
+                self._expect(TokenType.RPAREN)
+                return ArrayExpression(
+                    elements=elements,
+                    line=lparen.line,
+                    column=lparen.column,
+                )
+            # `(expr)` —— 单值括号透明透传
+            self._expect(TokenType.RPAREN)
+            return first
+
+        # `[1, 2, 3]` 或任意表达式走常规路径
+        return self._parse_expression_with_precedence(prec)
 
     def _parse_postfix(self, left: Expression) -> Expression:
         """Parse postfix expression (call, member access, etc.)."""
@@ -1218,9 +1312,11 @@ class FsscriptParser:
             if p[0] == 'str':
                 result_parts.append(StringExpression(value=p[1]))
             elif p[0] == 'expr':
-                # Parse the expression string
+                # Parse the expression string. Inherit the outer parser's
+                # dialect so e.g. `if(...)` inside `${...}` follows the same
+                # keyword-override rules as the surrounding source.
                 expr_str = p[1]
-                expr_parser = FsscriptParser(expr_str)
+                expr_parser = FsscriptParser(expr_str, dialect=self._dialect)
                 try:
                     expr = expr_parser.parse_expression()
                     result_parts.append(expr)

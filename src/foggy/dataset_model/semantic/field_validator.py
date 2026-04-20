@@ -83,20 +83,40 @@ def _extract_field_dependencies(expr: str) -> Set[str]:
     Strips string literals, tokenizes, and removes known SQL keywords.
     This is the **single source of truth** for dependency extraction.
 
+    v1.5 Phase 3: identifiers appearing immediately after a ``.`` are
+    treated as method or sub-property names (e.g. ``name.startsWith`` —
+    ``startsWith`` is a fsscript method, not a field).  Those are
+    excluded from the dependency set so they don't trigger "field not
+    found" validation errors for the AST expression compiler.
+
     Examples::
 
         "a + b"                → {"a", "b"}
         "sum(a + b)"           → {"a", "b"}
         "case when s = 'x' then amount else 0 end" → {"s", "amount"}
         "round(a / b, 2)"      → {"a", "b"}
+        "name.startsWith('x')" → {"name"}     # startsWith dropped (method)
+        "a.b + c"              → {"a.b", "c"} # dotted-path stays as one token
         "1 + 2"                → set()
         ""                     → set()
     """
     if not expr:
         return set()
     cleaned = _STRING_LITERAL_RE.sub("", expr)
-    tokens = _TOKEN_RE.findall(cleaned)
-    return {t for t in tokens if t.lower() not in _EXPR_KEYWORDS}
+    # Collect tokens with preceding-char context to decide method vs field.
+    results: Set[str] = set()
+    for m in _TOKEN_RE.finditer(cleaned):
+        token = m.group(0)
+        if token.lower() in _EXPR_KEYWORDS:
+            continue
+        start = m.start()
+        # Preceding dot → this is a method or sub-property name.  Skip
+        # it; the dotted path is tracked via the ``dim$prop`` convention
+        # or by the caller (which gets the base name anyway).
+        if start > 0 and cleaned[start - 1] == ".":
+            continue
+        results.add(token)
+    return results
 
 
 @dataclass

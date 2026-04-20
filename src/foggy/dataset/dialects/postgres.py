@@ -98,16 +98,59 @@ class PostgresDialect(FDialect):
             pg_path = pg_path[1:]
         return f"{json_expr}->>'{pg_path}'"
 
-    def _get_function_mappings(self) -> dict:
-        """PostgreSQL function mappings: IFNULL→COALESCE, NVL→COALESCE."""
-        return {
-            "IFNULL": "COALESCE",
-            "NVL": "COALESCE",
-            "ISNULL": "COALESCE",
-            "LEN": "LENGTH",
-            "SUBSTR": "SUBSTR",
-            "SUBSTRING": "SUBSTR",
-        }
+    # PostgreSQL function mappings: IFNULL→COALESCE, NVL→COALESCE, etc.
+    _FUNCTION_MAPPINGS: dict = {
+        "IFNULL": "COALESCE",
+        "NVL": "COALESCE",
+        "ISNULL": "COALESCE",
+        "LEN": "LENGTH",
+        "SUBSTR": "SUBSTR",
+        "SUBSTRING": "SUBSTR",
+        "POW": "POWER",
+        "TRUNCATE": "TRUNC",  # MySQL TRUNCATE → Postgres TRUNC
+    }
+
+    # MySQL → PostgreSQL DATE_FORMAT placeholder mapping.
+    # 对齐 Java ``PostgresDialect.translateMysqlDateFormat``.
+    _MYSQL_TO_PG_FORMAT: dict = {
+        "%Y": "YYYY",    "%y": "YY",
+        "%m": "MM",      "%d": "DD",
+        "%H": "HH24",    "%i": "MI",      "%s": "SS",
+        "%M": "Month",   "%b": "Mon",
+        "%W": "Day",     "%a": "Dy",
+        "%j": "DDD",
+    }
+
+    def build_function_call(self, func_name: str, args: List[str]) -> Optional[str]:
+        """Complex dialect translations.
+
+        Mirrors Java ``PostgresDialect.buildFunctionCall``:
+        - ``YEAR/MONTH/DAY/HOUR/MINUTE/SECOND(col)`` → ``EXTRACT(X FROM col)``
+        - ``DATE_FORMAT(col, fmt)`` → ``TO_CHAR(col, translated_fmt)``
+        """
+        if func_name is None or args is None:
+            return None
+        upper = func_name.upper()
+        if upper in ("YEAR", "MONTH", "DAY", "HOUR", "MINUTE", "SECOND"):
+            if len(args) == 1:
+                return f"EXTRACT({upper} FROM {args[0]})"
+            return None
+        if upper == "DATE_FORMAT" and len(args) == 2:
+            translated_fmt = self._translate_mysql_date_format(args[1])
+            return f"TO_CHAR({args[0]}, {translated_fmt})"
+        return None
+
+    @classmethod
+    def _translate_mysql_date_format(cls, mysql_fmt_literal: str) -> str:
+        """Translate MySQL format literal to Postgres ``TO_CHAR`` form.
+
+        Thin wrapper over :meth:`FDialect._translate_mysql_date_format`
+        that supplies the Postgres placeholder map.  Kept as a method
+        here so callers can invoke it via the dialect type directly.
+        """
+        return FDialect._translate_mysql_date_format(
+            mysql_fmt_literal, cls._MYSQL_TO_PG_FORMAT,
+        )
 
     def get_insert_on_conflict_sql(
         self,

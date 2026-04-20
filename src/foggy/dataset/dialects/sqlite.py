@@ -1,6 +1,6 @@
 """SQLite dialect implementation."""
 
-from typing import Optional
+from typing import List, Optional
 
 from foggy.dataset.dialects.base import FDialect
 
@@ -93,16 +93,46 @@ class SqliteDialect(FDialect):
         """Get SQL to extract value from JSON using json_extract."""
         return f"json_extract({json_expr}, '{path}')"
 
-    def _get_function_mappings(self) -> dict:
-        """SQLite function mappings: NVL→IFNULL, LEN→LENGTH."""
-        return {
-            "NVL": "IFNULL",
-            "COALESCE": "COALESCE",
-            "ISNULL": "IFNULL",
-            "LEN": "LENGTH",
-            "SUBSTR": "SUBSTR",
-            "SUBSTRING": "SUBSTR",
+    # SQLite function mappings: NVL/ISNULL → IFNULL, LEN → LENGTH,
+    # SUBSTRING → SUBSTR (SQLite prefers the short form).
+    _FUNCTION_MAPPINGS: dict = {
+        "NVL": "IFNULL",
+        "COALESCE": "COALESCE",
+        "ISNULL": "IFNULL",
+        "LEN": "LENGTH",
+        "SUBSTR": "SUBSTR",
+        "SUBSTRING": "SUBSTR",
+    }
+
+    def build_function_call(self, func_name: str, args: List[str]) -> Optional[str]:
+        """Complex SQLite translations.
+
+        Mirrors Java ``SqliteDialect.buildFunctionCall`` (lines 190-211):
+
+        - ``YEAR/MONTH/DAY/HOUR/MINUTE/SECOND(col)`` →
+          ``CAST(strftime('%Y', col) AS INTEGER)`` etc.
+        - ``DATE_FORMAT(col, fmt)`` → ``strftime(fmt, col)`` — arguments
+          reversed; SQLite uses same MySQL ``%X`` placeholders natively so
+          no format translation needed.
+        """
+        if func_name is None or args is None:
+            return None
+        upper = func_name.upper()
+        _STRFTIME_MAP = {
+            "YEAR": "%Y",
+            "MONTH": "%m",
+            "DAY": "%d",
+            "HOUR": "%H",
+            "MINUTE": "%M",
+            "SECOND": "%S",
         }
+        if upper in _STRFTIME_MAP and len(args) == 1:
+            token = _STRFTIME_MAP[upper]
+            return f"CAST(strftime('{token}', {args[0]}) AS INTEGER)"
+        if upper == "DATE_FORMAT" and len(args) == 2:
+            # SQLite strftime reverses the arg order.
+            return f"strftime({args[1]}, {args[0]})"
+        return None
 
     def get_create_table_sql(
         self,

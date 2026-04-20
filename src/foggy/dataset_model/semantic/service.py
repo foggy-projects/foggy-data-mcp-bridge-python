@@ -42,6 +42,14 @@ from foggy.dataset_model.semantic.field_validator import (
     filter_response_columns,
     validate_query_fields,
 )
+from foggy.dataset_model.semantic.calc_field_sorter import (
+    sort_calc_fields_by_dependencies,
+    CircularCalcFieldError,
+)
+from foggy.dataset_model.semantic.fsscript_to_sql_visitor import (
+    render_with_ast,
+    AstCompileError,
+)
 from foggy.dataset_model.semantic.masking import apply_masking
 from foggy.dataset_model.semantic.physical_column_mapping import (
     PhysicalColumnMapping,
@@ -94,6 +102,7 @@ class SemanticQueryService(SemanticServiceResolver):
         cache_ttl_seconds: int = 300,
         executor=None,
         dialect=None,
+        use_ast_expression_compiler: bool = False,
     ):
         """Initialize the semantic query service.
 
@@ -106,6 +115,14 @@ class SemanticQueryService(SemanticServiceResolver):
             dialect: Optional database dialect for identifier quoting.
                      If None, uses ANSI double-quote (compatible with
                      PostgreSQL, SQLite, and most databases).
+            use_ast_expression_compiler: v1.5 Phase 3 opt-in.  When True,
+                     computed-field / slice / orderBy / having expressions
+                     are compiled via the fsscript AST visitor first,
+                     falling back to the character-level tokenizer on
+                     parse error.  Adds support for fsscript method
+                     calls (``s.startsWith('x')``), ternary ``a ? b : c``,
+                     null coalescing ``a ?? b``, etc.  Default ``False``
+                     preserves pre-v1.5-Phase-3 behaviour byte-for-byte.
         """
         self._models: Dict[str, DbTableModelImpl] = {}
         self._default_limit = default_limit
@@ -116,6 +133,7 @@ class SemanticQueryService(SemanticServiceResolver):
         self._executor = executor
         self._executor_manager = None  # Optional[ExecutorManager] for multi-datasource routing
         self._dialect = dialect
+        self._use_ast_expression_compiler = use_ast_expression_compiler
         self._formula_registry: SqlFormulaRegistry = get_default_registry()
         self._hierarchy_registry = get_default_hierarchy_registry()
         # v1.3: physical column mapping cache (model_name → PhysicalColumnMapping)
@@ -645,9 +663,23 @@ class SemanticQueryService(SemanticServiceResolver):
                         warnings.append(f"Column not found: {col_name}")
 
         # 2.5 Process calculatedFields (aggregated calculations + window functions)
-        for cf_dict in request.calculated_fields:
-            cf = CalculatedFieldDef(**cf_dict) if isinstance(cf_dict, dict) else cf_dict
-            select_sql = self._build_calculated_field_sql(cf, model, ensure_join)
+        #
+        # v1.5 Phase 2:
+        # 1. Topologically sort so calc B referring to calc A compiles
+        #    after A.  Cycles raise CircularCalcFieldError (subclass of
+        #    ValueError).
+        # 2. Initialize ``compiled_calcs`` per-query so subsequent
+        #    slice/orderBy/having/etc. can reference calc fields by name.
+        calc_field_defs: List[CalculatedFieldDef] = [
+            CalculatedFieldDef(**cf_dict) if isinstance(cf_dict, dict) else cf_dict
+            for cf_dict in request.calculated_fields
+        ]
+        if calc_field_defs:
+            calc_field_defs = sort_calc_fields_by_dependencies(calc_field_defs)
+        compiled_calcs: Dict[str, str] = {}
+
+        for cf in calc_field_defs:
+            select_sql = self._build_calculated_field_sql(cf, model, ensure_join, compiled_calcs)
             alias = cf.alias or cf.name
             builder.select(f"{select_sql} AS {self._qi(alias)}")
             columns_info.append({
@@ -660,11 +692,15 @@ class SemanticQueryService(SemanticServiceResolver):
 
         # 3. WHERE clause
         for filter_item in request.slice:
-            self._add_filter(builder, model, filter_item, ensure_join)
+            self._add_filter(builder, model, filter_item, ensure_join, compiled_calcs=compiled_calcs)
 
         # 4. GROUP BY
         if request.group_by:
             for col_name in request.group_by:
+                # v1.5 Phase 2: calc field reference in GROUP BY
+                if compiled_calcs and col_name in compiled_calcs:
+                    builder.group_by(f"({compiled_calcs[col_name]})")
+                    continue
                 resolved = model.resolve_field(col_name)
                 if resolved:
                     ensure_runtime_joins(col_name)
@@ -682,7 +718,12 @@ class SemanticQueryService(SemanticServiceResolver):
         for hf in having_filters:
             col, op, val = hf.get("column"), hf.get("operator"), hf.get("value")
             if col and op and val is not None:
-                builder.having(f"{col} {op} ?", params=[val])
+                # v1.5 Phase 2: calc field reference in HAVING
+                if compiled_calcs and col in compiled_calcs:
+                    col_sql = f"({compiled_calcs[col]})"
+                else:
+                    col_sql = col
+                builder.having(f"{col_sql} {op} ?", params=[val])
 
         # 6. ORDER BY
         selected_order_aliases = self._build_selected_order_aliases(columns_info)
@@ -701,6 +742,10 @@ class SemanticQueryService(SemanticServiceResolver):
                         builder.order_by(self._qi(resolved['alias_label']), direction)
                     else:
                         builder.order_by(resolved["sql_expr"], direction)
+                elif compiled_calcs and column in compiled_calcs:
+                    # v1.5 Phase 2: calc field not in SELECT, but ORDER BY
+                    # references it by name — inline the expression.
+                    builder.order_by(f"({compiled_calcs[column]})", direction)
                 else:
                     builder.order_by(column, direction)
 
@@ -797,35 +842,117 @@ class SemanticQueryService(SemanticServiceResolver):
 
     # ==================== Calculated Fields & Window Functions ====================
 
-    # Allowed SQL functions whitelist (aligned with Java AllowedFunctions.java).
-    # Only these functions are permitted in calculated fields and expressions.
-    # Any function call not in this set will be rejected to prevent SQL injection.
-    _ALLOWED_FUNCTIONS = frozenset({
-        # Aggregate (7)
-        'SUM', 'AVG', 'COUNT', 'MIN', 'MAX', 'GROUP_CONCAT',
-        'COUNT_DISTINCT',
-        # Statistical aggregate (4)
-        'STDDEV_POP', 'STDDEV_SAMP', 'VAR_POP', 'VAR_SAMP',
-        # Window (10)
-        'ROW_NUMBER', 'RANK', 'DENSE_RANK', 'NTILE',
-        'LAG', 'LEAD', 'FIRST_VALUE', 'LAST_VALUE',
-        'CUME_DIST', 'PERCENT_RANK',
-        # String (12)
-        'CONCAT', 'CONCAT_WS', 'SUBSTRING', 'SUBSTR', 'LEFT', 'RIGHT',
-        'LTRIM', 'RTRIM', 'LPAD', 'RPAD', 'REPLACE', 'LOCATE',
-        'CHAR_LENGTH', 'INSTR', 'UPPER', 'LOWER', 'TRIM',
-        # Numeric (7)
-        'ABS', 'ROUND', 'FLOOR', 'CEIL', 'CEILING', 'MOD', 'POWER', 'SQRT',
-        # Date (12)
-        'YEAR', 'MONTH', 'DAY', 'HOUR', 'MINUTE', 'SECOND',
-        'DATE_FORMAT', 'STR_TO_DATE', 'DATE_ADD', 'DATE_SUB',
-        'DATEDIFF', 'TIMESTAMPDIFF', 'EXTRACT',
-        'TIME', 'CURRENT_TIME', 'CURRENT_TIMESTAMP',
-        # Conditional / type (8)
-        'COALESCE', 'IFNULL', 'NVL', 'NULLIF', 'IF', 'CAST', 'CONVERT', 'ISNULL',
+    # Function arity table — the **source of truth** for both arity
+    # validation and the allow-list.  Maps UPPER-cased function name to
+    # ``(min_args, max_args_or_None_for_unlimited)``.
+    #
+    # Functions with SQL-keyword-delimited internal syntax
+    # (``CAST(x AS t)``, ``EXTRACT(field FROM src)``, ``CONVERT(...)``)
+    # are listed separately in ``_KEYWORD_DELIMITED_FUNCTIONS``: they
+    # bypass the arity check because comma-split arity doesn't reflect
+    # semantic arity, and they bypass dialect routing because their
+    # literal SQL form is already dialect-agnostic.
+    #
+    # Aligned with Java ``AllowedFunctions.java``.
+    _FUNCTION_ARITY: dict = {
+        # Aggregate
+        "SUM": (1, 1),
+        "AVG": (1, 1),
+        "COUNT": (1, 1),
+        "MIN": (1, 1),
+        "MAX": (1, 1),
+        "GROUP_CONCAT": (1, None),
+        "COUNT_DISTINCT": (1, 1),
+        "STDDEV_POP": (1, 1),
+        "STDDEV_SAMP": (1, 1),
+        "VAR_POP": (1, 1),
+        "VAR_SAMP": (1, 1),
+        # Window (no positional args; OVER clause handled separately)
+        "ROW_NUMBER": (0, 0),
+        "RANK": (0, 0),
+        "DENSE_RANK": (0, 0),
+        "NTILE": (1, 1),
+        "CUME_DIST": (0, 0),
+        "PERCENT_RANK": (0, 0),
+        "LAG": (1, 3),
+        "LEAD": (1, 3),
+        "FIRST_VALUE": (1, 1),
+        "LAST_VALUE": (1, 1),
+        # String
+        "CONCAT": (1, None),
+        "CONCAT_WS": (2, None),
+        "SUBSTRING": (2, 3),
+        "SUBSTR": (2, 3),
+        "LEFT": (2, 2),
+        "RIGHT": (2, 2),
+        "LTRIM": (1, 1),
+        "RTRIM": (1, 1),
+        "LPAD": (3, 3),
+        "RPAD": (3, 3),
+        "REPLACE": (3, 3),
+        "LOCATE": (2, 3),
+        "INSTR": (2, 2),
+        "CHAR_LENGTH": (1, 1),
+        "UPPER": (1, 1),
+        "LOWER": (1, 1),
+        "TRIM": (1, 1),
+        # Numeric
+        "ABS": (1, 1),
+        "ROUND": (1, 2),
+        "FLOOR": (1, 1),
+        "CEIL": (1, 1),
+        "CEILING": (1, 1),
+        "MOD": (2, 2),
+        "POWER": (2, 2),
+        "POW": (2, 2),
+        "SQRT": (1, 1),
+        "TRUNC": (1, 2),
+        # Date
+        "YEAR": (1, 1),
+        "MONTH": (1, 1),
+        "DAY": (1, 1),
+        "HOUR": (1, 1),
+        "MINUTE": (1, 1),
+        "SECOND": (1, 1),
+        "DATE_FORMAT": (2, 2),
+        "STR_TO_DATE": (2, 2),
+        "DATE_ADD": (2, 2),
+        "DATE_SUB": (2, 2),
+        "DATEDIFF": (2, 2),
+        "TIMESTAMPDIFF": (3, 3),
+        "TIME": (0, 1),
+        "CURRENT_TIME": (0, 0),
+        "CURRENT_TIMESTAMP": (0, 0),
+        # Conditional / type
+        "COALESCE": (1, None),
+        "IFNULL": (2, 2),
+        "NVL": (2, 2),
+        "NULLIF": (2, 2),
+        "IF": (3, 3),
+        "ISNULL": (1, 2),  # MySQL ISNULL(x) / SQL Server ISNULL(x, y)
         # Misc
-        'DISTINCT',
+        "DISTINCT": (1, 1),
+        # Intentionally excluded: CAST, CONVERT, EXTRACT
+        # (comma-split arity does not match semantic arity because of
+        #  internal ``AS`` / ``FROM`` keywords)
+    }
+
+    # Functions whose internal syntax uses SQL keywords (not commas) to
+    # separate arguments.  ``_render_expression`` must NOT run its
+    # arity check on these, and must NOT route them through Dialect
+    # translation — the user's literal text is already valid SQL.
+    _KEYWORD_DELIMITED_FUNCTIONS: frozenset = frozenset({
+        "CAST",       # CAST(x AS type)
+        "CONVERT",    # MySQL CONVERT(x, type) vs SQL Server CONVERT(type, x [, style])
+        "EXTRACT",    # EXTRACT(field FROM src)
     })
+
+    # Allow-list = everything with a declared arity plus the keyword-
+    # delimited functions.  Deriving this avoids the pre-v1.5 sync
+    # burden between two separate frozensets.  Note: ``TRUNCATE`` is
+    # deliberately excluded (DDL ``TRUNCATE TABLE`` collision); users
+    # should write ``TRUNC(x, d)`` and let MySQL dialect rename it.
+    _ALLOWED_FUNCTIONS: frozenset = frozenset(_FUNCTION_ARITY.keys()) | _KEYWORD_DELIMITED_FUNCTIONS
 
     @classmethod
     def validate_function(cls, func_name: str) -> bool:
@@ -861,11 +988,30 @@ class SemanticQueryService(SemanticServiceResolver):
         re.IGNORECASE,
     )
 
-    def _resolve_single_field(self, field_name: str, model: DbTableModelImpl, ensure_join=None) -> str:
+    def _resolve_single_field(
+        self,
+        field_name: str,
+        model: DbTableModelImpl,
+        ensure_join=None,
+        compiled_calcs: Optional[Dict[str, str]] = None,
+    ) -> str:
         """Resolve a semantic field name to SQL column expression.
 
-        Tries model.resolve_field() first, then dimension/measure lookup, then returns as-is.
+        Lookup order:
+        1. ``compiled_calcs`` — pre-rendered calc-field SQL fragments from
+           earlier in the same query.  Supports calc-to-calc chaining,
+           slice/orderBy/groupBy referencing calc fields, etc.  The
+           fragment is wrapped in parentheses to protect operator
+           precedence when embedded into a larger expression.
+        2. ``model.resolve_field`` — base columns / joined dimensions
+        3. ``model.get_dimension`` / ``get_measure`` fallback
+        4. Return the raw name (may yield invalid SQL downstream — this
+           preserves pre-v1.5 behaviour for unknown identifiers).
         """
+        # v1.5 Phase 2: transitive calc-field reference
+        if compiled_calcs and field_name in compiled_calcs:
+            return f"({compiled_calcs[field_name]})"
+
         resolved = model.resolve_field(field_name)
         if resolved:
             if resolved["join_def"] and ensure_join:
@@ -881,8 +1027,134 @@ class SemanticQueryService(SemanticServiceResolver):
             return f"{alias}.{measure.column or measure.name}"
         return field_name
 
-    def _render_expression(self, expression: str, model: DbTableModelImpl, ensure_join=None) -> str:
-        """Render an expression to SQL, lowering IF(...) to CASE WHEN recursively."""
+    @staticmethod
+    def _normalize_string_literal_for_sql(raw: str) -> str:
+        """Rewrite a DSL string literal as a SQL-standard single-quoted literal.
+
+        The DSL permits both ``'...'`` and ``"..."`` string literals. The
+        inline-expression scanner (``skip_string_literal``) treats ``\\`` as
+        an escape for the following character. SQL (Postgres / MySQL /
+        SQLite with standard settings) requires string literals to be wrapped
+        with single quotes; emitting ``"posted"`` verbatim causes Postgres to
+        interpret it as an identifier and fail with
+        ``column "posted" does not exist`` (BUG-003 v1.4).
+
+        This helper:
+          * strips the outer opening/closing quote;
+          * honors ``\\`` escapes consistent with ``skip_string_literal`` so
+            ``"a\\"b"`` and ``'a\\'b'`` decode to the logical value;
+          * doubles any embedded single quote per SQL standard; and
+          * re-wraps with single quotes.
+
+        Non-quoted input is returned unchanged as a defensive fallback.
+        """
+        if len(raw) < 2 or raw[0] not in ("'", '"'):
+            return raw
+        quote = raw[0]
+        inner = raw[1:-1] if len(raw) >= 2 and raw[-1] == quote else raw[1:]
+
+        decoded: List[str] = []
+        j = 0
+        n = len(inner)
+        while j < n:
+            c = inner[j]
+            if c == "\\" and j + 1 < n:
+                decoded.append(inner[j + 1])
+                j += 2
+            else:
+                decoded.append(c)
+                j += 1
+        value = "".join(decoded)
+        return "'" + value.replace("'", "''") + "'"
+
+    def _validate_function_arity(
+        self, func_name: str, actual: int, expression: str
+    ) -> None:
+        """Validate that ``actual`` arg count falls in the declared arity.
+
+        Raises ``ValueError`` with a friendly message if arity is wrong.
+        Silently accepts any arity for functions NOT in
+        ``_FUNCTION_ARITY`` (SQL keywords like AND/OR/IS that happen to
+        be followed by ``(`` would not reach this point anyway because
+        they are not in ``_ALLOWED_FUNCTIONS``).
+        """
+        arity = self._FUNCTION_ARITY.get(func_name)
+        if arity is None:
+            return
+        min_args, max_args = arity
+        if actual < min_args or (max_args is not None and actual > max_args):
+            if max_args is None:
+                expected = f"{min_args} or more"
+            elif min_args == max_args:
+                expected = f"exactly {min_args}"
+            else:
+                expected = f"{min_args} to {max_args}"
+            arg_word = "argument" if actual == 1 else "arguments"
+            raise ValueError(
+                f"Function '{func_name}' expects {expected} arguments, "
+                f"got {actual} {arg_word} in: {expression}"
+            )
+
+    def _emit_function_call(self, func_name: str, rendered_args: List[str]) -> str:
+        """Emit a SQL function call, routing through the dialect if present.
+
+        Delegates to ``FDialect.translate_function`` which internally does
+        the ``build_function_call`` → rename-table cascade (see
+        ``foggy.dataset.dialects.base.FDialect``).
+
+        Keyword-delimited functions (CAST/CONVERT/EXTRACT) always bypass
+        dialect routing: their internal ``AS``/``FROM`` syntax means the
+        comma-joined rendered args are already the literal SQL source.
+        """
+        if func_name in self._KEYWORD_DELIMITED_FUNCTIONS:
+            return f"{func_name}({', '.join(rendered_args)})"
+
+        if self._dialect is not None:
+            try:
+                sql = self._dialect.translate_function(func_name, rendered_args)
+            except (AttributeError, TypeError, ValueError):
+                sql = None
+            if sql:
+                return sql
+
+        return f"{func_name}({', '.join(rendered_args)})"
+
+    def _render_expression(
+        self,
+        expression: str,
+        model: DbTableModelImpl,
+        ensure_join=None,
+        compiled_calcs: Optional[Dict[str, str]] = None,
+    ) -> str:
+        """Render an expression to SQL, lowering IF(...) to CASE WHEN recursively.
+
+        ``compiled_calcs`` (v1.5 Phase 2) lets this pass resolve
+        references to previously-compiled calculated fields.  Threaded
+        through every recursive ``_render_expression`` and
+        ``_resolve_single_field`` call so that nested IF / function
+        arguments also see the calc registry.
+
+        v1.5 Phase 3 opt-in: when ``self._use_ast_expression_compiler``
+        is True, first try compiling via the fsscript AST visitor
+        (``render_with_ast``).  Falls through to the character-level
+        tokenizer on parse error or unsupported-node error, so SQL
+        constructs the Python fsscript parser cannot handle yet
+        (``IS NULL``, ``BETWEEN``, ``LIKE``, ``CAST ... AS`` keyword
+        syntax) still compile.
+        """
+        if self._use_ast_expression_compiler:
+            try:
+                return render_with_ast(
+                    expression,
+                    service=self,
+                    model=model,
+                    ensure_join=ensure_join,
+                    compiled_calcs=compiled_calcs,
+                )
+            except AstCompileError:
+                # Fall through to the char-level tokenizer for constructs
+                # the AST visitor can't translate (e.g. `IS NULL`).
+                pass
         result: List[str] = []
         i = 0
         length = len(expression)
@@ -890,7 +1162,7 @@ class SemanticQueryService(SemanticServiceResolver):
             ch = expression[i]
             if ch in ("'", '"'):
                 end = skip_string_literal(expression, i)
-                result.append(expression[i:end])
+                result.append(self._normalize_string_literal_for_sql(expression[i:end]))
                 i = end
                 continue
             if ch == "&" and i + 1 < length and expression[i + 1] == "&":
@@ -925,33 +1197,50 @@ class SemanticQueryService(SemanticServiceResolver):
                             f"Allowed functions: {sorted(self._ALLOWED_FUNCTIONS)}"
                         )
                     args = split_top_level_commas(expression[j + 1:close])
+
+                    # Arity validation — skipped for keyword-delimited
+                    # functions whose comma-split count is not the same
+                    # as their semantic argument count.
+                    if func_name not in self._KEYWORD_DELIMITED_FUNCTIONS:
+                        self._validate_function_arity(func_name, len(args), expression)
+
                     if func_name == "IF":
-                        if len(args) != 3:
-                            raise ValueError(f"IF(...) expects 3 arguments, got {len(args)} in: {expression}")
-                        cond_sql = self._render_expression(args[0], model, ensure_join).strip()
-                        then_sql = self._render_expression(args[1], model, ensure_join).strip()
-                        else_sql = self._render_expression(args[2], model, ensure_join).strip()
+                        # IF(cond, then, else) → CASE WHEN cond THEN then ELSE else END
+                        # Arity already validated above.
+                        cond_sql = self._render_expression(args[0], model, ensure_join, compiled_calcs).strip()
+                        then_sql = self._render_expression(args[1], model, ensure_join, compiled_calcs).strip()
+                        else_sql = self._render_expression(args[2], model, ensure_join, compiled_calcs).strip()
                         result.append(
                             f"CASE WHEN {cond_sql} THEN {then_sql} ELSE {else_sql} END"
                         )
                     else:
                         rendered_args = [
-                            self._render_expression(arg, model, ensure_join).strip()
+                            self._render_expression(arg, model, ensure_join, compiled_calcs).strip()
                             for arg in args
                         ]
-                        result.append(f"{func_name}({', '.join(rendered_args)})")
+                        result.append(
+                            self._emit_function_call(func_name, rendered_args)
+                        )
                     i = close + 1
                     continue
                 if token.upper() in self._SQL_KEYWORDS:
                     result.append(token)
                 else:
-                    result.append(self._resolve_single_field(token, model, ensure_join))
+                    result.append(
+                        self._resolve_single_field(token, model, ensure_join, compiled_calcs)
+                    )
                 continue
             result.append(ch)
             i += 1
         return "".join(result)
 
-    def _resolve_expression_fields(self, expression: str, model: DbTableModelImpl, ensure_join=None) -> str:
+    def _resolve_expression_fields(
+        self,
+        expression: str,
+        model: DbTableModelImpl,
+        ensure_join=None,
+        compiled_calcs: Optional[Dict[str, str]] = None,
+    ) -> str:
         """Replace semantic field names in an expression with SQL column references.
 
         Handles:
@@ -959,28 +1248,42 @@ class SemanticQueryService(SemanticServiceResolver):
         - Function calls: LAG(salesAmount, 1) → LAG(t.sales_amount, 1)
         - Arithmetic: salesAmount - discountAmount → t.sales_amount - t.discount_amount
         - Dimension refs: product$categoryName → dp.category_name (with auto-JOIN)
+        - v1.5 Phase 2: calc-field references resolved via ``compiled_calcs``
         """
         stripped = expression.strip()
 
         # Pure window functions (no arguments): return as-is
         if self._PURE_WINDOW_RE.match(stripped):
             return stripped
-        return self._render_expression(expression, model, ensure_join)
+        return self._render_expression(expression, model, ensure_join, compiled_calcs)
 
     def _build_calculated_field_sql(
         self,
         cf: CalculatedFieldDef,
         model: DbTableModelImpl,
         ensure_join=None,
+        compiled_calcs: Optional[Dict[str, str]] = None,
     ) -> str:
         """Build SQL expression for a calculated field, including OVER() for window functions.
 
         Flow:
         1. Resolve semantic field names in expression → SQL column names
-        2. If agg specified (non-window): wrap as AGG(expr)
-        3. If window function: wrap as expr OVER (PARTITION BY ... ORDER BY ... frame)
+        2. v1.5 Phase 2: register the **pre-wrap** rendered expression into
+           ``compiled_calcs`` under ``cf.name`` — so later calcs / slices
+           / orderBy can reference this calc by name and inline the raw
+           expression (see ``_resolve_single_field``).  We deliberately
+           register the form **before** agg/window wrapping; users who
+           want the aggregated form at the reference site can apply agg
+           at the outer calc level.
+        3. If agg specified (non-window): wrap as AGG(expr)
+        4. If window function: wrap as expr OVER (PARTITION BY ... ORDER BY ... frame)
         """
-        base_sql = self._resolve_expression_fields(cf.expression, model, ensure_join)
+        base_sql = self._resolve_expression_fields(cf.expression, model, ensure_join, compiled_calcs)
+
+        # Register pre-wrap fragment for downstream calc refs.  See
+        # Phase 2 requirement doc "Pre-wrap 注册语义" for rationale.
+        if compiled_calcs is not None:
+            compiled_calcs[cf.name] = base_sql
 
         if cf.is_window_function():
             # Window function: optionally wrap with agg, then add OVER()
@@ -994,13 +1297,14 @@ class SemanticQueryService(SemanticServiceResolver):
             over_parts: List[str] = []
             if cf.partition_by:
                 resolved_parts = [
-                    self._resolve_single_field(f, model, ensure_join) for f in cf.partition_by
+                    self._resolve_single_field(f, model, ensure_join, compiled_calcs)
+                    for f in cf.partition_by
                 ]
                 over_parts.append(f"PARTITION BY {', '.join(resolved_parts)}")
             if cf.window_order_by:
                 order_clauses = []
                 for wo in cf.window_order_by:
-                    col_sql = self._resolve_single_field(wo["field"], model, ensure_join)
+                    col_sql = self._resolve_single_field(wo["field"], model, ensure_join, compiled_calcs)
                     direction = wo.get("dir", "asc").upper()
                     order_clauses.append(f"{col_sql} {direction}")
                 over_parts.append(f"ORDER BY {', '.join(order_clauses)}")
@@ -1027,6 +1331,7 @@ class SemanticQueryService(SemanticServiceResolver):
         filter_item: Dict[str, Any],
         ensure_join=None,
         root_builder: Optional[SqlQueryBuilder] = None,
+        compiled_calcs: Optional[Dict[str, str]] = None,
     ) -> None:
         """Add a single filter condition with auto-JOIN support.
 
@@ -1034,6 +1339,10 @@ class SemanticQueryService(SemanticServiceResolver):
           {"$or": [{...}, {...}]}  → (cond1 OR cond2)
           {"$and": [{...}, {...}]} → cond1 AND cond2
         Nesting is supported: {"$or": [{"$and": [...]}, {...}]}
+
+        v1.5 Phase 2: ``compiled_calcs`` lets slice conditions reference
+        previously-compiled calc fields by name.  The reference resolves
+        to the calc's pre-wrap SQL expression inlined in parentheses.
         """
         if root_builder is None:
             root_builder = builder
@@ -1044,7 +1353,10 @@ class SemanticQueryService(SemanticServiceResolver):
             or_params: list[Any] = []
             for sub_item in filter_item["$or"]:
                 sub_builder = SqlQueryBuilder()
-                self._add_filter(sub_builder, model, sub_item, ensure_join, root_builder=root_builder)
+                self._add_filter(
+                    sub_builder, model, sub_item, ensure_join,
+                    root_builder=root_builder, compiled_calcs=compiled_calcs,
+                )
                 if sub_builder._query.where and sub_builder._query.where.conditions:
                     fragment = " AND ".join(sub_builder._query.where.conditions)
                     if len(sub_builder._query.where.conditions) > 1:
@@ -1061,7 +1373,10 @@ class SemanticQueryService(SemanticServiceResolver):
         # --- Handle $and compound condition ---
         if "$and" in filter_item:
             for sub_item in filter_item["$and"]:
-                self._add_filter(builder, model, sub_item, ensure_join, root_builder=root_builder)
+                self._add_filter(
+                    builder, model, sub_item, ensure_join,
+                    root_builder=root_builder, compiled_calcs=compiled_calcs,
+                )
             return
 
         column = filter_item.get("column") or filter_item.get("field")
@@ -1072,6 +1387,10 @@ class SemanticQueryService(SemanticServiceResolver):
             # Check for shorthand: {"fieldName": value}
             for k, v in filter_item.items():
                 if k not in ("column", "operator", "value", "op", "field", "values", "pattern", "from", "to"):
+                    # v1.5 Phase 2: calc field shorthand reference
+                    if compiled_calcs and k in compiled_calcs:
+                        builder.where(f"({compiled_calcs[k]}) = ?", params=[v])
+                        return
                     resolved = model.resolve_field(k)
                     if resolved:
                         if resolved["join_def"] and ensure_join:
@@ -1080,31 +1399,39 @@ class SemanticQueryService(SemanticServiceResolver):
                     return
             return
 
-        # Resolve column through model field resolver
-        resolved = model.resolve_field(column)
-        if resolved:
-            col_expr = resolved["sql_expr"]
-            if resolved["join_def"] and ensure_join:
-                ensure_join(resolved["join_def"])
+        # v1.5 Phase 2: calc field reference (check before model resolve)
+        if compiled_calcs and column in compiled_calcs:
+            col_expr = f"({compiled_calcs[column]})"
         else:
-            # Fallback to fact table
-            dim = model.get_dimension(column)
-            alias = model.get_table_alias_for_model(model.get_field_model_name(column))
-            col_expr = f"{alias}.{dim.column}" if dim else f"{alias}.{column}"
+            # Resolve column through model field resolver
+            resolved = model.resolve_field(column)
+            if resolved:
+                col_expr = resolved["sql_expr"]
+                if resolved["join_def"] and ensure_join:
+                    ensure_join(resolved["join_def"])
+            else:
+                # Fallback to fact table
+                dim = model.get_dimension(column)
+                alias = model.get_table_alias_for_model(model.get_field_model_name(column))
+                col_expr = f"{alias}.{dim.column}" if dim else f"{alias}.{column}"
 
         # Check for $field value reference: {"value": {"$field": "otherField"}}
         # Generates field-to-field comparison: col_a > col_b (no bind param)
         if isinstance(value, dict) and "$field" in value:
             ref_field = value["$field"]
-            ref_resolved = model.resolve_field(ref_field)
-            if ref_resolved:
-                ref_expr = ref_resolved["sql_expr"]
-                if ref_resolved["join_def"] and ensure_join:
-                    ensure_join(ref_resolved["join_def"])
+            # v1.5 Phase 2: calc field on the reference side too
+            if compiled_calcs and ref_field in compiled_calcs:
+                ref_expr = f"({compiled_calcs[ref_field]})"
             else:
-                ref_dim = model.get_dimension(ref_field)
-                ref_alias = model.get_table_alias_for_model(model.get_field_model_name(ref_field))
-                ref_expr = f"{ref_alias}.{ref_dim.column}" if ref_dim else f"{ref_alias}.{ref_field}"
+                ref_resolved = model.resolve_field(ref_field)
+                if ref_resolved:
+                    ref_expr = ref_resolved["sql_expr"]
+                    if ref_resolved["join_def"] and ensure_join:
+                        ensure_join(ref_resolved["join_def"])
+                else:
+                    ref_dim = model.get_dimension(ref_field)
+                    ref_alias = model.get_table_alias_for_model(model.get_field_model_name(ref_field))
+                    ref_expr = f"{ref_alias}.{ref_dim.column}" if ref_dim else f"{ref_alias}.{ref_field}"
 
             # Map operator to SQL
             op_map = {"=": "=", "eq": "=", "!=": "<>", "<>": "<>", "neq": "<>",

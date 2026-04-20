@@ -1,6 +1,6 @@
 """SQL Server dialect implementation."""
 
-from typing import Optional
+from typing import List, Optional
 
 from foggy.dataset.dialects.base import FDialect
 
@@ -119,15 +119,61 @@ class SqlServerDialect(FDialect):
         """Get SQL to extract value from JSON using JSON_VALUE."""
         return f"JSON_VALUE({json_expr}, '{path}')"
 
-    def _get_function_mappings(self) -> dict:
-        """SQL Server function mappings: IFNULL→ISNULL, LENGTH→LEN, NVL→ISNULL."""
-        return {
-            "IFNULL": "ISNULL",
-            "NVL": "ISNULL",
-            "COALESCE": "COALESCE",
-            "LENGTH": "LEN",
-            "SUBSTR": "SUBSTRING",
-        }
+    # SQL Server function mappings — aligned with Java ``SqlServerDialect``.
+    #   NULL coalescing: IFNULL/NVL/ISNULL → ISNULL
+    #   String:          LENGTH/CHAR_LENGTH → LEN, SUBSTR → SUBSTRING
+    #   Math:            CEIL → CEILING, POW → POWER
+    #   Statistical:     STDDEV_POP → STDEVP, STDDEV_SAMP → STDEV,
+    #                    VAR_POP → VARP, VAR_SAMP → VAR
+    _FUNCTION_MAPPINGS: dict = {
+        "IFNULL": "ISNULL",
+        "NVL": "ISNULL",
+        "COALESCE": "COALESCE",
+        "LENGTH": "LEN",
+        "CHAR_LENGTH": "LEN",
+        "SUBSTR": "SUBSTRING",
+        "CEIL": "CEILING",
+        "POW": "POWER",
+        "STDDEV_POP": "STDEVP",
+        "STDDEV_SAMP": "STDEV",
+        "VAR_POP": "VARP",
+        "VAR_SAMP": "VAR",
+    }
+
+    # MySQL → SQL Server DATE_FORMAT placeholder mapping.
+    # 对齐 Java ``SqlServerDialect.translateMysqlDateFormatToSqlServer``.
+    _MYSQL_TO_SQLSERVER_FORMAT: dict = {
+        "%Y": "yyyy",    "%y": "yy",
+        "%m": "MM",      "%d": "dd",
+        "%H": "HH",      "%i": "mm",      "%s": "ss",
+    }
+
+    def build_function_call(self, func_name: str, args: List[str]) -> Optional[str]:
+        """Complex SQL Server translations.
+
+        Mirrors Java ``SqlServerDialect.buildFunctionCall``:
+        - ``HOUR/MINUTE/SECOND(col)`` → ``DATEPART(HOUR, col)``
+          (``YEAR/MONTH/DAY`` are native, handled via default rename.)
+        - ``DATE_FORMAT(col, fmt)`` → ``FORMAT(col, translated_fmt)``
+        """
+        if func_name is None or args is None:
+            return None
+        upper = func_name.upper()
+        if upper in ("HOUR", "MINUTE", "SECOND"):
+            if len(args) == 1:
+                return f"DATEPART({upper}, {args[0]})"
+            return None
+        if upper == "DATE_FORMAT" and len(args) == 2:
+            translated_fmt = self._translate_mysql_date_format(args[1])
+            return f"FORMAT({args[0]}, {translated_fmt})"
+        return None
+
+    @classmethod
+    def _translate_mysql_date_format(cls, mysql_fmt_literal: str) -> str:
+        """Translate MySQL format literal to SQL Server ``FORMAT`` form."""
+        return FDialect._translate_mysql_date_format(
+            mysql_fmt_literal, cls._MYSQL_TO_SQLSERVER_FORMAT,
+        )
 
     def get_insert_with_output_sql(
         self,
