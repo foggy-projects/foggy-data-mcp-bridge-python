@@ -2,13 +2,16 @@
 type: progress
 version: v1.6
 req_id: P0-BUG-F3
-status: in-progress
+status: accepted
 priority: P0
-blocking_for:
-  - foggy-data-mcp-bridge 8.2.0.beta Compose Query
-  - foggy-odoo-bridge-pro v1.6 REQ-001 OdooEmbeddedAuthorityResolver
-java_sync_required: yes  # 2026-04-21 M6 grep 判定：Java 侧存在同类但不同形态的 bug
-python_side_status: ready-for-review  # M2-M5 已完成 · 2430 passed / 1 skipped
+blocking_for: []  # 2026-04-21 accepted · 8.2.0.beta Compose Query + Odoo Pro v1.6 REQ-001 均已 unblock
+java_sync_required: yes  # 2026-04-21 M6 grep 判定
+java_landed_at: 2026-04-21
+java_test_baseline: foggy-dataset-model sqlite lane 1246 passed / 0 failures · F-3 regression test class 7 tests green
+python_side_status: accepted  # M2-M5 已完成 · 2430 passed / 1 skipped · M11 签收 2026-04-21
+odoo_pro_side_status: accepted  # vendored sync + xfail drop + fast 570 · M9 签收 2026-04-21
+acceptance_record: docs/v1.6/acceptance/REQ-P0-BUG-F3-acceptance.md
+accepted_at: 2026-04-21
 ---
 
 # P0-BUG-F3 Progress
@@ -26,12 +29,12 @@ python_side_status: ready-for-review  # M2-M5 已完成 · 2430 passed / 1 skipp
 | M4 | 新增测试：F-3 回归 + 6 条正向用例 | `completed` | 2026-04-21 | `tests/test_metadata_v3_cross_model_governance.py` · 7 tests 落盘并全绿 |
 | M5 | 全仓回归（期望 2420+N passed） | `completed` | 2026-04-21 | **2430 passed / 1 skipped / 4.95s**（v1.5 基线 2420 → 2430，0 failed） |
 | M6 | Java 侧 grep 判定 | `completed` | 2026-04-21 | **`java_sync_required = yes`** —— Java 侧存在形态不同但症状一致的 bug：`SemanticServiceV3Impl.processModelFieldsV3` 用 `fields.put(key, freshInfo)` 且 `create*FieldInfo` 每次都新建 `models: {thisModel: ...}` 单元素 map，导致后处理模型直接**覆盖**前模型的字段条目。详见下方"M6 判定依据" |
-| M7 | Java 侧同步修复 | `pending` | — | 见下方"Java 修复方案" · 预计 ~200 LOC refactor · 走独立 Java 仓 PR |
-| M8 | Parity baseline 双端核对 | `pending` | — | Java 修完后跑 `FormulaParitySnapshotTest` 41 条目 + 新增多模型共享字段 parity 测试 |
-| M9 | Odoo Pro 撤 xfail + vendored sync | `pending` | — | Python 侧已可撤 xfail，但需先 vendored sync；Java 侧修完再联调 |
-| M10 | 签收记录 `docs/v1.6/acceptance/` | `pending` | — | |
-| M11 | 通知 root CLAUDE.md F-3 状态升级为 `resolved` | `pending` | — | 待 Java M7 完成后 |
-| M12 | 通知 8.2.0.beta 三份文档解除 blocking | `pending` | — | 待 M11 完成 |
+| M7 | Java 侧同步修复 | `completed` | 2026-04-21 | `SemanticServiceV3Impl` 新增 `mergeFieldInfo(fields, key, freshInfo)` 辅助；`processModelFieldsV3` 中 6 处 `fields.put(key, freshInfo)` 改为 `mergeFieldInfo(...)`；存量 metadata 顶层字段（type / filterable / ...）继续 first-write-wins，仅 `models` 子 map 合并；Markdown 路径的 `deniedColumns` 透传是独立 bug，未纳入本 PR（见"未合入项"） |
+| M8 | Parity baseline 双端核对 | `completed` | 2026-04-21 | Java 新增 `SemanticServiceV3MultiModelGovernanceTest` **7 tests 全绿**；`foggy-dataset-model` sqlite lane **1246 passed / 0 failures**（M1 基线 1134 → 1246，0 failed） · 未发现 `FormulaParitySnapshotTest` 有关回归 |
+| M9 | Odoo Pro 撤 xfail + vendored sync | `completed` | 2026-04-21 | `sync_foggy_vendored.py --check` exit 0；`tests/test_v13_semantic_service_regression.py::test_metadata_keeps_shared_field_for_visible_models` 已 regular pass（无 xfail marker）；fast lane **570 passed** |
+| M10 | 签收记录 `docs/v1.6/acceptance/` | `completed` | 2026-04-21 | `docs/v1.6/acceptance/REQ-P0-BUG-F3-acceptance.md` · decision **`accepted`** · evidence_count 8 |
+| M11 | 通知 root CLAUDE.md F-3 状态升级为 `resolved` | `completed` | 2026-04-21 | workspace `CLAUDE.md` Follow-up P0 F-3 条目改写为 `resolved-accepted`（2026-04-21） |
+| M12 | 通知 8.2.0.beta 三份文档解除 blocking | `completed` | 2026-04-21 | 3 份 8.2.0.beta 文档前置依赖节已改写为"F-3 accepted · unblocked"；Compose Query 需求 / 实现规划 / 代码清单 均已同步 |
 
 ## 下游依赖清单
 
