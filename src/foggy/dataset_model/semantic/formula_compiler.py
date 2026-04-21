@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional, Set
+from typing import Any, Callable, Optional, Set, Tuple, Union
 
 from foggy.dataset_model.semantic.formula_dialect import SqlDialect
 from foggy.dataset_model.semantic.formula_errors import (
@@ -148,7 +148,12 @@ _BINOP_SYMBOL: dict[BinaryOperator, str] = {
 
 
 # Type alias：语义字段名 → 物理列 SQL 片段
-FieldResolver = Callable[[str], str]
+#
+# v1.4 M4 Step 4.1: resolver 也可以返回 ``(sql_fragment, bind_params)`` 元组，
+# 让调用方把已编译的 calc-field 片段（含 ``?`` 占位符）安全注入到上层编译中。
+# 返回裸 ``str`` 时保持原有语义（无参数）。
+FieldResolverReturn = Union[str, Tuple[str, list]]
+FieldResolver = Callable[[str], FieldResolverReturn]
 
 
 # ---------------------------------------------------------------------------
@@ -212,6 +217,56 @@ class FormulaCompiler:
     @property
     def config(self) -> FormulaCompilerConfig:
         return self._config
+
+    def validate_syntax(self, expression: str) -> None:
+        """Parser + AST white-list gate only — no field resolution / SQL gen.
+
+        v1.4 M4 Step 4.4: used as the early-fail hook from Pydantic model
+        validators (e.g. ``CalculatedFieldDef.expression``) so that a
+        QM file with an invalid formula fails at load time with a clear
+        pointer to the offending field, rather than at query time.
+
+        The method runs the same length / parse / AST-validation pipeline
+        as :meth:`compile` but stops before SQL generation.  Any
+        :class:`FormulaError` subclass is propagated untouched.
+
+        Args:
+            expression: formula expression string to validate.
+
+        Raises:
+            FormulaSyntaxError / FormulaSecurityError /
+                FormulaNodeNotAllowedError / FormulaFunctionNotAllowedError /
+                FormulaDepthError / FormulaInListSizeError /
+                FormulaNullComparisonError / FormulaAggNotOutermostError:
+                same surface as :meth:`compile`.
+        """
+        if not isinstance(expression, str):
+            raise FormulaSyntaxError(
+                f"Expression must be str, got {type(expression).__name__}"
+            )
+        if len(expression) > self._config.max_expr_len:
+            raise FormulaSecurityError(
+                f"Expression length {len(expression)} exceeds maximum "
+                f"{self._config.max_expr_len}",
+                expression=expression,
+            )
+        if not expression.strip():
+            raise FormulaSyntaxError("Expression cannot be empty")
+
+        try:
+            parser = FsscriptParser(expression, dialect=SQL_EXPRESSION_DIALECT)
+            tree = parser.parse_expression()
+        except Exception as exc:
+            raise FormulaSyntaxError(
+                f"Invalid formula syntax: {exc}",
+                expression=expression,
+            ) from exc
+
+        if tree is None:
+            raise FormulaSyntaxError("Expression did not produce any AST node")
+
+        validator = _Validator(self._config, expression)
+        validator.validate(tree)
 
     def compile(
         self,
@@ -750,7 +805,16 @@ class _SqlGenerator:
         name = node.name
         # r4: FSScript 已原生支持 null/true/false 作为字面量关键字 → NullExpression/BooleanExpression；
         # 不会以 VariableExpression 形式到达这里。
-        physical = self._field_resolver(name)
+        # v1.4 M4 Step 4.1: resolver 可返回 ``(sql, params)`` 让预编译的 calc-field
+        # 片段把内部 ``?`` 对应的 bind params 注入到当前编译上下文，保持
+        # Spec parity.md §2.4 左→右前序 DFS 的参数顺序。
+        resolved = self._field_resolver(name)
+        if isinstance(resolved, tuple):
+            physical, nested_params = resolved
+            if nested_params:
+                self._ctx.params.extend(nested_params)
+        else:
+            physical = resolved
         self._ctx.referenced_fields.add(name)
         return physical
 

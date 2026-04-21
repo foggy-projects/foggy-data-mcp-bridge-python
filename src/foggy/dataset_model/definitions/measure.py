@@ -1,10 +1,26 @@
 """Measure and formula definitions for semantic layer."""
 
+import warnings
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
-from pydantic import BaseModel, Field
+from typing import Any, ClassVar, Dict, List, Optional, Set, Union
+from pydantic import BaseModel, Field, model_validator
 
 from foggy.dataset_model.definitions.base import AiDef, AggregationType
+
+
+# v1.4 M4 Step 4.3: module-level cache of measure names we have already
+# emitted a FutureWarning for.  Module-scope avoids Pydantic treating the
+# class-level attribute as a private model field.
+_FILTER_CONDITION_WARNED: Set[str] = set()
+
+
+def clear_filter_condition_warning_cache() -> None:
+    """Reset the once-per-measure ``FutureWarning`` cache.
+
+    Intended for tests so each case starts with a clean slate; production
+    code should not need to call this.
+    """
+    _FILTER_CONDITION_WARNED.clear()
 
 
 class MeasureType(str, Enum):
@@ -50,6 +66,40 @@ class DbMeasureDef(AiDef):
     model_config = {
         "extra": "allow",
     }
+
+    @model_validator(mode="after")
+    def _warn_filter_condition_deprecation(self) -> "DbMeasureDef":
+        """Emit ``FutureWarning`` when ``filter_condition`` is set.
+
+        v1.4 M4 Step 4.3 (REQ-FORMULA-EXTEND §4.2.1): ``filter_condition``
+        was a reserved field that is no longer consumed by either the
+        Python or Java engine.  QM authors should rewrite the intent as
+        a ``formulaDef`` on the measure, using ``sum(if(cond, col, 0))``
+        or ``count(distinct(if(cond, col, null)))``.
+
+        The field stays on the model to preserve backwards-compatible
+        QM deserialisation; it will be removed in v1.6 or v2.0.
+
+        The warning is emitted at most once per measure name per process
+        to avoid warning storms when the same QM is re-validated
+        repeatedly by downstream deserialisers.  Tests can reset the
+        cache via ``clear_filter_condition_warning_cache()``.
+        """
+        if self.filter_condition:
+            key = self.name or ""
+            if key not in _FILTER_CONDITION_WARNED:
+                _FILTER_CONDITION_WARNED.add(key)
+                warnings.warn(
+                    "DbMeasureDef.filter_condition is deprecated since v1.4 "
+                    f"(measure name='{self.name}'). "
+                    "Rewrite as formulaDef with sum(if(cond, col, 0)) or "
+                    "count(distinct(if(cond, col, null))). "
+                    "See REQ-FORMULA-EXTEND §4.2.1. "
+                    "Field will be removed in v1.6 or v2.0.",
+                    FutureWarning,
+                    stacklevel=2,
+                )
+        return self
 
     def get_sql_aggregation(self, column_alias: Optional[str] = None) -> str:
         """Get the SQL aggregation expression.

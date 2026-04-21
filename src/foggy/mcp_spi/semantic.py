@@ -155,6 +155,18 @@ class SemanticQueryResponse(BaseModel):
         return None
 
     @property
+    def params(self) -> Optional[List[Any]]:
+        """Backward compat: extract positional bind params from debug.extra.
+
+        v1.4 M4: populated whenever ``_build_query`` emits a parameterised
+        SQL (e.g. calculated fields compiled by ``FormulaCompiler``).
+        ``None`` when the query didn't produce any params.
+        """
+        if self.debug and self.debug.extra:
+            return self.debug.extra.get("params")
+        return None
+
+    @property
     def columns(self) -> List[Dict[str, Any]]:
         """Backward compat: extract column defs from schema_info."""
         if self.schema_info and self.schema_info.columns:
@@ -197,8 +209,14 @@ class SemanticQueryResponse(BaseModel):
         start: int = 0,
         limit: Optional[int] = None,
         has_more: Optional[bool] = None,
+        params: Optional[List[Any]] = None,
     ) -> "SemanticQueryResponse":
-        """Create from legacy (Python-internal) field names — migration helper."""
+        """Create from legacy (Python-internal) field names — migration helper.
+
+        v1.4 M4: ``params`` surfaces the positional bind params produced by
+        the query builder (e.g. ``FormulaCompiler`` bound literals) into
+        ``debug.extra["params"]``.  Exposed via the ``.params`` property.
+        """
         schema = None
         if columns_info:
             col_defs = [
@@ -211,8 +229,14 @@ class SemanticQueryResponse(BaseModel):
             ]
             schema = SchemaInfo(columns=col_defs)
 
-        extra = {"sql": sql} if sql else None
-        debug = DebugInfo(duration_ms=duration_ms, extra=extra) if (duration_ms or sql) else None
+        extra: Optional[Dict[str, Any]] = None
+        if sql or params:
+            extra = {}
+            if sql:
+                extra["sql"] = sql
+            if params:
+                extra["params"] = list(params)
+        debug = DebugInfo(duration_ms=duration_ms, extra=extra) if (duration_ms or extra) else None
 
         # Build pagination when limit is provided (aligned with Java)
         pagination = None

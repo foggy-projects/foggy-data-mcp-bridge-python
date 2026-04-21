@@ -17,7 +17,7 @@ import json
 import asyncio
 import uuid
 
-from foggy.mcp_spi import LocalDatasetAccessor, SemanticMetadataRequest, MetadataFormat
+from foggy.mcp_spi import LocalDatasetAccessor, SemanticMetadataRequest
 from foggy.mcp_spi.semantic import DeniedColumn
 from foggy.dataset_model.semantic import SemanticQueryService
 
@@ -270,8 +270,14 @@ def create_mcp_router(
                     )
 
                 elif tool_name in ("get_metadata", "dataset.get_metadata"):
-                    # Default: markdown format (aligned with Java LocalDatasetAccessor)
-                    # Markdown is ~40-60% fewer tokens and better for LLM comprehension
+                    # AI Chat 契约（v1.3）：
+                    #   - LLM 可见 schema 不暴露 `format`（见 schemas/get_metadata_schema.json）。
+                    #     LLM 的 tool call 里不会有 format，因此默认走 markdown 分支，
+                    #     AI Chat 路径 deterministic。
+                    #   - 内部程序化消费方（Odoo Pro 网关模式下的列权限 / 字段映射服务等）
+                    #     会显式传 `format='json'` 经过本入口获取结构化 JSON。这里必须继续
+                    #     按原分支返回 JSON，否则会破坏 Model Overview / Mapping Preview
+                    #     等管理端结构化解析链路（参见总控治理原则）。
                     svc = _get_service()
                     fmt = tool_args.get("format", "markdown")
                     # v1.2 column governance: optional visible_fields filter
@@ -279,7 +285,7 @@ def create_mcp_router(
                     # v1.3 physical-column governance
                     denied_columns = _build_denied_column_models(tool_args.get("deniedColumns"))
 
-                    if fmt == MetadataFormat.JSON:
+                    if fmt == "json":
                         v3_data = svc.get_metadata_v3(
                             visible_fields=visible_fields,
                             denied_columns=denied_columns,
@@ -302,6 +308,10 @@ def create_mcp_router(
                     )
 
                 elif tool_name in ("describe_model_internal", "dataset.describe_model_internal"):
+                    # AI Chat 契约（v1.3）：LLM 不能选择格式（schema 不暴露 format）。
+                    # LLM 的 tool call 默认不带 format → 默认 markdown。
+                    # 内部程序化消费方（Odoo Pro 列权限 / 字段映射 / 管理端预览等）会显式
+                    # 传 format='json'，此处按原分支返回结构化 JSON，不得强行覆盖。
                     model_name = tool_args.get("model")
                     if not model_name:
                         return McpJsonRpcResponse(
@@ -313,7 +323,7 @@ def create_mcp_router(
                     fmt = tool_args.get("format", "markdown")
                     denied_columns = _build_denied_column_models(tool_args.get("deniedColumns"))
 
-                    if fmt == MetadataFormat.JSON:
+                    if fmt == "json":
                         v3_data = svc.get_metadata_v3(
                             model_names=[model_name],
                             denied_columns=denied_columns,
@@ -325,9 +335,8 @@ def create_mcp_router(
                             )
                         text = json.dumps(v3_data, ensure_ascii=False, indent=2)
                     else:
-                        # Use V3 markdown format — aligned with Java LocalDatasetAccessor
-                        # (default format="markdown"). Markdown is ~40-60% fewer tokens
-                        # and expands JOIN dimensions as {dim}$id / {dim}$caption.
+                        # V3 markdown format — 比 JSON 少约 40-60% token，
+                        # 且 JOIN 维度会展开成 {dim}$id / {dim}$caption。
                         text = svc.get_metadata_v3_markdown(
                             model_names=[model_name],
                             denied_columns=denied_columns,

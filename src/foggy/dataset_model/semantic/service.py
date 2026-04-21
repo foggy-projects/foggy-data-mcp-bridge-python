@@ -6,6 +6,7 @@ integrating SqlQueryBuilder with table/query models.
 
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
+import os
 import time
 import re
 import logging
@@ -56,6 +57,9 @@ from foggy.dataset_model.semantic.physical_column_mapping import (
     build_physical_column_mapping,
 )
 from foggy.dataset_model.semantic.error_sanitizer import sanitize_engine_error
+from foggy.dataset_model.semantic.formula_compiler import FormulaCompiler
+from foggy.dataset_model.semantic.formula_dialect import SqlDialect
+from foggy.dataset_model.semantic.formula_errors import FormulaError
 from foggy.dataset_model.semantic.inline_expression import (
     find_matching_paren,
     parse_inline_aggregate,
@@ -138,6 +142,12 @@ class SemanticQueryService(SemanticServiceResolver):
         self._hierarchy_registry = get_default_hierarchy_registry()
         # v1.3: physical column mapping cache (model_name → PhysicalColumnMapping)
         self._mapping_cache: Dict[str, PhysicalColumnMapping] = {}
+        # v1.4 M4 Step 4.1: FormulaCompiler lazy-init cache for
+        # calculated-field expression compilation. Built once per service
+        # instance based on ``self._dialect``; falls back to mysql when
+        # dialect is None (legacy default matches prior ANSI double-quote
+        # identifier behaviour).
+        self._formula_compiler: Optional[FormulaCompiler] = None
 
     def _qi(self, identifier: str) -> str:
         """Quote an SQL identifier using the configured dialect.
@@ -149,6 +159,46 @@ class SemanticQueryService(SemanticServiceResolver):
         # ANSI SQL standard: double-quote for identifiers
         escaped = identifier.replace('"', '""')
         return f'"{escaped}"'
+
+    # v1.4 M4 Step 4.1 helpers ------------------------------------------------
+
+    @staticmethod
+    def _formula_legacy_passthrough() -> bool:
+        """Read the ``FOGGY_FORMULA_LEGACY_PASSTHROUGH`` env flag.
+
+        When ``true``, ``_build_calculated_field_sql`` falls back to the
+        pre-v1.4 character-level string substitution path (no AST gate).
+        Only intended for staged rollout / hotfix rollback; defaults to
+        ``false``.
+        """
+        return os.getenv("FOGGY_FORMULA_LEGACY_PASSTHROUGH", "").strip().lower() == "true"
+
+    def _get_formula_compiler(self) -> FormulaCompiler:
+        """Return the cached FormulaCompiler, building it on first use.
+
+        Dialect resolution order:
+          1. ``self._dialect.name()`` when the service was wired with an
+             ``FDialect`` (mysql / postgresql / sqlserver / sqlite).
+          2. Fallback ``mysql`` — matches the historical behaviour of
+             ``_resolve_expression_fields`` which emitted MySQL-ish
+             arithmetic SQL regardless of the concrete engine.
+        """
+        if self._formula_compiler is not None:
+            return self._formula_compiler
+        dialect_name = "mysql"
+        if self._dialect is not None and hasattr(self._dialect, "name"):
+            try:
+                dialect_name = self._dialect.name()
+            except Exception:
+                dialect_name = "mysql"
+        try:
+            sql_dialect = SqlDialect.of(dialect_name)
+        except ValueError:
+            # Unknown dialect name (e.g. legacy fdialect sub-type) — fall
+            # back to mysql to preserve the previous behaviour.
+            sql_dialect = SqlDialect.of("mysql")
+        self._formula_compiler = FormulaCompiler(sql_dialect)
+        return self._formula_compiler
 
     def get_physical_column_mapping(self, model_name: str) -> Optional[PhysicalColumnMapping]:
         """Get or lazily build the physical column mapping for a model.
@@ -323,34 +373,59 @@ class SemanticQueryService(SemanticServiceResolver):
         model_names: List[str],
         visible_fields: Optional[List[str]],
         denied_columns: Optional[List['DeniedColumn']],
-    ) -> Optional[set]:
-        """Merge ``visible_fields`` whitelist with ``denied_columns`` blacklist.
+    ) -> Optional[Dict[str, set]]:
+        """Compute *per-model* effective visible QM fields.
 
-        Returns an effective visible set, or ``None`` when no governance applies.
-        Used by both JSON and markdown metadata builders.
+        v1.6 F-3 fix: previous implementation merged denied QM fields across
+        models into a single flat set, losing model attribution. When two
+        models shared a QM field name (e.g. both expose ``name`` but one maps
+        to ``sale_order.name`` and the other to ``res_partner.name``), denying
+        one model's physical column caused the shared QM field to disappear
+        from the OTHER model too.
+
+        The fix returns a ``Dict[model_name, Set[qm_field]]`` so callers can
+        apply per-model filtering. Absent model keys signal "this model has
+        no mapping; caller should treat it as ungoverned".
+
+        Returns
+        -------
+        None
+            When no governance applies (both ``visible_fields`` and
+            ``denied_columns`` absent).
+        Dict[str, Set[str]]
+            When governance applies. Keyed by model name. Missing keys indicate
+            the model has no ``PhysicalColumnMapping`` — downstream callers
+            should fall back to "no trimming" for those models.
         """
-        effective: Optional[set] = set(visible_fields) if visible_fields is not None else None
+        if visible_fields is None and not denied_columns:
+            return None
 
-        if not denied_columns:
-            return effective
+        visible_base: Optional[set] = (
+            set(visible_fields) if visible_fields is not None else None
+        )
 
-        all_denied_qm: set = set()
-        all_qm: set = set()
+        per_model: Dict[str, set] = {}
         for name in model_names:
             mapping = self.get_physical_column_mapping(name)
-            if mapping:
-                all_denied_qm.update(mapping.to_denied_qm_fields(denied_columns))
-                all_qm.update(mapping.get_all_qm_field_names())
+            if mapping is None:
+                # No mapping → ungoverned; caller treats as "no trimming".
+                # But preserve the legacy behaviour when ONLY visible_fields
+                # is set: whitelists apply globally, so attach it.
+                if visible_base is not None:
+                    per_model[name] = set(visible_base)
+                continue
 
-        if not all_denied_qm:
-            return effective
+            model_all_qm = mapping.get_all_qm_field_names()
+            model_denied = (
+                mapping.to_denied_qm_fields(denied_columns) if denied_columns else set()
+            )
 
-        if effective is not None:
-            effective -= all_denied_qm
-        else:
-            effective = all_qm - all_denied_qm
+            if visible_base is not None:
+                per_model[name] = set(visible_base) - model_denied
+            else:
+                per_model[name] = model_all_qm - model_denied
 
-        return effective
+        return per_model
 
     # ==================== SemanticServiceResolver Implementation ====================
 
@@ -416,6 +491,7 @@ class SemanticQueryService(SemanticServiceResolver):
                 data=[],
                 columns_info=build_result.columns,
                 sql=build_result.sql,
+                params=list(build_result.params) or None,
                 warnings=build_result.warnings,
                 duration_ms=(time.time() - start_time) * 1000,
             )
@@ -476,7 +552,11 @@ class SemanticQueryService(SemanticServiceResolver):
         # DebugInfo already imported at module level from foggy.mcp_spi
         response.debug = DebugInfo(
             duration_ms=duration_ms,
-            extra={"sql": build_result.sql, "from_cache": False},
+            extra={
+                "sql": build_result.sql,
+                "params": list(build_result.params),
+                "from_cache": False,
+            },
         )
         if build_result.warnings:
             response.warnings = build_result.warnings
@@ -677,11 +757,21 @@ class SemanticQueryService(SemanticServiceResolver):
         if calc_field_defs:
             calc_field_defs = sort_calc_fields_by_dependencies(calc_field_defs)
         compiled_calcs: Dict[str, str] = {}
+        # v1.4 M4 Step 4.1: parallel dict holding FormulaCompiler bind_params
+        # per calc name.  When a calc is referenced by slice / having /
+        # groupBy / orderBy, its params travel together with the inlined SQL
+        # fragment so the final positional `?` binding stays consistent.
+        compiled_calcs_params: Dict[str, List[Any]] = {}
 
         for cf in calc_field_defs:
-            select_sql = self._build_calculated_field_sql(cf, model, ensure_join, compiled_calcs)
+            select_sql, select_params = self._build_calculated_field_sql(
+                cf, model, ensure_join, compiled_calcs, compiled_calcs_params
+            )
             alias = cf.alias or cf.name
-            builder.select(f"{select_sql} AS {self._qi(alias)}")
+            builder.select(
+                f"{select_sql} AS {self._qi(alias)}",
+                params=select_params or None,
+            )
             columns_info.append({
                 "name": alias, "fieldName": cf.name,
                 "expression": cf.expression, "aggregation": cf.agg,
@@ -692,14 +782,21 @@ class SemanticQueryService(SemanticServiceResolver):
 
         # 3. WHERE clause
         for filter_item in request.slice:
-            self._add_filter(builder, model, filter_item, ensure_join, compiled_calcs=compiled_calcs)
+            self._add_filter(
+                builder, model, filter_item, ensure_join,
+                compiled_calcs=compiled_calcs,
+                compiled_calcs_params=compiled_calcs_params,
+            )
 
         # 4. GROUP BY
         if request.group_by:
             for col_name in request.group_by:
                 # v1.5 Phase 2: calc field reference in GROUP BY
                 if compiled_calcs and col_name in compiled_calcs:
-                    builder.group_by(f"({compiled_calcs[col_name]})")
+                    builder.group_by(
+                        f"({compiled_calcs[col_name]})",
+                        params=compiled_calcs_params.get(col_name) or None,
+                    )
                     continue
                 resolved = model.resolve_field(col_name)
                 if resolved:
@@ -721,9 +818,14 @@ class SemanticQueryService(SemanticServiceResolver):
                 # v1.5 Phase 2: calc field reference in HAVING
                 if compiled_calcs and col in compiled_calcs:
                     col_sql = f"({compiled_calcs[col]})"
+                    calc_params = list(compiled_calcs_params.get(col, []))
                 else:
                     col_sql = col
-                builder.having(f"{col_sql} {op} ?", params=[val])
+                    calc_params = []
+                # v1.4 M4 Step 4.1: calc bind params must precede the HAVING
+                # RHS value so the positional ``?`` binding matches the
+                # emitted SQL left-to-right.
+                builder.having(f"{col_sql} {op} ?", params=calc_params + [val])
 
         # 6. ORDER BY
         selected_order_aliases = self._build_selected_order_aliases(columns_info)
@@ -745,7 +847,11 @@ class SemanticQueryService(SemanticServiceResolver):
                 elif compiled_calcs and column in compiled_calcs:
                     # v1.5 Phase 2: calc field not in SELECT, but ORDER BY
                     # references it by name — inline the expression.
-                    builder.order_by(f"({compiled_calcs[column]})", direction)
+                    builder.order_by(
+                        f"({compiled_calcs[column]})",
+                        direction,
+                        params=compiled_calcs_params.get(column) or None,
+                    )
                 else:
                     builder.order_by(column, direction)
 
@@ -1263,27 +1369,93 @@ class SemanticQueryService(SemanticServiceResolver):
         model: DbTableModelImpl,
         ensure_join=None,
         compiled_calcs: Optional[Dict[str, str]] = None,
-    ) -> str:
+        compiled_calcs_params: Optional[Dict[str, List[Any]]] = None,
+    ) -> Tuple[str, List[Any]]:
         """Build SQL expression for a calculated field, including OVER() for window functions.
 
-        Flow:
-        1. Resolve semantic field names in expression → SQL column names
-        2. v1.5 Phase 2: register the **pre-wrap** rendered expression into
-           ``compiled_calcs`` under ``cf.name`` — so later calcs / slices
-           / orderBy can reference this calc by name and inline the raw
-           expression (see ``_resolve_single_field``).  We deliberately
-           register the form **before** agg/window wrapping; users who
-           want the aggregated form at the reference site can apply agg
-           at the outer calc level.
-        3. If agg specified (non-window): wrap as AGG(expr)
-        4. If window function: wrap as expr OVER (PARTITION BY ... ORDER BY ... frame)
-        """
-        base_sql = self._resolve_expression_fields(cf.expression, model, ensure_join, compiled_calcs)
+        v1.4 M4 Step 4.1:
+        - Returns ``(sql_fragment, bind_params)``: the final SELECT-ready SQL
+          and the positional ``?`` parameters produced by the compiler.
+        - Default path compiles ``cf.expression`` through
+          :class:`FormulaCompiler`, which runs AST white-list validation and
+          parameterises every literal.  This closes the "未闸门字符串拼接"
+          risk in the legacy ``_resolve_expression_fields`` path (see REQ
+          §6.1).
+        - Set env ``FOGGY_FORMULA_LEGACY_PASSTHROUGH=true`` to fall back to
+          the pre-v1.4 character-level resolver for staged rollout /
+          hotfix rollback.  The legacy path is retained at most one minor
+          version; new tests should cover the default path.
 
-        # Register pre-wrap fragment for downstream calc refs.  See
-        # Phase 2 requirement doc "Pre-wrap 注册语义" for rationale.
+        Flow:
+        1. Compile ``cf.expression`` → SQL fragment + bind_params (or run
+           legacy character-level substitution under the env flag).
+        2. Register the **pre-wrap** fragment into ``compiled_calcs`` under
+           ``cf.name`` so later calcs / slices / orderBy can reference this
+           calc by name (see ``_resolve_single_field``).  When the compiler
+           produced bind_params, also stash them under the same key in
+           ``compiled_calcs_params`` so call sites inlining the fragment
+           can forward the params to the builder.
+        3. If agg specified (non-window): wrap as AGG(expr).
+        4. If window function: wrap as expr OVER (PARTITION BY ... ORDER BY ... frame).
+        """
+        base_params: List[Any] = []
+
+        # Four routing paths:
+        # 1. ``FOGGY_FORMULA_LEGACY_PASSTHROUGH=true``: character-level
+        #    substitution (legacy, no AST gate) — staged rollout only.
+        # 2. ``self._use_ast_expression_compiler=True``: v1.5 Phase 3 AST
+        #    visitor preserved as-is — supports method calls / ternary /
+        #    null-coalescing that FormulaCompiler intentionally rejects.
+        #    FormulaCompiler scope is aggregation + arithmetic + allowlist
+        #    functions; it does NOT cover Phase 3 sugar.
+        # 3. ``cf.is_window_function()``: legacy ``_resolve_expression_fields``
+        #    is retained for window-function calcs.  Spec v1 scope is
+        #    aggregation + arithmetic — window functions (RANK / ROW_NUMBER /
+        #    LAG) live outside FormulaCompiler and are wrapped by OVER()
+        #    downstream; routing them through the compiler would trip the
+        #    allowlist.  See parity.md §4 (aggregation boundary).
+        # 4. Default: FormulaCompiler with AST white-list + bind_params,
+        #    closing the "未闸门字符串拼接" risk (REQ §6.1).
+        if (
+            self._formula_legacy_passthrough()
+            or self._use_ast_expression_compiler
+            or cf.is_window_function()
+        ):
+            base_sql = self._resolve_expression_fields(
+                cf.expression, model, ensure_join, compiled_calcs
+            )
+        else:
+            def _resolver(name: str):
+                sql = self._resolve_single_field(name, model, ensure_join, compiled_calcs)
+                # v1.4 M4 Step 4.1: when the resolved fragment originated
+                # from a previously-compiled calc-field that carries bind
+                # params, forward them to the current compiler context so
+                # the outer SQL's positional ``?`` binding stays aligned
+                # with the left-to-right emission order.
+                if compiled_calcs_params and name in compiled_calcs_params:
+                    nested = compiled_calcs_params.get(name) or []
+                    if nested:
+                        return sql, list(nested)
+                return sql
+            try:
+                compiled = self._get_formula_compiler().compile(cf.expression, _resolver)
+            except FormulaError:
+                # Propagate formula-level validation errors to the caller
+                # so the SemanticQueryService can turn them into a clear
+                # user-facing error message.  The attached ``expression``
+                # attribute on the error already carries the literal.
+                raise
+            base_sql = compiled.sql_fragment
+            base_params = list(compiled.bind_params)
+
+        # Register pre-wrap fragment + params for downstream calc refs. See
+        # Phase 2 requirement doc "Pre-wrap 注册语义" for rationale.  When
+        # the compiler emitted bind_params the sibling dict carries them so
+        # WHERE / HAVING / GROUP BY / ORDER BY inlining can forward them.
         if compiled_calcs is not None:
             compiled_calcs[cf.name] = base_sql
+        if compiled_calcs_params is not None:
+            compiled_calcs_params[cf.name] = list(base_params)
 
         if cf.is_window_function():
             # Window function: optionally wrap with agg, then add OVER()
@@ -1320,7 +1492,7 @@ class SemanticQueryService(SemanticServiceResolver):
             else:
                 base_sql = f"{agg_upper}({base_sql})"
 
-        return base_sql
+        return base_sql, base_params
 
     # ==================== Filtering ====================
 
@@ -1332,6 +1504,7 @@ class SemanticQueryService(SemanticServiceResolver):
         ensure_join=None,
         root_builder: Optional[SqlQueryBuilder] = None,
         compiled_calcs: Optional[Dict[str, str]] = None,
+        compiled_calcs_params: Optional[Dict[str, List[Any]]] = None,
     ) -> None:
         """Add a single filter condition with auto-JOIN support.
 
@@ -1343,9 +1516,20 @@ class SemanticQueryService(SemanticServiceResolver):
         v1.5 Phase 2: ``compiled_calcs`` lets slice conditions reference
         previously-compiled calc fields by name.  The reference resolves
         to the calc's pre-wrap SQL expression inlined in parentheses.
+
+        v1.4 M4 Step 4.1: ``compiled_calcs_params`` carries the sibling
+        FormulaCompiler bind_params for each calc name.  When a calc is
+        inlined into a filter fragment, its params are prepended in the
+        left-to-right emission order so the positional ``?`` binding
+        matches the final WHERE clause.
         """
         if root_builder is None:
             root_builder = builder
+
+        def _calc_params_for(name: str) -> List[Any]:
+            if compiled_calcs_params is None:
+                return []
+            return list(compiled_calcs_params.get(name, []))
 
         # --- Handle $or compound condition ---
         if "$or" in filter_item:
@@ -1355,7 +1539,9 @@ class SemanticQueryService(SemanticServiceResolver):
                 sub_builder = SqlQueryBuilder()
                 self._add_filter(
                     sub_builder, model, sub_item, ensure_join,
-                    root_builder=root_builder, compiled_calcs=compiled_calcs,
+                    root_builder=root_builder,
+                    compiled_calcs=compiled_calcs,
+                    compiled_calcs_params=compiled_calcs_params,
                 )
                 if sub_builder._query.where and sub_builder._query.where.conditions:
                     fragment = " AND ".join(sub_builder._query.where.conditions)
@@ -1375,7 +1561,9 @@ class SemanticQueryService(SemanticServiceResolver):
             for sub_item in filter_item["$and"]:
                 self._add_filter(
                     builder, model, sub_item, ensure_join,
-                    root_builder=root_builder, compiled_calcs=compiled_calcs,
+                    root_builder=root_builder,
+                    compiled_calcs=compiled_calcs,
+                    compiled_calcs_params=compiled_calcs_params,
                 )
             return
 
@@ -1389,7 +1577,10 @@ class SemanticQueryService(SemanticServiceResolver):
                 if k not in ("column", "operator", "value", "op", "field", "values", "pattern", "from", "to"):
                     # v1.5 Phase 2: calc field shorthand reference
                     if compiled_calcs and k in compiled_calcs:
-                        builder.where(f"({compiled_calcs[k]}) = ?", params=[v])
+                        builder.where(
+                            f"({compiled_calcs[k]}) = ?",
+                            params=_calc_params_for(k) + [v],
+                        )
                         return
                     resolved = model.resolve_field(k)
                     if resolved:
@@ -1399,9 +1590,14 @@ class SemanticQueryService(SemanticServiceResolver):
                     return
             return
 
+        # v1.4 M4 Step 4.1: accumulate calc-field bind params inlined into
+        # the current filter fragment, in left-to-right emission order.
+        inline_calc_params: List[Any] = []
+
         # v1.5 Phase 2: calc field reference (check before model resolve)
         if compiled_calcs and column in compiled_calcs:
             col_expr = f"({compiled_calcs[column]})"
+            inline_calc_params.extend(_calc_params_for(column))
         else:
             # Resolve column through model field resolver
             resolved = model.resolve_field(column)
@@ -1422,6 +1618,7 @@ class SemanticQueryService(SemanticServiceResolver):
             # v1.5 Phase 2: calc field on the reference side too
             if compiled_calcs and ref_field in compiled_calcs:
                 ref_expr = f"({compiled_calcs[ref_field]})"
+                inline_calc_params.extend(_calc_params_for(ref_field))
             else:
                 ref_resolved = model.resolve_field(ref_field)
                 if ref_resolved:
@@ -1439,7 +1636,10 @@ class SemanticQueryService(SemanticServiceResolver):
                        "<": "<", "lt": "<", "<=": "<=", "lte": "<=",
                        "===": "=", "force_eq": "="}
             sql_op = op_map.get(operator, operator)
-            builder.where(f"{col_expr} {sql_op} {ref_expr}")
+            builder.where(
+                f"{col_expr} {sql_op} {ref_expr}",
+                params=inline_calc_params if inline_calc_params else None,
+            )
             return
 
         # Resolve value: support "values" key for IN, or range from filter_item
@@ -1459,7 +1659,9 @@ class SemanticQueryService(SemanticServiceResolver):
         if hierarchy_condition:
             builder.where(
                 hierarchy_condition["condition"],
-                params=hierarchy_condition["params"] if hierarchy_condition["params"] else None,
+                params=(inline_calc_params + (hierarchy_condition["params"] or []))
+                if (inline_calc_params or hierarchy_condition["params"])
+                else None,
             )
             return
 
@@ -1469,7 +1671,8 @@ class SemanticQueryService(SemanticServiceResolver):
             col_expr, operator, effective_value, params
         )
         if condition:
-            builder.where(condition, params=params if params else None)
+            merged_params = inline_calc_params + params
+            builder.where(condition, params=merged_params if merged_params else None)
 
     def _build_hierarchy_filter(
         self,
@@ -1790,7 +1993,11 @@ class SemanticQueryService(SemanticServiceResolver):
         duration_ms = (time.time() - start_time) * 1000
         response.debug = DebugInfo(
             duration_ms=duration_ms,
-            extra={"sql": build_result.sql, "from_cache": False},
+            extra={
+                "sql": build_result.sql,
+                "params": list(build_result.params),
+                "from_cache": False,
+            },
         )
         if build_result.warnings:
             response.warnings = build_result.warnings
@@ -2068,12 +2275,30 @@ class SemanticQueryService(SemanticServiceResolver):
                         pt_seen.add(t)
                         physical_tables.append(pt)
 
-        # --- v1.2/v1.3: governance trimming ---
-        effective_visible = self._resolve_effective_visible(
+        # --- v1.2/v1.3 governance trimming · v1.6 F-3 fix: per-model ---
+        # _resolve_effective_visible now returns Dict[model_name, set] so that
+        # a DeniedColumn targeting one model's physical column does NOT strip
+        # the shared QM field from other models.
+        per_model_effective = self._resolve_effective_visible(
             target_models, visible_fields, denied_columns,
         )
-        if effective_visible is not None:
-            fields = {k: v for k, v in fields.items() if k in effective_visible}
+        if per_model_effective is not None:
+            filtered_fields: Dict[str, Any] = {}
+            for field_name, field_info in fields.items():
+                models_of_field: Dict[str, Any] = field_info.get("models", {})
+                kept_models: Dict[str, Any] = {}
+                for model_name, model_info in models_of_field.items():
+                    model_effective = per_model_effective.get(model_name)
+                    if model_effective is None:
+                        # Model has no mapping → treat as ungoverned; keep as-is.
+                        kept_models[model_name] = model_info
+                    elif field_name in model_effective:
+                        kept_models[model_name] = model_info
+                if kept_models:
+                    new_info = dict(field_info)
+                    new_info["models"] = kept_models
+                    filtered_fields[field_name] = new_info
+            fields = filtered_fields
 
         result: Dict[str, Any] = {
             "prompt": (
@@ -2115,18 +2340,29 @@ class SemanticQueryService(SemanticServiceResolver):
         if not target_models:
             return "# No data models available\n"
 
-        # --- v1.2/v1.3: governance trimming ---
+        # --- v1.2/v1.3 governance trimming · v1.6 F-3 fix: per-model ---
         target_names_only = [n for n, _ in target_models]
-        visible_set = self._resolve_effective_visible(
+        per_model_visible = self._resolve_effective_visible(
             target_names_only, visible_fields, denied_columns,
         )
 
         if len(target_models) == 1:
+            # Single-model path: extract that model's effective set (or None).
+            target_name = target_models[0][0]
+            single_visible = (
+                per_model_visible.get(target_name)
+                if per_model_visible is not None
+                else None
+            )
             return self._build_single_model_markdown(
-                target_models[0][0], target_models[0][1], visible_set=visible_set,
+                target_name, target_models[0][1], visible_set=single_visible,
             )
         else:
-            return self._build_multi_model_markdown(target_models, visible_set=visible_set)
+            # Multi-model path: pass the per-model dict; the builder applies
+            # each model's set independently inside its per-model loop.
+            return self._build_multi_model_markdown(
+                target_models, per_model_visible=per_model_visible,
+            )
 
     # ---------- Type description helpers (aligned with Java getDataTypeDescription) ----------
 
@@ -2268,20 +2504,29 @@ class SemanticQueryService(SemanticServiceResolver):
     def _build_multi_model_markdown(
         self,
         models: List[tuple],
-        visible_set: Optional[set] = None,
+        per_model_visible: Optional[Dict[str, set]] = None,
+        visible_set: Optional[set] = None,  # legacy compat — prefer per_model_visible
     ) -> str:
         """Build compact index markdown for multiple models (aligned with Java buildMultiModelMarkdown).
 
         Parameters
         ----------
+        per_model_visible
+            v1.6 F-3 fix: per-model effective visible set. When provided, the
+            ``_visible`` closure inside each model loop uses that model's
+            specific set. A missing model key means "no trimming for this model".
         visible_set
-            v1.2 governance: only include fields whose name is in this set.
-            ``None`` means no filtering.
+            Legacy parameter: flat set applied across all models. Kept for
+            backward compat; ignored when ``per_model_visible`` is provided.
+            Do not pass both.
         """
         lines: List[str] = []
 
+        # Per-iteration visibility closure; reassigned inside the model loop.
+        current_visible: Optional[set] = visible_set
+
         def _visible(field_name: str) -> bool:
-            return visible_set is None or field_name in visible_set
+            return current_visible is None or field_name in current_visible
 
         lines.append("# Semantic Model Index V3")
         lines.append("")
@@ -2301,6 +2546,13 @@ class SemanticQueryService(SemanticServiceResolver):
         lines.append("")
 
         for model_name, model in models:
+            # v1.6 F-3: switch visibility closure to THIS model's effective set
+            # so that per-model filtering is applied (not a flat global set).
+            # When per_model_visible has no entry for this model, fall back to
+            # "no trimming" (current_visible = None).
+            if per_model_visible is not None:
+                current_visible = per_model_visible.get(model_name)
+
             alias = model.alias or model_name
             lines.append(f"### {alias}")
             lines.append("")

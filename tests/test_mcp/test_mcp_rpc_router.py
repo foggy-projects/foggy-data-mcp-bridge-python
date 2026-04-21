@@ -1,9 +1,11 @@
 import json
+import os
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from foggy.mcp.routers.mcp_rpc import create_mcp_router
+from foggy.mcp.schemas.tool_config_loader import ToolConfigLoader
 from foggy.mcp_spi.semantic import DeniedColumn
 from foggy.mcp_spi import SemanticQueryResponse
 
@@ -19,7 +21,6 @@ class _FakeSemanticService:
             "visible_fields": visible_fields,
             "denied_columns": denied_columns,
         })
-        assert model_names == ["OdooResCompanyQueryModel"]
         return {
             "fields": {
                 "id": {
@@ -44,7 +45,6 @@ class _FakeSemanticService:
             "visible_fields": visible_fields,
             "denied_columns": denied_columns,
         })
-        assert model_names == ["OdooResCompanyQueryModel"]
         return "# OdooResCompanyQueryModel - Company Directory"
 
 
@@ -74,8 +74,33 @@ def _make_client(accessor=None, semantic_service=None) -> TestClient:
     return TestClient(app)
 
 
-def test_describe_model_internal_supports_json_format():
-    client = _make_client()
+def test_llm_visible_schema_does_not_expose_format():
+    """AI Chat 契约 v1.3：LLM 可见的 tool schema 不应让模型看见 `format` 参数。"""
+    loader = ToolConfigLoader()
+    describe_tool = loader.get_tool("dataset.describe_model_internal")
+    assert describe_tool is not None
+    properties = describe_tool.inputSchema.get("properties", {})
+    assert "model" in properties, "describe_model_internal 必须声明 model 参数"
+    assert "format" not in properties, (
+        "AI Chat 契约：describe_model_internal 不得向 LLM 暴露 format 参数"
+    )
+
+    metadata_tool = loader.get_tool("dataset.get_metadata")
+    assert metadata_tool is not None
+    metadata_properties = metadata_tool.inputSchema.get("properties", {})
+    assert "format" not in metadata_properties, (
+        "AI Chat 契约：get_metadata 不得向 LLM 暴露 format 参数"
+    )
+
+
+def test_describe_model_internal_honors_explicit_json_from_internal_callers():
+    """
+    AI Chat 契约 v1.3：LLM 不能选择格式（schema 不暴露 format）。
+    但内部程序化消费方（Odoo Pro 网关模式下的 column_governance / field_mapping_registry）
+    会显式传 format=json 获取结构化 JSON——此分支必须保留，不得被 AI Chat 契约覆盖。
+    """
+    service = _FakeSemanticService()
+    client = _make_client(semantic_service=service)
 
     response = client.post(
         "/mcp/analyst/rpc",
@@ -87,6 +112,7 @@ def test_describe_model_internal_supports_json_format():
                 "name": "dataset.describe_model_internal",
                 "arguments": {
                     "model": "OdooResCompanyQueryModel",
+                    # 内部调用方显式请求 JSON
                     "format": "json",
                 },
             },
@@ -99,6 +125,9 @@ def test_describe_model_internal_supports_json_format():
     payload = json.loads(text)
     assert payload["fields"]["id"]["sourceColumn"] == "id"
     assert payload["models"]["OdooResCompanyQueryModel"]["factTable"] == "res_company"
+    # 走 JSON 分支：metadata_v3 应被调用，markdown 不应被调用
+    assert len(service.metadata_v3_calls) == 1
+    assert service.metadata_markdown_calls == []
 
 
 def test_describe_model_internal_defaults_to_markdown():
@@ -125,6 +154,7 @@ def test_describe_model_internal_defaults_to_markdown():
 
 
 def test_describe_model_internal_forwards_denied_columns_to_metadata_service():
+    """内部程序化调用显式传 format=json 时，deniedColumns 仍按 JSON 链路透传。"""
     service = _FakeSemanticService()
     client = _make_client(semantic_service=service)
 
@@ -185,6 +215,10 @@ def test_get_metadata_forwards_visible_fields_and_denied_columns():
 
 
 def test_get_metadata_expands_grouped_denied_columns():
+    """
+    内部程序化调用显式传 format=json，需走 JSON 分支，且分组 denied columns 会展开。
+    此链路用于 Odoo Pro 网关模式下 field_mapping_registry._discover_models() 这类场景。
+    """
     service = _FakeSemanticService()
     client = _make_client(semantic_service=service)
 

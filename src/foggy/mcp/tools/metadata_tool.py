@@ -5,7 +5,6 @@ from typing import Any, Dict, List, Optional, ClassVar
 from foggy.mcp.tools.base import BaseMcpTool
 from foggy.mcp_spi.tool import ToolCategory, ToolResult
 from foggy.mcp_spi.context import ToolExecutionContext
-from foggy.mcp_spi.enums import MetadataFormat
 from foggy.mcp.services.query_service import QueryService
 
 
@@ -170,12 +169,22 @@ class ListModelsTool(BaseMcpTool):
 
 
 class DescriptionModelTool(BaseMcpTool):
-    """Tool for getting detailed model descriptions for AI/LLM context."""
+    """Tool for getting detailed model descriptions for AI/LLM context.
+
+    AI Chat 契约（v1.3）：
+      - `format` 参数不再暴露给 LLM（回归显示 markdown 比 JSON 准确率更高）。
+      - 该入口固定输出 markdown；调用方在 arguments 中传入的 `format` 会被忽略。
+      - 需要 JSON 结构化元数据的内部程序化链路（权限治理/字段映射/管理端预览等）
+        请直接调用 QueryService.get_model_schema() 或上层服务方法，不要走这里。
+    """
 
     tool_name: ClassVar[str] = "describe_model"
-    tool_description: ClassVar[str] = "Get a detailed description of a model optimized for AI/LLM understanding, including natural language descriptions and example queries."
+    tool_description: ClassVar[str] = "Get a detailed description of a model optimized for AI/LLM understanding, including natural language descriptions and example queries. Output is always markdown."
     tool_category: ClassVar[ToolCategory] = ToolCategory.METADATA
     tool_tags: ClassVar[List[str]] = ["metadata", "ai", "description"]
+
+    #: AI Chat 入口固定输出格式。内部调用方请直接调用 QueryService 并选择需要的格式。
+    AI_CHAT_FIXED_FORMAT: ClassVar[str] = "markdown"
 
     def __init__(self, query_service: Optional[QueryService] = None):
         """Initialize with optional query service."""
@@ -187,21 +196,16 @@ class DescriptionModelTool(BaseMcpTool):
         self._query_service = service
 
     def get_parameters(self) -> List[Dict[str, Any]]:
-        """Get parameter definitions."""
+        """Get parameter definitions (LLM-visible contract).
+
+        AI Chat 不再让 LLM 选择 format，因此这里不再声明 `format` 参数。
+        """
         return [
             {
                 "name": "model_name",
                 "type": "string",
                 "required": True,
                 "description": "Name of the model to describe"
-            },
-            {
-                "name": "format",
-                "type": "string",
-                "required": False,
-                "description": "Output format: 'markdown', 'json', or 'text'",
-                "enum": ["markdown", "json", "text"],
-                "default": "markdown"
             },
         ]
 
@@ -210,7 +214,11 @@ class DescriptionModelTool(BaseMcpTool):
         arguments: Dict[str, Any],
         context: Optional[ToolExecutionContext] = None
     ) -> ToolResult:
-        """Execute the model description query."""
+        """Execute the model description query.
+
+        AI Chat 契约：即使调用方在 arguments 中传入 `format`，
+        本入口也一律忽略，固定 markdown 输出。
+        """
         if not self._query_service:
             return self._error_result("Query service not configured")
 
@@ -218,13 +226,11 @@ class DescriptionModelTool(BaseMcpTool):
         if not model_name:
             return self._error_result("model_name is required")
 
-        format_type = arguments.get("format", "markdown")
+        # AI Chat 入口不接受 LLM 的 format 选择；强制 markdown。
+        format_type = self.AI_CHAT_FIXED_FORMAT
 
         try:
             schema = await self._query_service.get_model_schema(model_name)
-
-            if format_type == MetadataFormat.JSON:
-                return self._success_result(data=schema)
 
             # Generate description
             lines = []

@@ -95,9 +95,17 @@ class TestCalculatedFieldDef:
         assert cf.window_frame == "ROWS BETWEEN 6 PRECEDING AND CURRENT ROW"
 
     def test_extra_fields_allowed(self):
-        """Extra fields from Java payload (like 'caption') should not cause errors."""
+        """Extra fields from Java payload (like 'caption') should not cause errors.
+
+        v1.4 M4 Step 4.4: expression must be a valid Spec v1 formula *or*
+        a window-function calc (``partition_by`` / ``window_order_by``
+        set) for the early-fail hook to accept it.  We use the
+        window-function carve-out here since ``RANK()`` is the natural
+        motivating sample for an extra-fields test.
+        """
         cf = CalculatedFieldDef(
             name="test", expression="RANK()",
+            partition_by=["product"],
             caption="排名",  # extra field from Java
         )
         assert cf.name == "test"

@@ -15,9 +15,15 @@ class JdbcQuery:
 
     @dataclass
     class JdbcSelect:
-        """SELECT 子句"""
+        """SELECT 子句
+
+        v1.4 M4: ``params`` 承载来自 FormulaCompiler 的 bind_params（位置 ``?``
+        占位符按 SELECT 列表顺序扁平化），以支持 calculated field 走编译器
+        产生的参数化 SQL。existing 拼接式 SELECT 不填充此字段时仍然兼容。
+        """
         columns: List[str] = field(default_factory=list)
         distinct: bool = False
+        params: List[Any] = field(default_factory=list)
 
     @dataclass
     class JdbcFrom:
@@ -42,9 +48,14 @@ class JdbcQuery:
 
     @dataclass
     class JdbcGroupBy:
-        """GROUP BY 子句"""
+        """GROUP BY 子句
+
+        v1.4 M4: ``params`` 承载 GROUP BY 列表内联的 calc-field 参数化片段产生的
+        bind_params。现有基础列 GROUP BY 不填充此字段时保持兼容。
+        """
         columns: List[str] = field(default_factory=list)
         having: Optional[str] = None
+        params: List[Any] = field(default_factory=list)
 
     @dataclass
     class JdbcHaving:
@@ -54,9 +65,14 @@ class JdbcQuery:
 
     @dataclass
     class JdbcOrder:
-        """ORDER BY 子句"""
+        """ORDER BY 子句
+
+        v1.4 M4: ``params`` 承载 ORDER BY 表达式内联的 calc-field 参数化片段
+        产生的 bind_params。现有基础列 ORDER BY 不填充此字段时保持兼容。
+        """
         columns: List[str] = field(default_factory=list)
         directions: List[str] = field(default_factory=list)  # ASC, DESC
+        params: List[Any] = field(default_factory=list)
 
     def __init__(self):
         self.select: Optional[JdbcQuery.JdbcSelect] = None
@@ -135,6 +151,10 @@ class DefaultJdbcQueryVisitor(JdbcQueryVisitor):
         distinct = "DISTINCT " if select.distinct else ""
         columns = ", ".join(select.columns)
         self._sql_parts.append(f"SELECT {distinct}{columns}")
+        # v1.4 M4: SELECT-level bind params（来自 calculated field FormulaCompiler 编译结果）
+        # 按 SQL 子句顺序排在 WHERE/HAVING 之前，与 DB driver 的位置绑定期望一致
+        if select.params:
+            self._params.extend(select.params)
 
     def accept_from(self, from_clause: JdbcQuery.JdbcFrom) -> None:
         """处理 FROM 子句"""
@@ -166,6 +186,9 @@ class DefaultJdbcQueryVisitor(JdbcQueryVisitor):
         if group.columns:
             columns = ", ".join(group.columns)
             self._sql_parts.append(f"GROUP BY {columns}")
+            # v1.4 M4: GROUP BY 内联 calc-field 参数化片段时携带的 bind params
+            if group.params:
+                self._params.extend(group.params)
 
     def accept_having(self, having: JdbcQuery.JdbcHaving) -> None:
         """处理 HAVING 子句"""
@@ -181,6 +204,9 @@ class DefaultJdbcQueryVisitor(JdbcQueryVisitor):
             for col, direction in zip(order.columns, order.directions):
                 order_parts.append(f"{col} {direction}")
             self._sql_parts.append(f"ORDER BY {', '.join(order_parts)}")
+            # v1.4 M4: ORDER BY 内联 calc-field 参数化片段时携带的 bind params
+            if order.params:
+                self._params.extend(order.params)
 
     def get_sql(self) -> str:
         """获取生成的 SQL"""
@@ -207,11 +233,22 @@ class SqlQueryBuilder:
         self._query = JdbcQuery()
         self._dialect = dialect
 
-    def select(self, *columns: str) -> 'SqlQueryBuilder':
-        """设置 SELECT 列"""
+    def select(
+        self,
+        *columns: str,
+        params: Optional[List[Any]] = None,
+    ) -> 'SqlQueryBuilder':
+        """设置 SELECT 列。
+
+        v1.4 M4: 可选 ``params`` 参数承载该列（集合）对应的 bind params，
+        典型来自 FormulaCompiler 编译 calculated field 产生的 ``?`` 占位符。
+        多次调用 ``select`` 的 params 按调用顺序累积。
+        """
         if not self._query.select:
             self._query.select = JdbcQuery.JdbcSelect()
         self._query.select.columns.extend(columns)
+        if params:
+            self._query.select.params.extend(params)
         return self
 
     def distinct(self, value: bool = True) -> 'SqlQueryBuilder':
@@ -264,11 +301,20 @@ class SqlQueryBuilder:
             self._query.where.params.extend(params)
         return self
 
-    def group_by(self, *columns: str) -> 'SqlQueryBuilder':
-        """设置 GROUP BY"""
+    def group_by(
+        self,
+        *columns: str,
+        params: Optional[List[Any]] = None,
+    ) -> 'SqlQueryBuilder':
+        """设置 GROUP BY。
+
+        v1.4 M4: 可选 ``params`` 承载 GROUP BY 列内联的 calc-field 片段的 bind params。
+        """
         if not self._query.group_by:
             self._query.group_by = JdbcQuery.JdbcGroupBy()
         self._query.group_by.columns.extend(columns)
+        if params:
+            self._query.group_by.params.extend(params)
         return self
 
     def having(self, *conditions: str, params: Optional[List[Any]] = None) -> 'SqlQueryBuilder':
@@ -280,12 +326,23 @@ class SqlQueryBuilder:
             self._query.having.params.extend(params)
         return self
 
-    def order_by(self, column: str, direction: str = "ASC") -> 'SqlQueryBuilder':
-        """添加 ORDER BY"""
+    def order_by(
+        self,
+        column: str,
+        direction: str = "ASC",
+        *,
+        params: Optional[List[Any]] = None,
+    ) -> 'SqlQueryBuilder':
+        """添加 ORDER BY。
+
+        v1.4 M4: 可选 ``params`` 承载表达式内联的 calc-field 片段的 bind params。
+        """
         if not self._query.order:
             self._query.order = JdbcQuery.JdbcOrder()
         self._query.order.columns.append(column)
         self._query.order.directions.append(direction)
+        if params:
+            self._query.order.params.extend(params)
         return self
 
     def limit(self, value: int) -> 'SqlQueryBuilder':

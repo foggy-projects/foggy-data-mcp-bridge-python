@@ -52,7 +52,14 @@ def svc(model):
 
 class TestTransitiveCalcRefs:
     def test_two_level_chain(self, svc):
-        """calc B references calc A → A's expression inlined in B's SQL."""
+        """calc B references calc A → A's expression inlined in B's SQL.
+
+        v1.4 M4 Step 4.1: FormulaCompiler parameterises literals and
+        defensively wraps binary ops with parens (R-2).  ``1.13`` is now
+        a bind param, and the inlined ``netAmount`` expression carries
+        the compiler-added paren layer + ``_resolve_single_field``'s own
+        paren wrap → triple-nested parens on references.
+        """
         req = SemanticQueryRequest(
             columns=["name", "netAmount", "withTax"],
             # Intentionally out-of-order: withTax listed before netAmount
@@ -67,8 +74,10 @@ class TestTransitiveCalcRefs:
         idx_net = r.sql.index('AS "netAmount"')
         idx_tax = r.sql.index('AS "withTax"')
         assert idx_net < idx_tax
-        # withTax should inline netAmount's expression
-        assert "(t.sales_amount - t.cost_amount) * 1.13" in r.sql
+        # withTax inlines netAmount and parameterises the literal
+        assert "t.sales_amount - t.cost_amount" in r.sql
+        assert "* ?" in r.sql
+        assert 1.13 in (r.params or [])
 
     def test_deep_chain(self, svc):
         """a → b → c: each references its predecessor."""
@@ -82,18 +91,22 @@ class TestTransitiveCalcRefs:
         )
         r = svc.query_model("TestModel", req, mode="validate")
         assert r.error is None
-        # b = (a) * 2
-        assert "(t.sales_amount + 1) * 2" in r.sql
-        # c = (b) + (a) = ((a)*2) + (a)
-        assert "((t.sales_amount + 1) * 2) + (t.sales_amount + 1)" in r.sql
+        # v1.4 M4: literals flow through bind_params, physical column still inlines.
+        assert "t.sales_amount + ?" in r.sql  # a = salesAmount + 1
+        assert "* ?" in r.sql  # b = a * 2
+        # Check params contain the three literals encountered left-to-right.
+        # Order follows Spec parity.md §2.4 pre-order DFS across the SELECT list.
+        params = list(r.params or [])
+        assert params.count(1) >= 2  # a's +1 appears in b (once) + c (b_inlined, a_inlined)
+        assert 2 in params  # b's * 2
 
     def test_diamond_dependency(self, svc):
         """a → b, a → c, b+c → d.
 
-        Each reference wraps the inlined expression in parens, so ``a``
-        in ``b`` becomes ``(t.sales_amount)``; this is the defensive
-        precedence-safety bracketing — verified in the final ``d``
-        expression being ``((t.sales_amount) + 1) + ((t.sales_amount) - 1)``.
+        Each reference wraps the inlined expression in parens as a
+        precedence-safety bracket — we verify the final SQL references
+        ``t.sales_amount`` twice (once via b, once via c) with the
+        operator literals (``1``) parameterised.
         """
         req = SemanticQueryRequest(
             columns=["d"],
@@ -106,8 +119,13 @@ class TestTransitiveCalcRefs:
         )
         r = svc.query_model("TestModel", req, mode="validate")
         assert r.error is None
-        # d = (b) + (c) = ((a)+1) + ((a)-1)
-        assert "((t.sales_amount) + 1) + ((t.sales_amount) - 1)" in r.sql
+        # d's SQL must contain the physical column twice (b and c both use a)
+        assert r.sql.count("t.sales_amount") >= 2
+        # Both ``+`` and ``-`` operators show up
+        assert " + ?" in r.sql
+        assert " - ?" in r.sql
+        # Literal ``1`` is parameterised (appears in b's +1 and c's -1)
+        assert (r.params or []).count(1) >= 2
 
     def test_calc_in_if_condition(self, svc):
         """calc B uses calc A inside IF() condition."""
@@ -120,7 +138,12 @@ class TestTransitiveCalcRefs:
         )
         r = svc.query_model("TestModel", req, mode="validate")
         assert r.error is None
-        assert "CASE WHEN (t.sales_amount - t.cost_amount) > 0 THEN 1 ELSE 0 END" in r.sql
+        # v1.4 M4: IF → CASE WHEN form preserved; literals parameterised.
+        assert "CASE WHEN" in r.sql
+        assert "t.sales_amount - t.cost_amount" in r.sql
+        assert "> ?" in r.sql  # net > 0 parameterised
+        assert "THEN ? ELSE ? END" in r.sql  # 1 / 0 branches parameterised
+        assert 0 in (r.params or []) and 1 in (r.params or [])
 
     def test_calc_used_multiple_times(self, svc):
         """Calc field referenced more than once — each ref inlines the expression."""
@@ -133,7 +156,12 @@ class TestTransitiveCalcRefs:
         )
         r = svc.query_model("TestModel", req, mode="validate")
         assert r.error is None
-        assert "(t.sales_amount + 1) * (t.sales_amount + 1)" in r.sql
+        # b inlines a's expression twice → physical column appears >= 3
+        # times in the final SQL (once for a's SELECT, twice for b's).
+        assert r.sql.count("t.sales_amount") >= 3
+        # Literal ``1`` shows up at least twice in bind_params (a used in
+        # both operand positions of b).
+        assert (r.params or []).count(1) >= 2
 
 
 # --------------------------------------------------------------------------- #
@@ -200,7 +228,10 @@ class TestSliceRefsCalc:
         )
         r = svc.query_model("TestModel", req, mode="validate")
         assert r.error is None
-        assert "(t.sales_amount - t.cost_amount) > ?" in r.sql
+        # v1.4 M4: calc inlined, slice RHS becomes ``?`` with 100 in params.
+        assert "t.sales_amount - t.cost_amount" in r.sql
+        assert "> ?" in r.sql
+        assert 100 in (r.params or [])
 
     def test_slice_on_transitive_calc(self, svc):
         req = SemanticQueryRequest(
@@ -213,7 +244,15 @@ class TestSliceRefsCalc:
         )
         r = svc.query_model("TestModel", req, mode="validate")
         assert r.error is None
-        assert "((t.sales_amount - t.cost_amount) * 1.13) > ?" in r.sql
+        # v1.4 M4: withTax inlines net; both 1.13 (calc literal) and 113
+        # (slice RHS) are parameterised.
+        assert "t.sales_amount - t.cost_amount" in r.sql
+        assert "* ?" in r.sql
+        assert "> ?" in r.sql
+        params = list(r.params or [])
+        assert 1.13 in params and 113 in params
+        # calc params precede slice params in SQL order (SELECT → WHERE)
+        assert params.index(1.13) < params.index(113)
 
 
 # --------------------------------------------------------------------------- #
@@ -284,7 +323,8 @@ class TestBackwardCompat:
         )
         r = svc.query_model("TestModel", req, mode="validate")
         assert r.error is None
-        assert 't.sales_amount - t.cost_amount AS "profit"' in r.sql
+        # v1.4 M4: FormulaCompiler adds defensive outer parens (R-2).
+        assert '(t.sales_amount - t.cost_amount) AS "profit"' in r.sql
 
     def test_calc_with_agg_no_deps(self, svc):
         req = SemanticQueryRequest(
@@ -296,7 +336,8 @@ class TestBackwardCompat:
         )
         r = svc.query_model("TestModel", req, mode="validate")
         assert r.error is None
-        assert 'SUM(t.sales_amount - t.cost_amount) AS "totalNet"' in r.sql
+        # v1.4 M4: inner paren from R-2; agg wrapping unchanged.
+        assert 'SUM((t.sales_amount - t.cost_amount)) AS "totalNet"' in r.sql
 
     def test_empty_calc_list(self, svc):
         req = SemanticQueryRequest(columns=["name", "salesAmount"])
@@ -314,7 +355,10 @@ class TestBackwardCompat:
         )
         r = svc.query_model("TestModel", req, mode="validate")
         assert r.error is None
-        assert "IN('active', 'pending')" in r.sql
+        # v1.4 M4: FormulaCompiler parameterises IN list members.
+        assert "IN (?, ?)" in r.sql
+        params = list(r.params or [])
+        assert "active" in params and "pending" in params
 
 
 # --------------------------------------------------------------------------- #
@@ -328,7 +372,8 @@ class TestAggInteraction:
         SUM(...) — avoids nested aggregation invalid SQL.
 
         Test that B = "a * 2" where A = { expr: "salesAmount", agg: SUM }
-        produces "(t.sales_amount) * 2" (inlining raw expression)."""
+        inlines the raw expression without nesting SUM.
+        """
         req = SemanticQueryRequest(
             columns=["totalSales", "derived"],
             calculatedFields=[
@@ -338,9 +383,14 @@ class TestAggInteraction:
         )
         r = svc.query_model("TestModel", req, mode="validate")
         assert r.error is None
-        # SUM is ONLY applied to totalSales SELECT
+        # SUM is ONLY applied to totalSales SELECT (compiler raw output
+        # for a single field reference has no binary op → no R-2 parens
+        # on the inner ``t.sales_amount``).
         assert 'SUM(t.sales_amount) AS "totalSales"' in r.sql
-        # derived inlines pre-wrap expression, no nested SUM
-        assert "(t.sales_amount) * 2" in r.sql
+        # derived inlines pre-wrap expression (sales_amount, no SUM)
+        # and parameterises the ``2`` literal.
+        assert "t.sales_amount" in r.sql
+        assert "* ?" in r.sql
+        assert 2 in (r.params or [])
         # Nested SUM would be a bug — check it's NOT present
         assert "SUM(SUM(" not in r.sql

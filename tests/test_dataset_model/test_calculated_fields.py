@@ -1,9 +1,16 @@
 """Tests for calculated fields (DbFormulaDef) — aligned with Java CalculatedFieldTest
 and CalculatedFieldAggregationBugTest."""
 
+import sqlite3
+
 import pytest
 
 from foggy.dataset_model.definitions.measure import DbFormulaDef, FormulaOperator
+from foggy.dataset_model.semantic.formula_compiler import (
+    CompiledFormula,
+    FormulaCompiler,
+)
+from foggy.dataset_model.semantic.formula_dialect import SqlDialect
 
 
 # ---------------------------------------------------------------------------
@@ -186,3 +193,198 @@ class TestFormulaOperator:
         assert FormulaOperator.MULTIPLY.value == "*"
         assert FormulaOperator.DIVIDE.value == "/"
         assert FormulaOperator.MODULO.value == "%"
+
+
+# ===========================================================================
+# v1.4 M4 Step 4.5 — A-tier real SQLite E2E:
+#   sum / avg / count(distinct(if(...))) parity against native CASE WHEN
+# ===========================================================================
+
+
+def _pass_through(name: str) -> str:
+    """Identity field resolver — tests reference physical columns directly."""
+    return name
+
+
+@pytest.fixture
+def sqlite_conn():
+    """In-memory SQLite with a small order-style fixture.
+
+    Rows exercise every E2E case:
+      - varied ``state`` for ``if(state == ...)`` and ``in(...)`` branches
+      - some NULL ``parent_id`` for ``is_null(parent_id)``
+      - ``amount`` spans zero, negatives, and >1000 to exercise filters
+      - ``partner_id`` duplicates for ``count(distinct(...))``
+    """
+    conn = sqlite3.connect(":memory:")
+    cur = conn.cursor()
+    cur.execute(
+        "CREATE TABLE orders ("
+        "  id INTEGER PRIMARY KEY, state TEXT, amount REAL, "
+        "  parent_id INTEGER, partner_id INTEGER"
+        ")"
+    )
+    rows = [
+        # (state,    amount,  parent_id, partner_id)
+        ("posted",    100.0,  None,  10),
+        ("posted",    250.0,     1,   10),  # same partner as row #1
+        ("draft",     0.0,    None,  20),
+        ("draft",     -30.0,  None,  20),
+        ("cancel",   1500.0,     2,   30),
+        ("posted",    800.0,     3,   40),
+        ("posted",    5.0,     None,  50),
+    ]
+    cur.executemany(
+        "INSERT INTO orders (state, amount, parent_id, partner_id) VALUES (?, ?, ?, ?)",
+        rows,
+    )
+    conn.commit()
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+@pytest.fixture
+def sqlite_compiler():
+    return FormulaCompiler(SqlDialect.of("sqlite"))
+
+
+def _execute(
+    conn: sqlite3.Connection,
+    select_sql: str,
+    params: tuple,
+) -> list[tuple]:
+    """Run a single aggregate SELECT and return rows."""
+    cur = conn.cursor()
+    cur.execute(f"SELECT {select_sql} FROM orders", params)
+    return cur.fetchall()
+
+
+def _scalar(conn: sqlite3.Connection, select_sql: str, params: tuple):
+    rows = _execute(conn, select_sql, params)
+    assert len(rows) == 1 and len(rows[0]) == 1
+    return rows[0][0]
+
+
+class TestCalculatedFieldsE2ESqlite:
+    """Real-SQLite parity tests for the ``sum/avg/count(distinct(if(...)))``
+    aggregation-over-conditional pattern (Spec v1 §4).
+
+    Each case compiles a formula through :class:`FormulaCompiler`, executes
+    the result against the in-memory fixture, and compares to the CASE
+    WHEN baseline hand-written in SQL.
+    """
+
+    # ---------- E2E-01: sum(if(==, col, 0)) -------------------------------
+
+    def test_sum_if_equality(self, sqlite_conn, sqlite_compiler):
+        compiled = sqlite_compiler.compile(
+            "sum(if(state == 'posted', amount, 0))",
+            _pass_through,
+        )
+        assert "IIF(" not in compiled.sql_fragment  # parity.md §7
+        assert "CASE WHEN" in compiled.sql_fragment
+        actual = _scalar(sqlite_conn, compiled.sql_fragment, compiled.bind_params)
+        baseline = _scalar(
+            sqlite_conn,
+            "SUM(CASE WHEN state = ? THEN amount ELSE ? END)",
+            ("posted", 0),
+        )
+        assert actual == baseline == pytest.approx(100 + 250 + 800 + 5)
+
+    # ---------- E2E-02: avg(if(>, col, null)) -----------------------------
+
+    def test_avg_if_with_null_else(self, sqlite_conn, sqlite_compiler):
+        compiled = sqlite_compiler.compile(
+            "avg(if(amount > 0, amount, null))",
+            _pass_through,
+        )
+        assert "IIF(" not in compiled.sql_fragment
+        assert "ELSE NULL" in compiled.sql_fragment
+        actual = _scalar(sqlite_conn, compiled.sql_fragment, compiled.bind_params)
+        baseline = _scalar(
+            sqlite_conn,
+            "AVG(CASE WHEN amount > ? THEN amount END)",
+            (0,),
+        )
+        # Both drop the -30 negative and the 0 row from the mean.
+        assert actual == baseline
+        assert actual == pytest.approx((100 + 250 + 1500 + 800 + 5) / 5)
+
+    # ---------- E2E-03: count(distinct(if(in(...), col, null))) ----------
+
+    def test_count_distinct_if_in(self, sqlite_conn, sqlite_compiler):
+        compiled = sqlite_compiler.compile(
+            "count(distinct(if(state in ('draft', 'posted'), partner_id, null)))",
+            _pass_through,
+        )
+        # parity.md §7: count(distinct(if(c, col, null))) drops ELSE NULL.
+        assert "IIF(" not in compiled.sql_fragment
+        assert "COUNT(DISTINCT" in compiled.sql_fragment
+        assert "ELSE NULL" not in compiled.sql_fragment
+        actual = _scalar(sqlite_conn, compiled.sql_fragment, compiled.bind_params)
+        baseline = _scalar(
+            sqlite_conn,
+            "COUNT(DISTINCT CASE WHEN state IN (?, ?) THEN partner_id END)",
+            ("draft", "posted"),
+        )
+        # draft → partner 20; posted → partners 10, 40, 50. Distinct = 4.
+        assert actual == baseline == 4
+
+    # ---------- E2E-04: sum(if(is_null(x), col, 0)) -----------------------
+
+    def test_sum_if_is_null(self, sqlite_conn, sqlite_compiler):
+        compiled = sqlite_compiler.compile(
+            "sum(if(is_null(parent_id), amount, 0))",
+            _pass_through,
+        )
+        assert "parent_id IS NULL" in compiled.sql_fragment
+        actual = _scalar(sqlite_conn, compiled.sql_fragment, compiled.bind_params)
+        baseline = _scalar(
+            sqlite_conn,
+            "SUM(CASE WHEN parent_id IS NULL THEN amount ELSE ? END)",
+            (0,),
+        )
+        # NULL parent_id rows: 100, 0, -30, 5.
+        assert actual == baseline == pytest.approx(100 + 0 + (-30) + 5)
+
+    # ---------- E2E-05: avg(if(between(x, lo, hi), x, null)) --------------
+
+    def test_avg_if_between(self, sqlite_conn, sqlite_compiler):
+        compiled = sqlite_compiler.compile(
+            "avg(if(between(amount, 100, 1000), amount, null))",
+            _pass_through,
+        )
+        assert "IIF(" not in compiled.sql_fragment
+        assert "BETWEEN" in compiled.sql_fragment
+        actual = _scalar(sqlite_conn, compiled.sql_fragment, compiled.bind_params)
+        baseline = _scalar(
+            sqlite_conn,
+            "AVG(CASE WHEN amount BETWEEN ? AND ? THEN amount END)",
+            (100, 1000),
+        )
+        # Values in [100, 1000]: 100, 250, 800 → avg = (100+250+800)/3
+        assert actual == baseline == pytest.approx((100 + 250 + 800) / 3)
+
+    # ---------- bind-param ordering parity (Spec parity.md §2.4) ---------
+
+    def test_bind_params_follow_left_to_right_dfs(self, sqlite_compiler):
+        """R-1 says params follow a pre-order DFS left-to-right."""
+        compiled = sqlite_compiler.compile(
+            "if(state in ('a', 'b', 'c'), 1, 0)",
+            _pass_through,
+        )
+        # Order: state (no param), 'a', 'b', 'c', 1, 0 → params = (a,b,c,1,0)
+        assert compiled.bind_params == ("a", "b", "c", 1, 0)
+
+    def test_compile_output_never_uses_iif(self, sqlite_compiler):
+        """parity.md §7: FormulaCompiler emits CASE WHEN, never IIF()."""
+        for expression in [
+            "if(state == 'posted', 1, 0)",
+            "sum(if(amount > 0, amount, 0))",
+            "avg(if(between(amount, 100, 1000), amount, null))",
+        ]:
+            compiled = sqlite_compiler.compile(expression, _pass_through)
+            assert "IIF(" not in compiled.sql_fragment.upper() \
+                or "CASE WHEN" in compiled.sql_fragment

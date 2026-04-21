@@ -2,7 +2,7 @@
 
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class FilterType(str, Enum):
@@ -72,6 +72,23 @@ class SelectColumnDef(BaseModel):
         return expr
 
 
+# v1.4 M4 Step 4.4: shared compiler instance for the CalculatedFieldDef
+# early-fail hook.  Built on first use to keep import-time side effects
+# minimal, and reused across all calc-field constructions (thread-safe —
+# FormulaCompiler's ``validate_syntax`` is stateless).
+_SHARED_SYNTAX_COMPILER: Optional[Any] = None
+
+
+def _get_shared_syntax_compiler() -> Any:
+    """Return the shared FormulaCompiler used by ``CalculatedFieldDef``."""
+    global _SHARED_SYNTAX_COMPILER
+    if _SHARED_SYNTAX_COMPILER is None:
+        from foggy.dataset_model.semantic.formula_compiler import FormulaCompiler
+        from foggy.dataset_model.semantic.formula_dialect import SqlDialect
+        _SHARED_SYNTAX_COMPILER = FormulaCompiler(SqlDialect.of("mysql"))
+    return _SHARED_SYNTAX_COMPILER
+
+
 class CalculatedFieldDef(BaseModel):
     """Calculated field definition for computed columns.
 
@@ -115,6 +132,75 @@ class CalculatedFieldDef(BaseModel):
     def is_window_function(self) -> bool:
         """Check if this calculated field uses window function semantics."""
         return bool(self.partition_by or self.window_order_by)
+
+    @model_validator(mode="after")
+    def _validate_expression_syntax(self) -> "CalculatedFieldDef":
+        """Early-fail hook — validate expression syntax at QM load time.
+
+        v1.4 M4 Step 4.4 (REQ-FORMULA-EXTEND §4.3): catch unsafe /
+        malformed calc expressions as Pydantic ``ValidationError`` at
+        QM load time, rather than surfacing a cryptic SQL error at the
+        first query against the model.
+
+        Scope limitations:
+          - Window functions are exempt — ``RANK() / ROW_NUMBER() / LAG()``
+            and other windowing primitives live outside the
+            ``FormulaCompiler`` whitelist but are wrapped by ``OVER()``
+            downstream.  The service routes them through the legacy path.
+          - Phase 3 AST-only constructs (method calls, ternary, null
+            coalescing) are accepted here because they are consumed by
+            the opt-in ``use_ast_expression_compiler=True`` path, not by
+            ``FormulaCompiler``.  When the service is in default mode
+            those expressions will still fail at build time — this hook
+            only catches the cases where no downstream path can accept
+            them.
+        """
+        # Import inside the method to avoid a module-import cycle —
+        # ``formula_compiler`` depends on ``definitions`` via type hints
+        # in some tooling contexts, so we keep the edge lazy.
+        if not self.expression:
+            return self
+        if self.is_window_function():
+            return self
+
+        # Local import keeps QM deserialisation cheap for callers that
+        # never touch the compiler (e.g. simple .model_dump round-trips).
+        from foggy.dataset_model.semantic.formula_compiler import (
+            FormulaCompiler,
+        )
+        from foggy.dataset_model.semantic.formula_dialect import SqlDialect
+        from foggy.dataset_model.semantic.formula_errors import (
+            FormulaError,
+            FormulaNodeNotAllowedError,
+        )
+
+        # Pooled compiler (dialect irrelevant — validate_syntax skips
+        # SQL generation).  Reusing avoids re-parsing Spec v1 constants
+        # on every QM field.
+        compiler = _get_shared_syntax_compiler()
+        try:
+            compiler.validate_syntax(self.expression)
+        except FormulaNodeNotAllowedError as exc:
+            # Phase 3 AST-only node types are accepted — they are the
+            # deliberate carve-out above.  Anything else is rejected.
+            phase3_nodes = {
+                "MemberAccessExpression",
+                "TernaryExpression",
+                "NullCoalescingExpression",
+                "MethodCallExpression",
+            }
+            if any(n in str(exc) for n in phase3_nodes):
+                return self
+            raise ValueError(
+                f"Invalid calculated field expression '{self.expression}' "
+                f"(field name='{self.name}'): {exc}"
+            ) from exc
+        except FormulaError as exc:
+            raise ValueError(
+                f"Invalid calculated field expression '{self.expression}' "
+                f"(field name='{self.name}'): {exc}"
+            ) from exc
+        return self
 
 
 class CondRequestDef(BaseModel):
