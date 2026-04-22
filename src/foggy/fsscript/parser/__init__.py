@@ -10,6 +10,7 @@ from foggy.fsscript.parser.dialect import (
     FsscriptDialect,
     DEFAULT_DIALECT,
     SQL_EXPRESSION_DIALECT,
+    COMPOSE_QUERY_DIALECT,
 )
 from foggy.fsscript.parser.errors import (
     FsscriptError,
@@ -38,6 +39,7 @@ __all__ = [
     "FsscriptDialect",
     "DEFAULT_DIALECT",
     "SQL_EXPRESSION_DIALECT",
+    "COMPOSE_QUERY_DIALECT",
     # Errors
     "FsscriptError",
     "LexerError",

@@ -6,12 +6,16 @@ target_repo: foggy-data-mcp-bridge-python
 target_module: foggy.dataset_model.engine.compose
 req_id: M6-SQLCompilation-Python
 parent_req: P0-ComposeQuery-QueryPlan派生查询与关系复用规范
-status: ready-to-execute
+status: done
 drafted_at: 2026-04-22
 revised_at: 2026-04-22 (r3 — 应用 6+2 评审确认)
+completed_at: 2026-04-22 (Python M6 · python-ready-for-review)
 python_baseline_before: 2709 passed / 1 skipped (M5 baseline)
+python_baseline_after: 2873 passed / 1 skipped / 2 xfailed (M6 · 净增 164 passed + 2 xfail)
 python_new_tests_target: ≥ 82 (6.1 base+derived ~20 / 6.2 union ~12 / 6.3 join ~12 / 6.4 binding injection ~20 / 6.5 dialect fallback ~14 含 derived-chain × 4 方言 / 6.6 plan-hash dedup ~10 含 MAX_PLAN_DEPTH guard)
+python_new_tests_actual: 164 passed + 2 xfailed（目标 82 · 2× 覆盖）
 python_new_source_files_target: ~7 (compilation subpackage)
+python_new_source_files_actual: 7（__init__ / errors / error_codes / plan_hash / per_base / compose_planner / compiler）
 effort_estimate: 2.5 – 3.5 PD（含 D1–D6 决策闭环）
 ---
 
@@ -778,7 +782,7 @@ def plan_hash(plan: QueryPlan) -> Tuple:
     # UnionPlan / JoinPlan 同理
 ```
 
-**为什么不直接用 `__hash__` 强化 M2**：会触动 M2 frozen 契约，需要另起一轮 Java/Python 一致性签字。M6 本期把 canonical logic 放在 `compile/plan_hash.py`，既不动 M2，也避免在多处重复实现。
+**为什么不直接用 `__hash__` 强化 M2**：会触动 M2 frozen 契约，需要另起一轮 Java/Python 一致性签字。M6 本期把 canonical logic 放在 `compilation/plan_hash.py`，既不动 M2，也避免在多处重复实现。
 
 测试聚焦（~10）：
 - MVP 档（6 条）：
@@ -787,7 +791,7 @@ def plan_hash(plan: QueryPlan) -> Tuple:
   - 同一实例三次引用 → 仍 1 个 CTE
   - 单次引用 → inline subquery（不生成 CTE alias）
   - MVP 档不合并"结构相同但实例不同"的两个子树（这是 Full 档）
-  - `compile/plan_hash.py::plan_hash(plan)` 对 frozen dataclass List 字段不抛 `TypeError`（这是 r2 新增的重点 guard test）
+  - `compilation/plan_hash.py::plan_hash(plan)` 对 frozen dataclass List 字段不抛 `TypeError`（这是 r2 新增的重点 guard test）
 - Full 档（4 条，P1 覆盖）：
   - 结构性等价但实例不同的子树（两次 `from_("X", columns=[...])` 完全一样）→ 合并
   - 结构性不等价（`columns` 顺序不同）→ 不合并
@@ -808,8 +812,8 @@ def plan_hash(plan: QueryPlan) -> Tuple:
 
 ## 验收硬门槛
 
-1. `pytest tests/compose/compile/ -q` 全绿
-2. `pytest -q` 全回归，从 **2709 baseline** 推进到 **2709 + N**（N ≥ 80），**0 failures**, **1 skipped**（M4 snapshot 占位，不动）。允许 **≤2 xfail**（`CROSS_DATASOURCE_REJECTED` 真实检测 + Full 档 plan-hash 结构等价的其中一条 P1 测试，两者之一或两者）
+1. `pytest tests/compose/compilation/ -q` 全绿
+2. `pytest -q` 全回归，从 **2709 baseline** 推进到 **2709 + N**（N ≥ 82），**0 failures**, **1 skipped**（M4 snapshot 占位，不动）。允许 **≤2 xfail**（`CROSS_DATASOURCE_REJECTED` 真实检测 · F-7 / Full 档 plan-hash 结构等价的其中一条 P1 测试，两者之一或两者）
 3. **4 个错误码字符串 + 1 个 `NAMESPACE` 常量**（共 5 条 `error_codes.py` 模块级常量）在与测试断言中逐字对齐（`SANDBOX_REJECTED` 已 r2 移除）。测试以 `assert error_codes.NAMESPACE == "compose-compile-error"` + 4 条错误码字符串断言分开完成
 4. 4 方言（MySQL / PG / MSSQL / SQLite）至少各有 1 条 SQL snapshot 测试验证 CTE vs 子查询；snapshot 归一化**复用 M5 已有** `tests/integration/_sql_normalizer.py`（别新建一套）
 5. `spec §典型示例 1`（两段聚合）+ `§典型示例 2`（union+aggregate）+ `§典型示例 3`（join+alias 消歧）3 个端到端 compile 成功 → `ComposedSql.sql` 可读（不要求 SQL 字符串完全稳定，允许 alias 命名 drift，但结构正确）

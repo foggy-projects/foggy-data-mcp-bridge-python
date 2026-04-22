@@ -115,8 +115,32 @@ SQL_EXPRESSION_DIALECT: FsscriptDialect = FsscriptDialect(
 """
 
 
+COMPOSE_QUERY_DIALECT: FsscriptDialect = FsscriptDialect(
+    name="compose-query",
+    # 移除 `from` 保留字 → 让 `from(...)` 走 IDENTIFIER token 路径，被
+    # parser 识别为普通 FunctionCallExpression(function=VariableExpression('from'))。
+    # 8.2.0.beta Compose Query 的顶层入口就叫 `from(...)`，对齐 JS 宿主
+    # 脚本里 `from({model: 'X'})` 的字面形态。
+    #
+    # 只移除 `from`；其他保留字（包括 `if`/`import`/`export` 等）保持原状。
+    # 如 compose 脚本内出现 `if(...)` 函数调用需求，另行合并
+    # ``SQL_EXPRESSION_DIALECT.keywords_override``。
+    keywords_override={"from": None},
+)
+"""Compose Query 方言：8.2.0.beta 的脚本入口需要把 ``from`` 作为普通函数名
+使用（跨语言 JS 侧 ``from({model: 'X'})`` 形态的 Python 对应）。
+
+与 ``DEFAULT_DIALECT`` 的唯一差异：``from`` 不再是保留字。
+
+跨语言对齐：Java 侧 fsscript 在本版本里没有 `from` 保留字冲突，直接作为
+标识符使用；Python 因为 fsscript 沿用 Python-风格的 `import ... from ...`
+语法保留了 `FROM` token，所以需要本方言显式解保留。
+"""
+
+
 __all__ = [
     "FsscriptDialect",
     "DEFAULT_DIALECT",
     "SQL_EXPRESSION_DIALECT",
+    "COMPOSE_QUERY_DIALECT",
 ]

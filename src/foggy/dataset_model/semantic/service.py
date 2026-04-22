@@ -569,6 +569,73 @@ class SemanticQueryService(SemanticServiceResolver):
 
     # ==================== Query Building ====================
 
+    def build_query_with_governance(
+        self,
+        model_name: str,
+        request: SemanticQueryRequest,
+    ) -> QueryBuildResult:
+        """Build a SQL query end-to-end: governance → field validation → build.
+
+        Public entry point intended for callers that need a parameterised SQL
+        fragment WITHOUT executing (e.g. Compose Query's M6 SQL compiler).
+        Mirrors the governance-then-build sequence that ``query_model``
+        runs internally, but surfaces the result as a ``QueryBuildResult``
+        instead of a ``SemanticQueryResponse`` and raises on governance
+        rejection so callers keep a clean exception chain.
+
+        Steps:
+          1. ``get_model(model_name)`` — resolve the TableModel
+          2. ``_apply_query_governance`` — column whitelist, denied column
+             → denied QM field translation, system_slice merge
+          3. ``validate_query_fields`` — structural field existence
+          4. ``_build_query`` — SQL + params generation
+
+        Parameters
+        ----------
+        model_name:
+            QM name registered with this service.
+        request:
+            Bridge-level query request, typically constructed by the
+            caller with ``field_access`` / ``system_slice`` /
+            ``denied_columns`` already populated from a
+            ``ModelBinding``.
+
+        Returns
+        -------
+        QueryBuildResult
+            ``sql`` / ``params`` / ``warnings`` / ``columns``. Never
+            ``None`` — the call either succeeds or raises.
+
+        Raises
+        ------
+        ValueError
+            When the QM is not registered, governance rejects the
+            request, or structural field validation fails. The caller
+            (e.g. M6 compiler) wraps this into its own error-code
+            vocabulary.
+        Exception
+            Propagates ``_build_query`` raises untouched so callers can
+            preserve the ``__cause__`` chain.
+        """
+        table_model = self.get_model(model_name)
+        if table_model is None:
+            raise ValueError(f"Model not found: {model_name}")
+
+        governance_error, request = self._apply_query_governance(model_name, request)
+        if governance_error is not None:
+            raise ValueError(
+                governance_error.error
+                or f"Governance rejected request for model '{model_name}'"
+            )
+
+        invalid_field = validate_query_fields(table_model, request)
+        if invalid_field is not None:
+            raise ValueError(
+                getattr(invalid_field, "message", str(invalid_field))
+            )
+
+        return self._build_query(table_model, request)
+
     def _build_query(
         self,
         model: DbTableModelImpl,
