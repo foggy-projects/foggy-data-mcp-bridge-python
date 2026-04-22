@@ -4,7 +4,7 @@
 
 本目录是从 Java 仓 (`foggy-data-mcp-bridge`) 的 `dev-compose` 分支 worktree 复制过来的**快照**，便于 Python 工程师在本仓内本地开工 M6 时直接读，无需切换仓库或打开远端。
 
-快照时间：**2026-04-22** · r3 (M5 Java 落地之后，M6 Python 开工之前；包含 r3 评审吸收 —— 6+2 条评审确认，含 MAX_PLAN_DEPTH / `compilation/` 包名改动 / Follow-up F-7 等)。
+快照时间：**2026-04-22** · r4 (M6 Python **已落地** `python-ready-for-review`；Java M6 prompt 已升级为 `ready-to-execute`；包含 r3 评审吸收 —— 6+2 条评审确认 + Python 实际交付数据回填 + `build_query_with_governance` 公共方法升格决策)。
 
 ## 权威来源
 
@@ -25,6 +25,7 @@ foggy-data-mcp-bridge (origin/dev-compose)
       ├── M4-SchemaDerivation-Java-execution-prompt.md
       ├── M5-AuthorityBinding-Java-execution-prompt.md
       ├── M6-SQLCompilation-Python-execution-prompt.md   ← this repo 首发
+      ├── M6-SQLCompilation-Java-execution-prompt.md     ← ready-to-execute (Python 落地后回填)
       └── M9-三层沙箱防护测试脚手架.md
 ```
 
@@ -49,7 +50,7 @@ foggy-data-mcp-bridge (origin/dev-compose)
 | M3 | Dialect + Sandbox 错误契约 | ✅ ready-for-review | ✅ ready-for-review |
 | M4 | Schema 推导与别名 / 冲突校验 | ✅ ready-for-review | ✅ ready-for-review |
 | M5 | Authority 绑定管线 | ✅ ready-for-review | ✅ ready-for-review |
-| **M6** | **SQL 编译器** | **⏳ ready-to-execute（本目录 M6 提示词）** | 待 Python 落地后镜像 |
+| **M6** | **SQL 编译器** | ✅ **python-ready-for-review** · 2873 passed / 1 skipped / 2 xfailed · +164 tests | ⏳ **ready-to-execute**（Java prompt 已回填） |
 | M7 | MCP script 工具入口 | not-started | not-started |
 | M8 | Odoo Pro 嵌入验收 | partial | — |
 | M9 | 三层沙箱防护测试集 | not-started | not-started |
