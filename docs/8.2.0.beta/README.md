@@ -4,7 +4,7 @@
 
 本目录是从 Java 仓 (`foggy-data-mcp-bridge`) 的 `dev-compose` 分支 worktree 复制过来的**快照**，便于 Python 工程师在本仓内本地开工 M6 时直接读，无需切换仓库或打开远端。
 
-快照时间：**2026-04-22**（M5 Java 落地之后，M6 Python 开工之前）。
+快照时间：**2026-04-22** · r3 (M5 Java 落地之后，M6 Python 开工之前；包含 r3 评审吸收 —— 6+2 条评审确认，含 MAX_PLAN_DEPTH / `compilation/` 包名改动 / Follow-up F-7 等)。
 
 ## 权威来源
 
