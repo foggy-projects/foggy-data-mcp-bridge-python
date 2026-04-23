@@ -4,7 +4,7 @@
 
 本目录是从 Java 仓 (`foggy-data-mcp-bridge`) 的 `dev-compose` 分支 worktree 复制过来的**快照**，便于 Python 工程师在本仓内本地开工 M6 时直接读，无需切换仓库或打开远端。
 
-快照时间：**2026-04-22** · r4 (M6 Python **已落地** `python-ready-for-review`；Java M6 prompt 已升级为 `ready-to-execute`；包含 r3 评审吸收 —— 6+2 条评审确认 + Python 实际交付数据回填 + `build_query_with_governance` 公共方法升格决策)。
+快照时间：**2026-04-22** · r5 (**M6 双端完成 · `ready-for-review`** — Python `python-ready-for-review`（2873 passed / 1 skipped / 2 xfailed · +164 tests） + Java `ready-for-review`（sqlite lane 1537 passed / 1 skipped / 0 failures · +138 tests · 1 F-7 skip）；包含 r3 评审吸收 + Step 0 降级决策（Python `build_query_with_governance` 的 Java 等价 API 是既有 `SemanticQueryServiceV3.generateSql`，不需新增公共方法）)。
 
 ## 权威来源
 
@@ -50,7 +50,7 @@ foggy-data-mcp-bridge (origin/dev-compose)
 | M3 | Dialect + Sandbox 错误契约 | ✅ ready-for-review | ✅ ready-for-review |
 | M4 | Schema 推导与别名 / 冲突校验 | ✅ ready-for-review | ✅ ready-for-review |
 | M5 | Authority 绑定管线 | ✅ ready-for-review | ✅ ready-for-review |
-| **M6** | **SQL 编译器** | ✅ **python-ready-for-review** · 2873 passed / 1 skipped / 2 xfailed · +164 tests | ⏳ **ready-to-execute**（Java prompt 已回填） |
+| **M6** | **SQL 编译器** | ✅ **ready-for-review** · 2873 passed / 1 skipped / 2 xfailed · +164 tests | ✅ **ready-for-review** · 1537 passed / 1 skipped / 0 failures · +138 tests + 1 F-7 skip |
 | M7 | MCP script 工具入口 | not-started | not-started |
 | M8 | Odoo Pro 嵌入验收 | partial | — |
 | M9 | 三层沙箱防护测试集 | not-started | not-started |
