@@ -1852,6 +1852,28 @@ class SemanticQueryService(SemanticServiceResolver):
             self._sync_loop = asyncio.new_event_loop()
         return self._sync_loop
 
+    def _run_async_in_sync(self, coro, *, timeout: int = 60):
+        """Run an awaitable on the service's persistent event loop.
+
+        Handles both cases: caller already has a running loop (delegates to
+        a worker thread so our persistent loop keeps async-pool ownership
+        stable) vs no loop running (runs directly). Used by both the
+        standard query path and the compose-query raw-SQL path.
+        """
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        sync_loop = self._get_sync_loop()
+        if loop and loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(sync_loop.run_until_complete, coro)
+                return future.result(timeout=timeout)
+        return sync_loop.run_until_complete(coro)
+
     def _execute_query(
         self,
         build_result: QueryBuildResult,
@@ -1868,8 +1890,6 @@ class SemanticQueryService(SemanticServiceResolver):
         pools between consecutive queries (fixes asyncpg/aiomysql
         "Event loop is closed" errors in embedded scenarios).
         """
-        import asyncio
-
         executor = self._resolve_executor(model)
         if executor is None:
             logger.warning("No database executor configured - returning empty result")
@@ -1878,29 +1898,11 @@ class SemanticQueryService(SemanticServiceResolver):
                 columns_info=build_result.columns,
             )
 
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-
-        if loop and loop.is_running():
-            # Already in an async context (e.g., FastAPI) —
-            # run in a thread with its own persistent loop
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                sync_loop = self._get_sync_loop()
-                future = pool.submit(
-                    sync_loop.run_until_complete,
-                    self._execute_query_async(build_result, executor=executor,
-                                              start=start, limit=limit),
-                )
-                return future.result(timeout=60)
-        else:
-            # No running loop — use persistent loop directly
-            return self._get_sync_loop().run_until_complete(
-                self._execute_query_async(build_result, executor=executor,
-                                          start=start, limit=limit)
-            )
+        return self._run_async_in_sync(
+            self._execute_query_async(
+                build_result, executor=executor, start=start, limit=limit,
+            ),
+        )
 
     async def _execute_query_async(
         self,
@@ -1973,12 +1975,9 @@ class SemanticQueryService(SemanticServiceResolver):
         """Execute raw SQL (already compiled by M6 ``compile_plan_to_sql``)
         against the service's database executor and return rows.
 
-        Added for Compose Query M7 — the script runtime / ``QueryPlan.execute``
-        path produces ``ComposedSql(sql, params)`` and needs a minimal public
-        raw-SQL executor. It sits above the async ``executor.execute(sql, params)``
-        and shares ``_execute_query``'s sync↔async bridging (persistent event
-        loop + ThreadPoolExecutor fallback when called from inside a running
-        loop).
+        The compose script runtime path produces ``ComposedSql(sql, params)``
+        and calls this method to get rows back; ``route_model`` drives
+        multi-datasource routing.
 
         Parameters
         ----------
@@ -1987,82 +1986,61 @@ class SemanticQueryService(SemanticServiceResolver):
         params:
             Positional bind parameters. ``None`` is treated as ``[]``.
         route_model:
-            Optional QM model name. When provided, the executor is resolved
-            via :meth:`_resolve_executor` (multi-datasource routing). When
-            ``None``, falls back to :attr:`_executor` — suitable for single
-            datasource deployments.
+            Optional QM model name. When provided and the model is
+            registered, executor resolution follows the same fallback
+            chain as :meth:`_resolve_executor` (named datasource →
+            manager default → service-level ``_executor``). When omitted
+            or the model is unknown, the fallback chain is walked
+            without the named-datasource step.
 
         Returns
         -------
         List[Dict[str, Any]]
-            Row dicts from ``executor.execute``'s result. Empty list when no
-            rows match.
+            Row dicts from ``executor.execute``'s result. Empty list
+            when no rows match.
 
         Raises
         ------
         RuntimeError
-            No executor configured (host never called ``set_executor``), or
-            the underlying executor returned an error, or the DB driver
-            raised an exception during execution.
+            No executor configured, or the underlying executor returned
+            an error, or the DB driver raised during execution.
         """
-        import asyncio
-
-        executor = None
-        if route_model:
-            model = self.get_model(route_model)
-            if model is not None:
-                executor = self._resolve_executor(model)
-        if executor is None:
-            if self._executor_manager is not None:
-                default = self._executor_manager.get_default()
-                if default is not None:
-                    executor = default
-        if executor is None:
-            executor = self._executor
-
+        executor = self._resolve_execute_sql_executor(route_model)
         if executor is None:
             raise RuntimeError(
                 "SemanticQueryService.execute_sql: no executor configured; "
                 "host must call set_executor(...) before running compose scripts"
             )
 
-        effective_params = list(params) if params else []
+        effective_params = params if isinstance(params, list) else (
+            list(params) if params else []
+        )
 
         async def _run():
             return await executor.execute(sql, effective_params)
 
         try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-
-        if loop and loop.is_running():
-            # Already inside an async context — isolate via a worker thread
-            # so our persistent loop keeps its async-pool ownership stable.
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                sync_loop = self._get_sync_loop()
-                future = pool.submit(sync_loop.run_until_complete, _run())
-                try:
-                    result = future.result(timeout=60)
-                except Exception as exc:
-                    raise RuntimeError(
-                        f"execute_sql failed: {exc}"
-                    ) from exc
-        else:
-            sync_loop = self._get_sync_loop()
-            try:
-                result = sync_loop.run_until_complete(_run())
-            except Exception as exc:
-                raise RuntimeError(
-                    f"execute_sql failed: {exc}"
-                ) from exc
+            result = self._run_async_in_sync(_run())
+        except Exception as exc:
+            raise RuntimeError(f"execute_sql failed: {exc}") from exc
 
         if getattr(result, "error", None):
-            raise RuntimeError(
-                f"execute_sql failed: {result.error}"
-            )
+            raise RuntimeError(f"execute_sql failed: {result.error}")
         return list(getattr(result, "rows", None) or [])
+
+    def _resolve_execute_sql_executor(self, route_model: Optional[str]):
+        """Executor resolution used by :meth:`execute_sql`. Unlike
+        :meth:`_resolve_executor` which needs a model instance, this
+        accepts an optional model name and walks the fallback chain."""
+        if route_model:
+            model = self.get_model(route_model)
+            if model is not None:
+                return self._resolve_executor(model)
+        if self._executor_manager is not None:
+            default = self._executor_manager.get_default()
+            if default is not None:
+                return default
+        return self._executor
 
     def _resolve_executor(self, model: DbTableModelImpl):
         """Resolve the appropriate executor for a model based on its source_datasource.

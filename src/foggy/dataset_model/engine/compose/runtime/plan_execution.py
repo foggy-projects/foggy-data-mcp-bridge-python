@@ -22,13 +22,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from ..compilation.compiler import compile_plan_to_sql
-from ..plan.plan import (
-    BaseModelPlan,
-    DerivedQueryPlan,
-    JoinPlan,
-    QueryPlan,
-    UnionPlan,
-)
+from ..plan.plan import QueryPlan
 
 
 __all__ = ["execute_plan", "pick_route_model"]
@@ -39,33 +33,14 @@ def pick_route_model(plan: QueryPlan) -> Optional[str]:
     ``plan``. Used as the ``route_model`` hint for multi-datasource
     routing inside :meth:`SemanticQueryService.execute_sql`.
 
-    Walks:
-        ``BaseModelPlan`` → itself
-        ``DerivedQueryPlan`` → recurse into ``.source``
-        ``UnionPlan`` / ``JoinPlan`` → recurse into ``.left`` then
-        ``.right`` (left-preorder).
-
-    Returns ``None`` when no :class:`BaseModelPlan` is reachable
-    (degenerate case — in practice every plan leaf is a BaseModelPlan,
-    so this is defensive).
+    Delegates to :meth:`QueryPlan.base_model_plans` which M2 guarantees
+    on every concrete subclass (BaseModel / Derived / Union / Join) and
+    whose contract is left-preorder traversal.
     """
     if plan is None:
         return None
-    if isinstance(plan, BaseModelPlan):
-        return plan.model
-    if isinstance(plan, DerivedQueryPlan):
-        return pick_route_model(plan.source)
-    if isinstance(plan, (UnionPlan, JoinPlan)):
-        left = pick_route_model(plan.left)
-        if left is not None:
-            return left
-        return pick_route_model(plan.right)
-    # Unknown subclass — rely on the ``base_model_plans`` fallback
-    # which M2 guarantees every QueryPlan subclass implements.
     bases = plan.base_model_plans()
-    if bases:
-        return bases[0].model
-    return None
+    return bases[0].model if bases else None
 
 
 def execute_plan(
@@ -115,12 +90,12 @@ def execute_plan(
     try:
         return semantic_service.execute_sql(
             composed.sql,
-            list(composed.params),
+            composed.params,
             route_model=route_model,
         )
     except Exception as exc:
         # Execute-phase failures get a dedicated tag so the MCP layer
-        # can surface `phase: "execute"` without inspecting the cause.
+        # can surface ``phase: "execute"`` without inspecting the cause.
         raise RuntimeError(
             f"Plan execution failed at execute phase: {exc}"
         ) from exc

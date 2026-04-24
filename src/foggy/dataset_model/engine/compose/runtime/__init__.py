@@ -7,11 +7,9 @@ Public surface (M7):
 * :func:`execute_plan` — compile + execute a :class:`QueryPlan` tree.
 * :class:`ComposeRuntimeBundle` — host-infrastructure bundle carried via
   ContextVar (not injected into the script).
-* :func:`current_bundle` / :func:`set_bundle` — internal ContextVar
-  accessors; exposed for advanced hosts that want to pre-seed the
-  runtime outside :func:`run_script`.
-* :class:`ScriptRuntimeError` — optional thin wrapper for MCP-layer
-  error serialisation.
+* :func:`current_bundle` / :func:`set_bundle` — ContextVar accessors
+  exposed for advanced hosts that want to pre-seed the runtime outside
+  :func:`run_script`.
 * :data:`ALLOWED_SCRIPT_GLOBALS` — frozen evaluator-visible surface
   (test-assertion target).
 
@@ -22,7 +20,6 @@ namespace codes. All structured errors come from M1–M6.
 from __future__ import annotations
 
 from .context_bridge import to_compose_context
-from .errors import ScriptRuntimeError
 from .plan_execution import execute_plan, pick_route_model
 from .script_runtime import (
     ALLOWED_SCRIPT_GLOBALS,
@@ -37,7 +34,6 @@ __all__ = [
     "ALLOWED_SCRIPT_GLOBALS",
     "ComposeRuntimeBundle",
     "ScriptResult",
-    "ScriptRuntimeError",
     "current_bundle",
     "execute_plan",
     "pick_route_model",

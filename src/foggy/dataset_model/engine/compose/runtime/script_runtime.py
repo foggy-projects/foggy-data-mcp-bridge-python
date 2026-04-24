@@ -1,32 +1,26 @@
 """Script execution entry — ties ``QueryPlan`` nodes to real SQL execution.
 
-``run_script`` is the M7 entry point: parse a Compose Query script (using
-the dialect that moves ``from`` out of the reserved-word list), evaluate it
-with the fsscript engine, and return whatever the script produces
-(typically a row list from ``.execute()`` or a ``ComposedSql`` from
-``.toSql()``).
+``run_script`` parses a Compose Query script with the dialect that moves
+``from`` out of the reserved-word list, evaluates it with fsscript, and
+returns whatever the script produces (typically a row list from
+``.execute()`` or a ``ComposedSql`` from ``.to_sql()``).
 
-Key design decisions (see M7 execution prompt §7.2 / §7.3):
+Key design decisions:
 
 1. **Host infrastructure is invisible to the script.** ``semantic_service``
-   / ``dialect`` / ``ComposeQueryContext`` ride on a :class:`ContextVar`
-   (:data:`_compose_runtime`), NOT on the evaluator context. The script
-   cannot reach them even with full fsscript reflection. ``QueryPlan``
+   / ``dialect`` / ``ComposeQueryContext`` ride on :data:`_compose_runtime`
+   (a :class:`ContextVar`), NOT on the evaluator context. ``QueryPlan``
    methods read the bundle from the ContextVar when called.
-2. **Evaluator visible surface is frozen.** We explicitly disable
-   ``module_loader`` and ``bean_registry`` (no ``import '@bean'`` escape),
-   and we supplement the fsscript builtins (`JSON` / `parseInt` / ...)
-   with exactly two extra names: ``from`` and ``dsl`` (alias). The full
-   allowed name set is captured by :data:`ALLOWED_SCRIPT_GLOBALS` and
-   tests hard-assert the evaluator's ``.context`` matches it (after
-   filtering the ``Array_*`` / ``Console_*`` function families).
+2. **Evaluator visible surface is frozen.** ``module_loader`` and
+   ``bean_registry`` are both ``None`` (no ``import '@bean'`` escape);
+   we supplement the fsscript builtins with just ``from`` and ``dsl``
+   (alias). The full allowed set is :data:`ALLOWED_SCRIPT_GLOBALS`.
 3. **Nested scripts restore parent bundle.** ``_compose_runtime.set(...)``
-   returns a token, we reset in a ``finally`` block. ``contextvars`` is
-   the correct primitive — each asyncio task inherits a Context copy, so
-   concurrent scripts don't see each other.
-4. **No ``eval()``.** fsscript's ``ExpressionEvaluator`` walks the AST;
-   no Python ``eval`` / ``exec`` / ``__import__`` appears in this module
-   or the helpers it calls. The prompt's hard red line.
+   returns a token; ``reset(token)`` runs in a ``finally`` block.
+   Each asyncio task inherits a Context copy, so concurrent scripts
+   don't collide.
+4. **Sandbox integrity: no Python ``eval`` / ``exec`` / ``__import__``**
+   appears in this module or its helpers.
 """
 
 from __future__ import annotations
@@ -39,6 +33,7 @@ from foggy.fsscript.evaluator import ExpressionEvaluator
 from foggy.fsscript.expressions.control_flow import ReturnException
 from foggy.fsscript.parser import COMPOSE_QUERY_DIALECT, FsscriptParser
 
+from .. import ComposedSql
 from ..context.compose_query_context import ComposeQueryContext
 from ..plan import from_ as _plan_from
 
@@ -145,21 +140,17 @@ class ScriptResult:
 # ---------------------------------------------------------------------------
 
 #: The frozen set of names the Compose Query script is allowed to see at the
-#: top level. Family prefixes (``Array_*`` / ``Console_*``) are handled by
-#: test assertions separately — tests filter them out before comparing to
-#: this set. ``from`` and ``dsl`` are the M7-added plan-constructor entries;
-#: everything else is what fsscript's ``_setup_builtins`` injects
-#: unconditionally (see ``foggy/fsscript/evaluator.py``).
+#: top level. Family prefixes (``Array_*`` / ``Console_*``) are filtered out
+#: by the lockdown test before comparing. ``from`` / ``dsl`` are the plan
+#: constructors; the rest are fsscript builtins from ``_setup_builtins``.
+#: If fsscript adds a new name, update this set AND the lockdown test.
 ALLOWED_SCRIPT_GLOBALS: frozenset = frozenset({
-    # fsscript builtins — frozen here; if fsscript adds a new name,
-    # update this set AND the lockdown test that asserts against it.
     "JSON",
     "parseInt", "parseFloat", "toString",
     "String", "Number", "Boolean",
     "isNaN", "isFinite",
     "Array", "Object", "Function",
     "typeof",
-    # M7-added compose entry points
     "from", "dsl",
 })
 
@@ -255,35 +246,13 @@ def run_script(
         except ReturnException as ret_exc:
             # Top-level `return expr;` lifts out of the program scope.
             value = getattr(ret_exc, "value", None)
-        # Best-effort SQL/params capture for diagnostics:
         result_sql = None
         result_params = None
-        # If the value is a ComposedSql (from .toSql()), pull sql/params
-        composed = _try_as_composed_sql(value)
-        if composed is not None:
-            result_sql = composed.sql
-            result_params = list(composed.params)
+        if isinstance(value, ComposedSql):
+            result_sql = value.sql
+            result_params = list(value.params)
         return ScriptResult(
             value=value, sql=result_sql, params=result_params,
         )
     finally:
         _compose_runtime.reset(token)
-
-
-def _try_as_composed_sql(value: Any):
-    """Return ``value`` when it looks like a ``ComposedSql`` (has ``sql``
-    + ``params``); otherwise ``None``. Avoids a hard import to keep this
-    module lightweight."""
-    if value is None:
-        return None
-    if hasattr(value, "sql") and hasattr(value, "params"):
-        try:
-            # Light duck-type check — strings with these attributes are
-            # vanishingly rare in practice.
-            if isinstance(value.sql, str) and isinstance(
-                value.params, (list, tuple)
-            ):
-                return value
-        except Exception:
-            return None
-    return None
