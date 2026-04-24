@@ -4,7 +4,7 @@
 
 本目录是从 Java 仓 (`foggy-data-mcp-bridge`) 的 `dev-compose` 分支 worktree 复制过来的**快照**，便于 Python 工程师在本仓内本地开工 M6 时直接读，无需切换仓库或打开远端。
 
-快照时间：**2026-04-24** · r9 (**M7 Java 镜像提示词下发** · `ready-to-execute`) — Python M7 已 done（2947 passed / 1 skipped / 1 xfailed · M6 基线 2874 → +73 net tests · 0 regression）· Java M7 镜像 r1 已起草 · `M7-ScriptTool-Java-execution-prompt.md` 同步至本仓副本 · 跨 3 Maven 模块（foggy-dataset-model + foggy-dataset-mcp + foggy-mcp-spi）· ThreadLocal<ComposeRuntimeBundle> 对 Python ContextVar · Function<ToolExecutionContext, AuthorityResolver> factory 签名冻结 · Java 预估 3.0 PD · 目标 1536 → ≥1606 tests。
+快照时间：**2026-04-24** · r10 (**M7 Java 镜像提示词 r2 · plan-evaluator 复核后修订**) — 吸收 3 blocker + 7 非阻塞项：C1 新工具改名 `dataset.compose_script` 对齐存量 `dataset.*` 命名 · C2 `foggy-dataset-mcp/CLAUDE.md` 标 stale 直接忽略 · C3 Step 0 DataSource 解析路径锁死（`@Resource` 注入 + `DataSourceQueryUtils` 执行） · S1 evaluator 可见面 Java 事实已核实（默认空 · `ALLOWED_SCRIPT_GLOBALS = {from, dsl}` 比 Python 更严） · S2 `QueryPlan.execute()` 返回类型变更登记 · S3 JWT 推迟 · 本期仅嵌入模式 · S5 预估 3.0 → **3.5-4.0 PD**。Python M6/M7 基线不变（Python 2947 / Java 1536）。
 
 ## 权威来源
 
