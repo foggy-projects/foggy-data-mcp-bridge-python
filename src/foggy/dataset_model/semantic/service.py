@@ -1963,6 +1963,107 @@ class SemanticQueryService(SemanticServiceResolver):
         self._executor_manager = manager
         logger.info(f"Executor manager set with {len(manager.list_names())} data sources: {manager.list_names()}")
 
+    def execute_sql(
+        self,
+        sql: str,
+        params: Optional[List[Any]] = None,
+        *,
+        route_model: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Execute raw SQL (already compiled by M6 ``compile_plan_to_sql``)
+        against the service's database executor and return rows.
+
+        Added for Compose Query M7 — the script runtime / ``QueryPlan.execute``
+        path produces ``ComposedSql(sql, params)`` and needs a minimal public
+        raw-SQL executor. It sits above the async ``executor.execute(sql, params)``
+        and shares ``_execute_query``'s sync↔async bridging (persistent event
+        loop + ThreadPoolExecutor fallback when called from inside a running
+        loop).
+
+        Parameters
+        ----------
+        sql:
+            Fully compiled SQL text.
+        params:
+            Positional bind parameters. ``None`` is treated as ``[]``.
+        route_model:
+            Optional QM model name. When provided, the executor is resolved
+            via :meth:`_resolve_executor` (multi-datasource routing). When
+            ``None``, falls back to :attr:`_executor` — suitable for single
+            datasource deployments.
+
+        Returns
+        -------
+        List[Dict[str, Any]]
+            Row dicts from ``executor.execute``'s result. Empty list when no
+            rows match.
+
+        Raises
+        ------
+        RuntimeError
+            No executor configured (host never called ``set_executor``), or
+            the underlying executor returned an error, or the DB driver
+            raised an exception during execution.
+        """
+        import asyncio
+
+        executor = None
+        if route_model:
+            model = self.get_model(route_model)
+            if model is not None:
+                executor = self._resolve_executor(model)
+        if executor is None:
+            if self._executor_manager is not None:
+                default = self._executor_manager.get_default()
+                if default is not None:
+                    executor = default
+        if executor is None:
+            executor = self._executor
+
+        if executor is None:
+            raise RuntimeError(
+                "SemanticQueryService.execute_sql: no executor configured; "
+                "host must call set_executor(...) before running compose scripts"
+            )
+
+        effective_params = list(params) if params else []
+
+        async def _run():
+            return await executor.execute(sql, effective_params)
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            # Already inside an async context — isolate via a worker thread
+            # so our persistent loop keeps its async-pool ownership stable.
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                sync_loop = self._get_sync_loop()
+                future = pool.submit(sync_loop.run_until_complete, _run())
+                try:
+                    result = future.result(timeout=60)
+                except Exception as exc:
+                    raise RuntimeError(
+                        f"execute_sql failed: {exc}"
+                    ) from exc
+        else:
+            sync_loop = self._get_sync_loop()
+            try:
+                result = sync_loop.run_until_complete(_run())
+            except Exception as exc:
+                raise RuntimeError(
+                    f"execute_sql failed: {exc}"
+                ) from exc
+
+        if getattr(result, "error", None):
+            raise RuntimeError(
+                f"execute_sql failed: {result.error}"
+            )
+        return list(getattr(result, "rows", None) or [])
+
     def _resolve_executor(self, model: DbTableModelImpl):
         """Resolve the appropriate executor for a model based on its source_datasource.
 

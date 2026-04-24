@@ -7,7 +7,6 @@ import pytest
 from foggy.dataset_model.engine.compose.plan import (
     BaseModelPlan,
     QueryPlan,
-    UnsupportedInM2Error,
 )
 
 
@@ -80,24 +79,24 @@ class TestBaseModelPlanTreeWalk:
         assert p.base_model_plans() == (p,)
 
 
-class TestBaseModelPlanExecuteAndToSqlDeferred:
-    """M2 delivers object model only — execute / to_sql land in M6/M7."""
+class TestBaseModelPlanExecuteAndToSqlNeedRuntime:
+    """M7 replaces the M2 UnsupportedInM2Error placeholders with a
+    RuntimeError when no ambient ``ComposeRuntimeBundle`` is present."""
 
-    def test_execute_raises_unsupported(self):
+    def test_execute_without_bundle_raises_runtimeerror(self):
         p = BaseModelPlan(model="X", columns=("id",))
-        with pytest.raises(UnsupportedInM2Error):
+        with pytest.raises(RuntimeError) as exc:
             p.execute()
+        assert "ComposeRuntimeBundle" in str(exc.value)
 
-    def test_to_sql_raises_unsupported(self):
+    def test_to_sql_without_bundle_or_ctx_raises_runtimeerror(self):
         p = BaseModelPlan(model="X", columns=("id",))
-        with pytest.raises(UnsupportedInM2Error):
+        with pytest.raises(RuntimeError) as exc:
             p.to_sql()
-
-    def test_unsupported_is_subclass_of_not_implemented(self):
-        """Catch-alls using ``pytest.raises(NotImplementedError)`` work."""
-        p = BaseModelPlan(model="X", columns=("id",))
-        with pytest.raises(NotImplementedError):
-            p.execute()
+        assert (
+            "explicit context" in str(exc.value)
+            or "ComposeRuntimeBundle" in str(exc.value)
+        )
 
 
 class TestIsInstanceQueryPlan:

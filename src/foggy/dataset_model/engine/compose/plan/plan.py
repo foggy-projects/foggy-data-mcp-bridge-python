@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from .result import SqlPreview, UnsupportedInM2Error
 
@@ -148,19 +148,108 @@ class QueryPlan(ABC):
 
     def execute(
         self, context: Optional["ComposeQueryContext"] = None
-    ) -> Any:
-        """Placeholder — wired in M7 (script runner ties QueryPlan to
-        real execution via the compiler produced in M6)."""
-        raise UnsupportedInM2Error(
-            "QueryPlan.execute() is not implemented in 8.2.0.beta M2. "
-            "Wiring arrives in M6 (SQL compile) + M7 (script runner)."
+    ) -> List[Dict[str, Any]]:
+        """Compile this plan to SQL and execute it, returning rows.
+
+        Wired in M7. Relies on an ambient :class:`ComposeRuntimeBundle`
+        established by :func:`run_script` (or manually via
+        :func:`set_bundle` for host-controlled scenarios). The bundle
+        carries the ``semantic_service`` / ``dialect`` /
+        :class:`ComposeQueryContext` that the compiler + executor need.
+
+        Parameters
+        ----------
+        context:
+            Optional explicit :class:`ComposeQueryContext`. When omitted,
+            the bundle's ``ctx`` is used. A caller outside
+            :func:`run_script` can pre-set a bundle to drive this path.
+
+        Raises
+        ------
+        RuntimeError:
+            When no ambient bundle is present (host configuration bug).
+            The ``compose-compile-error/*`` family is reserved for
+            compile-phase failures — host misconfiguration does not
+            belong there.
+        AuthorityResolutionError / ComposeSchemaError / ComposeCompileError:
+            Propagated from the M6 compile pipeline.
+        """
+        from ..runtime.plan_execution import execute_plan
+        from ..runtime.script_runtime import current_bundle
+
+        bundle = current_bundle()
+        if bundle is None:
+            raise RuntimeError(
+                "QueryPlan.execute requires an ambient ComposeRuntimeBundle; "
+                "call from inside run_script(), or wrap manually via "
+                "set_bundle(...). Host misconfiguration (semantic_service / "
+                "dialect not bound) cannot be surfaced as ComposeCompileError "
+                "— that family is reserved for compile-phase failures."
+            )
+        effective_ctx = context if context is not None else bundle.ctx
+        return execute_plan(
+            self,
+            effective_ctx,
+            semantic_service=bundle.semantic_service,
+            dialect=bundle.dialect,
         )
 
-    def to_sql(self) -> SqlPreview:
-        """Placeholder — wired in M6 (SQL compile + dialect rendering)."""
-        raise UnsupportedInM2Error(
-            "QueryPlan.to_sql() is not implemented in 8.2.0.beta M2. "
-            "Arrives in M6 together with the SQL compiler."
+    def to_sql(
+        self,
+        context: Optional["ComposeQueryContext"] = None,
+        *,
+        dialect: Optional[str] = None,
+    ):
+        """Compile this plan to dialect-aware SQL + params without
+        executing it.
+
+        Returns a :class:`ComposedSql` — the M6 compiler output. NOTE:
+        M2 used :class:`SqlPreview` as a placeholder; M7 upgrades the
+        return type to :class:`ComposedSql`. :class:`SqlPreview` is kept
+        as a legacy export so downstream code that imported the name
+        still works, but :meth:`to_sql` no longer returns it.
+
+        Parameters
+        ----------
+        context:
+            Optional explicit :class:`ComposeQueryContext`. When omitted,
+            the ambient bundle's ``ctx`` is used.
+        dialect:
+            Optional dialect override (useful for multi-dialect snapshot
+            testing). Falls back to the bundle's dialect, then to
+            ``"mysql"``.
+
+        Raises
+        ------
+        RuntimeError:
+            No bundle and no explicit ``context``; or no bundle and no
+            ``semantic_service`` available.
+        """
+        from ..compilation.compiler import compile_plan_to_sql
+        from ..runtime.script_runtime import current_bundle
+
+        bundle = current_bundle()
+        if bundle is None and context is None:
+            raise RuntimeError(
+                "QueryPlan.to_sql requires either an explicit context or "
+                "an ambient ComposeRuntimeBundle"
+            )
+        effective_ctx = context if context is not None else bundle.ctx
+        effective_svc = bundle.semantic_service if bundle is not None else None
+        effective_dialect = (
+            dialect if dialect is not None
+            else (bundle.dialect if bundle is not None else "mysql")
+        )
+        if effective_svc is None:
+            raise RuntimeError(
+                "QueryPlan.to_sql: semantic_service unbound (pass context + "
+                "set_bundle, or call from inside run_script)"
+            )
+        return compile_plan_to_sql(
+            self,
+            effective_ctx,
+            semantic_service=effective_svc,
+            dialect=effective_dialect,
         )
 
     # ------------------------------------------------------------------

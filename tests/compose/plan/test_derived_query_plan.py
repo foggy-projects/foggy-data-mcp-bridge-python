@@ -8,7 +8,6 @@ from foggy.dataset_model.engine.compose.plan import (
     BaseModelPlan,
     DerivedQueryPlan,
     QueryPlan,
-    UnsupportedInM2Error,
 )
 
 
@@ -82,15 +81,17 @@ class TestChainQuerySugar:
         assert d.distinct is True
 
 
-class TestDerivedExecuteToSqlDeferred:
-    def test_execute_raises(self):
+class TestDerivedExecuteToSqlNeedRuntime:
+    """M7: without an ambient bundle, execute/to_sql raise RuntimeError."""
+
+    def test_execute_without_bundle_raises_runtimeerror(self):
         d = DerivedQueryPlan(source=_base(), columns=("id",))
-        with pytest.raises(UnsupportedInM2Error):
+        with pytest.raises(RuntimeError):
             d.execute()
 
-    def test_to_sql_raises(self):
+    def test_to_sql_without_bundle_or_ctx_raises_runtimeerror(self):
         d = DerivedQueryPlan(source=_base(), columns=("id",))
-        with pytest.raises(UnsupportedInM2Error):
+        with pytest.raises(RuntimeError):
             d.to_sql()
 
 

@@ -10,7 +10,6 @@ from foggy.dataset_model.engine.compose.plan import (
     JoinPlan,
     QueryPlan,
     UnionPlan,
-    UnsupportedInM2Error,
     from_,
 )
 from foggy.dataset_model.engine.compose.plan.plan import JoinOn
@@ -48,8 +47,9 @@ class TestSpecExample1TwoStageAggregation:
         )
         assert isinstance(salesperson_overdue, DerivedQueryPlan)
         assert salesperson_overdue.source is overdue_by_customer
-        # Both execute() and to_sql() are M6/M7 — just confirm deferred.
-        with pytest.raises(UnsupportedInM2Error):
+        # M7: without an ambient ComposeRuntimeBundle, execute() raises
+        # RuntimeError (not UnsupportedInM2Error).
+        with pytest.raises(RuntimeError):
             salesperson_overdue.execute()
 
 
