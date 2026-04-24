@@ -37,6 +37,13 @@ from .. import ComposedSql
 from ..context.compose_query_context import ComposeQueryContext
 from ..plan import from_ as _plan_from
 
+from ..sandbox import (
+    scan_script_source,
+    validate_columns,
+    validate_security_param,
+    validate_slice,
+)
+
 __all__ = [
     "ALLOWED_SCRIPT_GLOBALS",
     "ComposeRuntimeBundle",
@@ -160,7 +167,7 @@ ALLOWED_SCRIPT_GLOBALS: frozenset = frozenset({
 # ---------------------------------------------------------------------------
 
 
-def _from_dsl(options: Dict[str, Any]):
+def _from_dsl(options: Dict[str, Any], *args):
     """Adapter from the script-world ``from(options)`` call → the Python
     plan factory ``from_(...)``.
 
@@ -169,10 +176,26 @@ def _from_dsl(options: Dict[str, Any]):
     that prefer ``from_(model="M")``.
     """
     if isinstance(options, dict):
-        return _plan_from(**options)
+        validate_security_param(options, "script-eval")
+        validate_columns(options.get("columns"), "script-eval")
+        validate_slice(options.get("slice"), "script-eval")
+        kwargs = {}
+        for k, v in options.items():
+            if k == "groupBy":
+                kwargs["group_by"] = v
+            elif k == "orderBy":
+                kwargs["order_by"] = v
+            else:
+                kwargs[k] = v
+                
+        # If columns is missing, add it as None so we don't get TypeError
+        if "columns" not in kwargs:
+            kwargs["columns"] = None
+            
+        return _plan_from(**kwargs)
     # fall back — if the caller passes a plan + option dict, forward
     # literally
-    return _plan_from(options)
+    return _plan_from(options, *args)
 
 
 def run_script(
@@ -225,6 +248,9 @@ def run_script(
     )
     token = set_bundle(bundle)
     try:
+        # Layer A & C static scan
+        scan_script_source(source)
+
         # Parse with the compose dialect — removes `from` from reserved words.
         parser = FsscriptParser(source, dialect=COMPOSE_QUERY_DIALECT)
         program = parser.parse_program()
@@ -240,6 +266,11 @@ def run_script(
         # Supplement: compose-query plan constructor + alias.
         evaluator.context["from"] = _from_dsl
         evaluator.context["dsl"] = _from_dsl
+        # Inject read-only business params
+        if ctx.params:
+            evaluator.context["params"] = dict(ctx.params)
+        else:
+            evaluator.context["params"] = {}
 
         try:
             value = evaluator.evaluate(program)

@@ -37,6 +37,7 @@ from .result import SqlPreview, UnsupportedInM2Error
 if TYPE_CHECKING:
     # Imported only for type hints; avoids circular import at runtime.
     from ..context.compose_query_context import ComposeQueryContext
+    from ..sandbox import validate_derived_columns, validate_slice
 
 
 # ---------------------------------------------------------------------------
@@ -67,8 +68,9 @@ class QueryPlan(ABC):
 
     def query(
         self,
+        options_dict: Optional[Dict[str, Any]] = None,
         *,
-        columns: List[str],
+        columns: Optional[List[str]] = None,
         slice: Optional[List[Any]] = None,
         group_by: Optional[List[str]] = None,
         order_by: Optional[List[str]] = None,
@@ -83,6 +85,21 @@ class QueryPlan(ABC):
         point; scripts tend to read more naturally as a chain
         (``base.query(...).union(...)``) than as nested calls.
         """
+        if options_dict is not None:
+            if not isinstance(options_dict, dict):
+                raise TypeError("options_dict must be a dictionary")
+            columns = options_dict.get("columns", columns)
+            slice = options_dict.get("slice", slice)
+            group_by = options_dict.get("groupBy", group_by)
+            order_by = options_dict.get("orderBy", order_by)
+            limit = options_dict.get("limit", limit)
+            start = options_dict.get("start", start)
+            distinct = options_dict.get("distinct", distinct)
+
+        from ..sandbox import validate_derived_columns, validate_slice
+        validate_derived_columns(columns, "plan-build")
+        validate_slice(slice, "plan-build")
+
         return DerivedQueryPlan(
             source=self,
             columns=_freeze_columns(columns),
@@ -95,7 +112,7 @@ class QueryPlan(ABC):
         )
 
     def union(
-        self, other: "QueryPlan", *, all: bool = False
+        self, other: "QueryPlan", options_dict: Optional[Dict[str, Any]] = None, *, all: bool = False
     ) -> "UnionPlan":
         """Build a union of this plan with ``other``. ``all=True`` selects
         ``UNION ALL``; any other truthy-ish rule is rejected to keep the
@@ -107,15 +124,21 @@ class QueryPlan(ABC):
           schema derivation lands). Passing mismatched plans is currently
           a deferred error — M4 raises at schema-derive time.
         """
+        if options_dict is not None:
+            if not isinstance(options_dict, dict):
+                raise TypeError("options_dict must be a dictionary")
+            all = options_dict.get("all", all)
+            
         _require_plan(other, "union.other")
         return UnionPlan(left=self, right=other, all=bool(all))
 
     def join(
         self,
         other: "QueryPlan",
+        options_dict: Optional[Dict[str, Any]] = None,
         *,
         type: str = "left",
-        on: List["JoinOn"],
+        on: Optional[List["JoinOn"]] = None,
     ) -> "JoinPlan":
         """Build a join of this plan with ``other``.
 
@@ -131,6 +154,12 @@ class QueryPlan(ABC):
             Non-empty list of :class:`JoinOn` conditions. Empty ``on``
             is rejected — cross joins are NOT in the M2 scope.
         """
+        if options_dict is not None:
+            if not isinstance(options_dict, dict):
+                raise TypeError("options_dict must be a dictionary")
+            type = options_dict.get("type", type)
+            on = options_dict.get("on", on)
+            
         _require_plan(other, "join.other")
         norm_type = _normalise_join_type(type)
         if not on:

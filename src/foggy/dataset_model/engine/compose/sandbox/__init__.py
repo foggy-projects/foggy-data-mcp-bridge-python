@@ -25,8 +25,20 @@ from __future__ import annotations
 
 from . import error_codes
 from .exceptions import ComposeSandboxViolationError
+from .expression_whitelist_validator import (
+    validate_columns,
+    validate_derived_columns,
+    validate_slice,
+)
+from .script_source_scanner import scan_script_source
+from .security_param_guard import validate as validate_security_param
 
 __all__ = [
     "error_codes",
     "ComposeSandboxViolationError",
+    "scan_script_source",
+    "validate_columns",
+    "validate_derived_columns",
+    "validate_slice",
+    "validate_security_param",
 ]

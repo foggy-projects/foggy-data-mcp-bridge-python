@@ -47,7 +47,7 @@ def from_(
     *,
     model: Optional[str] = None,
     source: Optional[QueryPlan] = None,
-    columns: List[str],
+    columns: Optional[List[str]] = None,
     slice: Optional[List[Any]] = None,
     group_by: Optional[List[str]] = None,
     order_by: Optional[List[str]] = None,
@@ -86,6 +86,8 @@ def from_(
 
     # Run column / pagination validation once, up-front, so the error
     # message is uniform across both shapes.
+    if columns is None:
+        raise ValueError("from_().columns must be non-empty")
     cols = _freeze_columns(columns)
     _validate_columns(cols, "from_().columns")
     _validate_pagination(limit, start, "from_()")
