@@ -4,7 +4,7 @@
 
 本目录是从 Java 仓 (`foggy-data-mcp-bridge`) 的 `dev-compose` 分支 worktree 复制过来的**快照**，便于 Python 工程师在本仓内本地开工 M6 时直接读，无需切换仓库或打开远端。
 
-快照时间：**2026-04-23** · r6 (**M6 双端 `ready-for-review` · M7 Python prompt 落盘** `ready-to-execute`) — Python M6 2873 passed / 1 skipped / 2 xfailed · +164 tests · Java M6 sqlite lane 1537 passed / 1 skipped / 0 failures · +138 tests + 1 F-7 skip · M7 Python 开工提示词 `M7-ScriptTool-Python-execution-prompt.md` 已下发（目标新增 ≥60 tests · 复用既有 4 错误码族，零新 code）。
+快照时间：**2026-04-24** · r7 (**M7 Python prompt r2 · plan-evaluator 复核后修订**) — 吸收 3 blocker + 6 非阻塞项：B1 evaluator 可见面锁定（承认既有 17 个 fsscript builtin + 追加 from/dsl，`ALLOWED_SCRIPT_GLOBALS` 硬断言） · B2 Step 0 新增 `SemanticQueryService.execute_sql(sql, params, *, route_model)` 公共方法（r1 假设的 `jdbc_executor` 不存在；改走 `executor.execute` 包装）· B3 `ComposeRuntimeBundle` ContextVar + `RuntimeError` 承载 host 配置缺失，不污染 `ComposeCompileError` · `QueryPlan.to_sql` 返回 `ComposedSql` 替换 M2 `SqlPreview` 占位 · 预估 3.0-3.5 PD。M6 基线不变（Python 2873 / Java 1537）。
 
 ## 权威来源
 
