@@ -4,7 +4,7 @@
 
 本目录是从 Java 仓 (`foggy-data-mcp-bridge`) 的 `dev-compose` 分支 worktree 复制过来的**快照**，便于 Python 工程师在本仓内本地开工 M6 时直接读，无需切换仓库或打开远端。
 
-快照时间：**2026-04-24** · r8 (**M7 Python 落地**) — Python M7 开工提示词 r2 已 done。全仓 **2947 passed / 1 skipped / 1 xfailed**（M6 基线 2874 → +73 net tests，0 regression）· 6 新源文件 + 2 edits · 0 新错误码命名空间 · 交付：`SemanticQueryService.execute_sql(sql, params, *, route_model)`（Step 0）+ `foggy.dataset_model.engine.compose.runtime` 子包 5 文件（`context_bridge / script_runtime / plan_execution / errors`）+ `ComposeRuntimeBundle` ContextVar + `compose.script` MCP 工具 + `QueryPlan.execute / to_sql` 替换 M2 占位（现在抛 `RuntimeError` 而非 `UnsupportedInM2Error`）· `ALLOWED_SCRIPT_GLOBALS` 硬断言 · Java 镜像待后续起草。M6 基线不变（Python 2874 / Java 1537）。
+快照时间：**2026-04-24** · r9 (**M7 Java 镜像提示词下发** · `ready-to-execute`) — Python M7 已 done（2947 passed / 1 skipped / 1 xfailed · M6 基线 2874 → +73 net tests · 0 regression）· Java M7 镜像 r1 已起草 · `M7-ScriptTool-Java-execution-prompt.md` 同步至本仓副本 · 跨 3 Maven 模块（foggy-dataset-model + foggy-dataset-mcp + foggy-mcp-spi）· ThreadLocal<ComposeRuntimeBundle> 对 Python ContextVar · Function<ToolExecutionContext, AuthorityResolver> factory 签名冻结 · Java 预估 3.0 PD · 目标 1536 → ≥1606 tests。
 
 ## 权威来源
 
@@ -27,6 +27,7 @@ foggy-data-mcp-bridge (origin/dev-compose)
       ├── M6-SQLCompilation-Python-execution-prompt.md   ← done (Python + Java 双端 ready-for-review)
       ├── M6-SQLCompilation-Java-execution-prompt.md     ← done (M6 双端 1537/2873 基线稳定)
       ├── M7-ScriptTool-Python-execution-prompt.md       ← done (Python-first · 2026-04-24 · 2947 passed)
+      ├── M7-ScriptTool-Java-execution-prompt.md         ← ready-to-execute (Java 镜像 · 2026-04-24)
       └── M9-三层沙箱防护测试脚手架.md
 ```
 
@@ -52,7 +53,7 @@ foggy-data-mcp-bridge (origin/dev-compose)
 | M4 | Schema 推导与别名 / 冲突校验 | ✅ ready-for-review | ✅ ready-for-review |
 | M5 | Authority 绑定管线 | ✅ ready-for-review | ✅ ready-for-review |
 | **M6** | **SQL 编译器** | ✅ **ready-for-review** · 2873 passed / 1 skipped / 2 xfailed · +164 tests | ✅ **ready-for-review** · 1537 passed / 1 skipped / 0 failures · +138 tests + 1 F-7 skip |
-| **M7** | **MCP script 工具入口** | ✅ **ready-for-review** · 2947 passed / 1 skipped / 1 xfailed · +73 net tests | 待 Python 落地后镜像（本条达成） |
+| **M7** | **MCP script 工具入口** | ✅ **ready-for-review** · 2947 passed / 1 skipped / 1 xfailed · +73 net tests | ⏳ **ready-to-execute**（r1 镜像提示词已下发 · 目标 1536 → ≥1606） |
 | M8 | Odoo Pro 嵌入验收 | partial | — |
 | M9 | 三层沙箱防护测试集 | not-started | not-started |
 | M10 | 集成测试 + 签收 | not-started | not-started |
