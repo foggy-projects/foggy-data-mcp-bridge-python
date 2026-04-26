@@ -125,13 +125,13 @@ def test_dsl_alias_equivalent_to_from():
 
 def test_module_loader_and_bean_registry_are_disabled():
     """M7 hard contract: evaluator is constructed with
-    ``module_loader=None`` + ``bean_registry=None``. Assert the runtime
-    source wires them that way — the one place we enforce the "no
-    arbitrary import / @bean" red line."""
+    ``module_loader=None`` + ``bean_registry=None``. Assert the helper
+    that actually wires the evaluator (``_evaluate_program``) keeps the
+    "no arbitrary import / @bean" red line."""
     import inspect
     from foggy.dataset_model.engine.compose.runtime import script_runtime
 
-    src = inspect.getsource(script_runtime.run_script)
+    src = inspect.getsource(script_runtime._evaluate_program)
     assert "module_loader=None" in src
     assert "bean_registry=None" in src
 

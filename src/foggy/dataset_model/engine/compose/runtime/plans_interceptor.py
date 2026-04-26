@@ -1,45 +1,20 @@
 # -*- coding: utf-8 -*-
-"""Plans interceptor — post-script result processing.
+"""Plans interceptor — post-script ``{ plans, metadata }`` envelope handler.
 
-Aligned with Java ``ScriptRuntime`` §5.5: when a script returns a dict
-containing a ``plans`` key, this module auto-evaluates each
-:class:`QueryPlan` found within it, according to the requested mode:
+When a Compose Query script returns ``{ "plans": <plans>, ... }``, each
+:class:`QueryPlan` inside ``plans`` is replaced by either rows (default)
+or a :class:`ComposedSql` (``preview_mode=True``). Three ``plans`` shapes
+are recognised: dict (named map), list / tuple (ordered), single plan.
 
-* **preview mode** (``preview_mode=True``): calls :meth:`QueryPlan.to_sql`
-  on each plan, replacing it with a :class:`ComposedSql` (SQL text + params).
-* **execution mode** (``preview_mode=False``): calls :meth:`QueryPlan.execute`
-  on each plan, replacing it with the actual result rows.
+Python diverges from Java in one outer-branch behaviour: a bare
+:class:`QueryPlan` returned at the script's top level passes through
+verbatim instead of being auto-executed. This preserves the M7
+unit-test contract that asserts on plan AST shape; production callers
+always emit the envelope.
 
-Three ``plans`` shapes are supported inside the envelope (matching the
-three inner branches of Java ``ScriptRuntime.interceptPlans``):
-
-1. **dict** — named plan map: ``{ "summary": plan1, "detail": plan2 }``
-2. **list** — ordered plan array: ``[ plan1, plan2 ]``
-3. **single** — bare :class:`QueryPlan` object as the value of ``plans``
-
-Divergence from Java
---------------------
-Java has an additional outer branch that auto-executes a bare
-:class:`QueryPlan` returned at the script's top level (``return finalPlan;``)
-as a backward-compat for the M7 baseline. The Python side does NOT do
-this — it preserves the M7 contract where bare plans pass through as the
-AST so unit tests can assert on plan shape. The explicit
-``{ plans: ..., metadata: ... }`` envelope is the **single** opt-in for
-auto-execution. Scripts that want their plans executed must wrap in the
-envelope.
-
-Production callers (``script_controller.py`` in the embedded backend, the
-MCP ``compose.script`` tool) always emit the envelope, so this is a
-purely test-vs-production distinction.
-
-Cross-repo invariant
---------------------
-Mirrors:
-
-* Java: ``foggy-dataset-model/.../engine/compose/runtime/ScriptRuntime#interceptPlans``
-* Odoo Pro vendored copy: ``foggy_mcp_pro/lib/foggy/dataset_model/engine/compose/runtime/plans_interceptor.py``
-
-When updating the contract, update all three to keep parity.
+Cross-repo invariant: mirrors Java
+``ScriptRuntime#interceptPlans`` and the vendored copy in
+``foggy_mcp_pro/lib/foggy/dataset_model/engine/compose/runtime/``.
 
 .. versionadded:: 8.2.0.beta (Phase 4 / Python Phase B)
 """
@@ -47,7 +22,7 @@ When updating the contract, update all three to keep parity.
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from ..plan.plan import QueryPlan
 
@@ -56,55 +31,52 @@ __all__ = ["intercept_plans"]
 _logger = logging.getLogger(__name__)
 
 
+# Single-plan dispatch lives in its own helper so the three shape
+# branches in :func:`_evaluate_plans_value` don't repeat the
+# ``preview_mode`` ternary.
 def _evaluate_plan(plan: QueryPlan, preview_mode: bool) -> Any:
-    """Evaluate a single :class:`QueryPlan` in the requested mode.
-
-    The plan reads the ambient :class:`ComposeRuntimeBundle` from
-    ``script_runtime``'s ContextVar, so this function does NOT need
-    ``semantic_service`` / ``dialect`` parameters. Callers MUST be
-    inside a :func:`run_script` invocation (or have manually called
-    :func:`set_bundle`).
-    """
-    if preview_mode:
-        return plan.to_sql()
-    return plan.execute()
+    """Evaluate one :class:`QueryPlan` against the ambient
+    :class:`ComposeRuntimeBundle` (``preview_mode`` toggles
+    ``to_sql`` vs ``execute``)."""
+    return plan.to_sql() if preview_mode else plan.execute()
 
 
 def _evaluate_plans_value(plans_obj: Any, preview_mode: bool) -> Any:
     """Evaluate the ``plans`` field, which may be a dict, list, or single
-    :class:`QueryPlan`.
-
-    Mirrors the three-branch logic in Java ``ScriptRuntime.interceptPlans``.
-    Non-plan values inside dicts/lists are passed through verbatim — the
-    spec allows scripts to mix plans with literal placeholders/labels.
+    :class:`QueryPlan`. Returns the input identity-unchanged when the
+    shape contains no plans, so callers can short-circuit the envelope
+    copy.
     """
-    # Branch 1: named plan map (dict)
+    # Branch 1: named plan map (dict).
     if isinstance(plans_obj, dict):
+        mutated = False
         executed: dict[str, Any] = {}
         for key, value in plans_obj.items():
             if isinstance(value, QueryPlan):
                 executed[key] = _evaluate_plan(value, preview_mode)
+                mutated = True
             else:
                 executed[key] = value
-        return executed
+        return executed if mutated else plans_obj
 
-    # Branch 2: ordered plan array (list/tuple)
+    # Branch 2: ordered plan array (list / tuple).
     if isinstance(plans_obj, (list, tuple)):
+        mutated = False
         executed_list: list[Any] = []
         for item in plans_obj:
             if isinstance(item, QueryPlan):
                 executed_list.append(_evaluate_plan(item, preview_mode))
+                mutated = True
             else:
                 executed_list.append(item)
-        return executed_list
+        return executed_list if mutated else plans_obj
 
-    # Branch 3: single QueryPlan
+    # Branch 3: single QueryPlan.
     if isinstance(plans_obj, QueryPlan):
         return _evaluate_plan(plans_obj, preview_mode)
 
-    # Fallback: not a recognised shape — pass through unchanged so the
-    # script's literal contract survives. We log because it usually
-    # signals a script bug (e.g. forgot to wrap in a dict).
+    # Fallback: log because it usually signals a script bug (e.g. forgot
+    # to wrap a literal in a dict). Pass-through so the literal survives.
     _logger.warning(
         "plans value is not a dict, list, or QueryPlan; passing through: %s",
         type(plans_obj).__name__,
@@ -117,43 +89,36 @@ def intercept_plans(
     *,
     preview_mode: bool = False,
 ) -> Any:
-    """Intercept and auto-evaluate :class:`QueryPlan` instances in the
-    script return value.
+    """Auto-evaluate :class:`QueryPlan` instances inside a
+    ``{ plans, ... }`` envelope.
 
     Parameters
     ----------
     result :
-        The raw return value from the fsscript evaluator. Two shapes
-        are recognised:
-
-        * ``{ "plans": <plans>, ... }`` — named-result envelope. ``plans``
-          itself can be a dict, list, or single plan; each
-          :class:`QueryPlan` inside is evaluated, others pass through.
-        * Anything else — passed through unchanged. This includes bare
-          :class:`QueryPlan` instances (so unit tests can keep asserting
-          on AST shape) and rows / ``ComposedSql`` already produced by
-          explicit ``.execute()`` / ``.to_sql()`` calls.
+        The fsscript evaluator return value. The envelope is recognised
+        as a dict containing the ``plans`` key; anything else (including
+        bare plans) passes through unchanged.
     preview_mode :
-        When ``True``, plans inside the envelope are converted to
-        :class:`ComposedSql` via ``to_sql()`` instead of being executed.
+        When ``True``, plans become :class:`ComposedSql` via ``to_sql()``
+        instead of executing.
 
     Returns
     -------
     Any
-        The processed result. When the envelope was matched, a NEW dict
-        is returned (the script's literal dict is not mutated) with
-        ``plans`` replaced by its evaluated form. Otherwise ``result``
-        is returned unchanged.
+        Same identity as ``result`` when no plans were evaluated; a new
+        dict (with ``plans`` replaced) when at least one plan was
+        evaluated. The input dict is never mutated.
     """
-    # Envelope match: dict with a 'plans' key.
-    if isinstance(result, dict) and "plans" in result:
-        # Copy so we don't mutate the script's literal dict in place;
-        # the contract is "the script's return value is read-only after
-        # it returns".
-        new_result = dict(result)
-        new_result["plans"] = _evaluate_plans_value(result["plans"], preview_mode)
-        return new_result
+    if not (isinstance(result, dict) and "plans" in result):
+        return result
 
-    # Anything else (bare plans, rows, ComposedSql, literals): pass
-    # through unchanged. See module docstring §"Divergence from Java".
-    return result
+    evaluated = _evaluate_plans_value(result["plans"], preview_mode)
+    # Identity check: when ``plans`` had no QueryPlan inside,
+    # ``_evaluate_plans_value`` returns the input unchanged — skip the
+    # envelope copy too so literal-only scripts never allocate.
+    if evaluated is result["plans"]:
+        return result
+
+    new_result = dict(result)
+    new_result["plans"] = evaluated
+    return new_result

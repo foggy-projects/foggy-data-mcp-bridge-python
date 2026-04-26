@@ -2,17 +2,19 @@
 ``{ plans, metadata }`` envelope handler that auto-evaluates
 :class:`QueryPlan` instances inside the envelope.
 
-These tests cover the four shapes the interceptor must support and the
-``preview_mode`` flag that toggles ``.execute()`` vs ``.to_sql()``.
-They do NOT exercise the full FSScript pipeline — see
-``test_js_fixture_parity.py`` for that layer.
+Covers the three envelope shapes (dict / list / single), pass-through
+of non-envelope inputs, the ``preview_mode`` flag (``.execute()`` vs
+``.to_sql()``), and the identity-unchanged short-circuit for
+literal-only ``plans`` values.
+
+These tests do NOT exercise the full FSScript pipeline — see
+``test_js_fixture_parity.py`` for that layer. The local ``_FakePlan``
+test double avoids any need for a real semantic service or bundle.
 
 .. versionadded:: 8.2.0.beta (Phase B)
 """
 
 from __future__ import annotations
-
-from typing import Any, List
 
 import pytest
 
@@ -234,3 +236,42 @@ class TestEnvelopeUnknownPlansShape:
         envelope = {"plans": "not a plan", "metadata": {}}
         out = intercept_plans(envelope, preview_mode=False)
         assert out["plans"] == "not a plan"
+
+
+class TestIdentityShortCircuit:
+    """Phase B optimisation: when ``plans`` contains no
+    :class:`QueryPlan` instances at all, ``intercept_plans`` MUST return
+    the input dict unchanged (same identity) instead of allocating a
+    new envelope dict. Verifies we don't pay the dict-copy cost for
+    literal-only scripts."""
+
+    def test_dict_plans_with_no_query_plans_returns_input_identity(self):
+        """All-literal dict inside ``plans`` — interceptor copies nothing."""
+        envelope = {
+            "plans": {"label": "no-op", "count": 0, "items": [1, 2]},
+            "metadata": {"title": "T"},
+        }
+        out = intercept_plans(envelope, preview_mode=False)
+        assert out is envelope
+
+    def test_list_plans_with_no_query_plans_returns_input_identity(self):
+        """All-literal list inside ``plans`` — same short-circuit."""
+        envelope = {"plans": ["a", "b", 42], "metadata": {}}
+        out = intercept_plans(envelope, preview_mode=False)
+        assert out is envelope
+
+    def test_unknown_plans_shape_returns_input_identity(self):
+        """``plans=42`` (warning branch) also passes the envelope
+        through unchanged — no point copying."""
+        envelope = {"plans": 42, "metadata": {}}
+        out = intercept_plans(envelope, preview_mode=False)
+        assert out is envelope
+
+    def test_dict_plans_with_one_real_plan_does_copy(self):
+        """Sanity check: when a real plan is present, the envelope IS
+        copied (otherwise mutation would leak)."""
+        p = _FakePlan("p")
+        envelope = {"plans": {"real": p, "label": "ok"}, "metadata": {}}
+        out = intercept_plans(envelope, preview_mode=False)
+        assert out is not envelope
+        assert envelope["plans"]["real"] is p  # original unmutated

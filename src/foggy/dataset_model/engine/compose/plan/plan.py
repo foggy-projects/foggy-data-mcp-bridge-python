@@ -56,12 +56,9 @@ class ProjectedColumn:
         return ProjectedColumn(self.ref, alias, caption)
 
     def __getattr__(self, name: str) -> Any:
-        # Forward JS keyword aliases (`.as` → `.as_`). Defined later in
-        # the file but resolved at call time.
-        target = {"as": "as_"}.get(name)
-        if target is None:
-            raise AttributeError(name)
-        return object.__getattribute__(self, target)
+        # ``_alias_js_keyword`` is defined later in the module but resolved
+        # at call time, so the forward reference is fine.
+        return _alias_js_keyword(self, name)
 
     def to_column_expr(self) -> str:
         if hasattr(self.ref, "func"): # it's an AggregateColumn or WindowColumn
@@ -73,34 +70,25 @@ class ProjectedColumn:
             return f"{base_expr}${self.caption} AS {self.alias}"
         return f"{base_expr} AS {self.alias}"
 
-# ---------------------------------------------------------------------------
-# JS-keyword aliases — let scripts call ``.as("foo")`` (matching the Java JS
-# fixtures and Java fluent API). ``as`` is a Python keyword, so we cannot
-# define a method named ``as``; we expose it via ``__getattr__`` returning
-# the existing ``as_`` method. Same trick is used for ``QueryFactory.from``.
-#
-# These aliases live at the class level (not via a metaclass) so frozen
-# dataclasses don't need to mutate field state. ``__getattr__`` is only
-# called when normal lookup fails — i.e. when the script writes ``.as(...)``
-# rather than ``.as_(...)``.
-# ---------------------------------------------------------------------------
+# JS-keyword aliases: scripts call ``.as("foo")`` (Python keyword), routed
+# to ``.as_("foo")`` via ``__getattr__``. Same trick as ``QueryFactory.from``.
 
 _JS_KEYWORD_ALIASES: Dict[str, str] = {
-    "as": "as_",  # JS reserved word in some contexts, Python keyword always
+    "as": "as_",
 }
 
 
 def _alias_js_keyword(self: Any, name: str) -> Any:
-    """Return ``self.<alias>`` when ``name`` is a JS-keyword alias.
+    """Forward ``self.<JS-keyword>`` to the corresponding Python method.
 
-    Raises :class:`AttributeError` if no alias matches — the caller's
-    normal :meth:`object.__getattribute__` fallback kicks in.
+    Raises :class:`AttributeError` if ``name`` is not in
+    :data:`_JS_KEYWORD_ALIASES`, so the caller's normal attribute lookup
+    can fall through (e.g. legitimate "missing attribute" bugs surface
+    instead of being swallowed).
     """
     target = _JS_KEYWORD_ALIASES.get(name)
     if target is None:
         raise AttributeError(name)
-    # ``getattr`` with a 3-arg form would silently swallow legitimate
-    # missing-attribute bugs; let it propagate AttributeError.
     return getattr(self, target)
 
 

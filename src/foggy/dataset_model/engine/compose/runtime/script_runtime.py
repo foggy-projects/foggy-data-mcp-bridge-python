@@ -125,16 +125,24 @@ class ScriptResult:
     Attributes
     ----------
     value:
-        Whatever the script's last expression / return value is.
-        Typically ``List[Dict]`` (from ``.execute()``) or ``ComposedSql``
-        (from ``.toSql()``).
+        Post-interception script return value. Common shapes:
+
+        * ``dict`` — the ``{ plans, metadata, ... }`` envelope, with each
+          plan inside ``plans`` already replaced by rows or
+          :class:`ComposedSql` (depending on ``preview_mode``).
+        * ``List[Dict]`` — rows from a script that called ``.execute()``
+          directly and returned the result (no envelope).
+        * :class:`ComposedSql` — SQL preview from a direct ``.to_sql()``
+          call (no envelope).
+        * Bare :class:`QueryPlan` — script returned the AST verbatim
+          (Python-specific; see :mod:`plans_interceptor`).
+        * Any other literal — passed through.
     sql:
-        Most-recent SQL string observed during plan execution — captured
-        by the runtime so MCP callers can show it back to the LLM for
-        debugging. ``None`` when no plan was executed.
+        Convenience capture for the legacy "single :class:`ComposedSql`
+        return" path. ``None`` in envelope mode (callers should walk
+        ``value["plans"]`` instead).
     params:
-        Bind parameters for :attr:`sql`. ``None`` when no plan was
-        executed.
+        Bind parameters for :attr:`sql`. ``None`` when :attr:`sql` is.
     warnings:
         Non-fatal warnings collected during execution. Reserved for
         future use (Layer B pre-checks / dialect fallback notices).
@@ -203,6 +211,88 @@ def _from_dsl(options: Dict[str, Any], *args):
     return _plan_from(options, *args)
 
 
+def _evaluate_program(
+    script: str, ctx: ComposeQueryContext,
+) -> Any:
+    """Run sandbox scan + parse + evaluate for ``script``.
+
+    Caller is responsible for pushing a :class:`ComposeRuntimeBundle`
+    onto :data:`_compose_runtime` BEFORE calling — this helper does not
+    manage bundle lifecycle so callers can keep the same bundle live
+    across both evaluation and post-processing (e.g. interception).
+
+    Returns the evaluator's return value, or ``None`` for empty /
+    whitespace input. Top-level ``return expr;`` is unwrapped from
+    :class:`ReturnException` automatically.
+
+    Upstream errors (sandbox / parse / authority) propagate verbatim.
+    """
+    source = script if script is not None else ""
+    if not source.strip():
+        return None
+
+    # Layer A & C static scan.
+    scan_script_source(source)
+
+    parser = FsscriptParser(source, dialect=COMPOSE_QUERY_DIALECT)
+    program = parser.parse_program()
+
+    # Evaluator with NO module loader and NO bean registry — disables
+    # ``import 'x'`` and ``import '@bean'``, the two paths that could
+    # reach arbitrary Python or bean-registered objects.
+    evaluator = ExpressionEvaluator(
+        context={},
+        module_loader=None,
+        bean_registry=None,
+    )
+    evaluator.context["from"] = _from_dsl
+    evaluator.context["dsl"] = _from_dsl
+    evaluator.context["Query"] = _query_factory
+    evaluator.context["params"] = (
+        dict(ctx.params) if ctx.params else {}
+    )
+
+    try:
+        return evaluator.evaluate(program)
+    except ReturnException as ret_exc:
+        # Top-level `return expr;` lifts out of the program scope.
+        return getattr(ret_exc, "value", None)
+
+
+def _run_script_no_intercept(
+    script: str,
+    ctx: ComposeQueryContext,
+    *,
+    semantic_service: Any,
+    dialect: str = "mysql",
+) -> Any:
+    """Public-but-underscored entry: run ``script`` under a fresh
+    :class:`ComposeRuntimeBundle` and return the raw evaluator value
+    BEFORE :func:`plans_interceptor.intercept_plans` runs.
+
+    Used by tests that need to assert on the literal ``{ plans,
+    metadata }`` envelope the script returned (with plans still as
+    :class:`QueryPlan` instances). Production code should call
+    :func:`run_script` so post-processing happens.
+
+    Empty / whitespace input returns ``None``. Required-parameter
+    validation matches :func:`run_script`.
+    """
+    if ctx is None:
+        raise ValueError("run_script: ctx is required")
+    if semantic_service is None:
+        raise ValueError("run_script: semantic_service is required")
+
+    bundle = ComposeRuntimeBundle(
+        ctx=ctx, semantic_service=semantic_service, dialect=dialect,
+    )
+    token = set_bundle(bundle)
+    try:
+        return _evaluate_program(script, ctx)
+    finally:
+        _compose_runtime.reset(token)
+
+
 def run_script(
     script: str,
     ctx: ComposeQueryContext,
@@ -211,7 +301,8 @@ def run_script(
     dialect: str = "mysql",
     preview_mode: bool = False,
 ) -> ScriptResult:
-    """Execute ``script`` under a fresh compose runtime bundle.
+    """Execute ``script`` and return a :class:`ScriptResult` with plans
+    inside any ``{ plans, ... }`` envelope auto-evaluated.
 
     Parameters
     ----------
@@ -227,28 +318,20 @@ def run_script(
     dialect:
         SQL dialect forwarded to the compiler. Default ``"mysql"``.
     preview_mode:
-        When ``True``, any :class:`QueryPlan` returned in the result
-        envelope (under ``plans``) — or returned bare — is converted to
-        :class:`ComposedSql` via ``.to_sql()`` instead of being executed.
-        Used by the controller's ``preview`` parameter to surface the SQL
-        for human review before committing to a database round-trip.
-        Default ``False`` (execute normally).
-
-    Returns
-    -------
-    ScriptResult
+        When ``True``, plans inside the envelope's ``plans`` field are
+        converted to :class:`ComposedSql` via ``.to_sql()`` instead of
+        being executed against the database. Used by the controller's
+        ``preview`` parameter to surface SQL for human review.
 
     Notes
     -----
-    The post-script processing (``plans`` interception) follows the
-    contract documented in :mod:`plans_interceptor`. Three return shapes
-    are recognised:
+    Post-script processing follows :mod:`plans_interceptor`:
 
-    1. ``{ "plans": <plans>, ... }`` — named/list/single plan envelope.
-       Each plan is auto-executed (or previewed) and the dict is rebuilt
-       with the evaluated values in place of the plans.
-    2. Bare :class:`QueryPlan` — backward-compat from the M7 baseline.
-       Auto-executed (or previewed).
+    1. ``{ "plans": <plans>, ... }`` — each :class:`QueryPlan` inside
+       ``plans`` (dict / list / single) is auto-executed (or previewed).
+    2. Bare :class:`QueryPlan` — passes through verbatim. Python-specific
+       divergence from Java that preserves the M7 unit-test contract for
+       AST assertions; production callers always wrap in the envelope.
     3. Anything else — passed through unchanged.
 
     Raises
@@ -265,64 +348,27 @@ def run_script(
     if semantic_service is None:
         raise ValueError("run_script: semantic_service is required")
 
-    source = script if script is not None else ""
-    if not source.strip():
-        return ScriptResult(value=None)
-
+    # Single bundle covers both evaluation AND interception —
+    # ``QueryPlan.execute() / .to_sql()`` reads the bundle from the
+    # ContextVar, so it must stay live until ``intercept_plans``
+    # finishes processing every plan.
     bundle = ComposeRuntimeBundle(
         ctx=ctx, semantic_service=semantic_service, dialect=dialect,
     )
     token = set_bundle(bundle)
     try:
-        # Layer A & C static scan
-        scan_script_source(source)
-
-        # Parse with the compose dialect — removes `from` from reserved words.
-        parser = FsscriptParser(source, dialect=COMPOSE_QUERY_DIALECT)
-        program = parser.parse_program()
-
-        # Evaluator: NO module loader, NO bean registry. This disables
-        # ``import 'x'`` and ``import '@bean'`` — the two paths that
-        # could reach arbitrary Python or bean-registered objects.
-        evaluator = ExpressionEvaluator(
-            context={},
-            module_loader=None,
-            bean_registry=None,
-        )
-        # Supplement: compose-query plan constructor + alias.
-        evaluator.context["from"] = _from_dsl
-        evaluator.context["dsl"] = _from_dsl
-        # OO entry point: Query.from("ModelName")
-        evaluator.context["Query"] = _query_factory
-        # Inject read-only business params
-        if ctx.params:
-            evaluator.context["params"] = dict(ctx.params)
-        else:
-            evaluator.context["params"] = {}
-
-        try:
-            raw_value = evaluator.evaluate(program)
-        except ReturnException as ret_exc:
-            # Top-level `return expr;` lifts out of the program scope.
-            raw_value = getattr(ret_exc, "value", None)
-
-        # Plans interception — Phase 4 contract. This MUST run inside the
-        # ``try/finally`` block while the runtime bundle is still active,
-        # because ``QueryPlan.execute()`` and ``QueryPlan.to_sql()`` read
-        # the bundle from the ContextVar.
+        raw_value = _evaluate_program(script, ctx)
         value = intercept_plans(raw_value, preview_mode=preview_mode)
-
-        # Best-effort SQL/params capture — only when the value reduces
-        # to a single ComposedSql. With the new ``plans`` envelope the
-        # value is typically a dict (preview mode) or a list (rows), so
-        # these stay None except in the legacy single-plan path.
-        result_sql = None
-        result_params = None
-        if isinstance(value, ComposedSql):
-            result_sql = value.sql
-            result_params = list(value.params)
-        return ScriptResult(
-            value=value, sql=result_sql, params=result_params,
-        )
     finally:
         _compose_runtime.reset(token)
+
+    # Lift sql/params for the legacy single-ComposedSql return path.
+    # Envelope mode keeps these None — callers walk ``value["plans"]``.
+    result_sql = None
+    result_params = None
+    if isinstance(value, ComposedSql):
+        result_sql = value.sql
+        result_params = list(value.params)
+    return ScriptResult(
+        value=value, sql=result_sql, params=result_params,
+    )
