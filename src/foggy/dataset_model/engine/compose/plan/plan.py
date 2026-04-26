@@ -41,8 +41,197 @@ if TYPE_CHECKING:
 
 
 # ---------------------------------------------------------------------------
-# Abstract base
+# Abstract base and Ref Classes
 # ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class ProjectedColumn:
+    ref: Any  # "PlanColumnRef" or "AggregateColumn" or "WindowColumn"
+    alias: str
+    caption: Optional[str] = None
+
+    def as_(self, alias: str, caption: Optional[str] = None) -> "ProjectedColumn":
+        """Re-alias an already-aliased projection. Useful for the union
+        scenario where ``sales.sales_amount.as("amount")`` re-projects."""
+        return ProjectedColumn(self.ref, alias, caption)
+
+    def __getattr__(self, name: str) -> Any:
+        # Forward JS keyword aliases (`.as` → `.as_`). Defined later in
+        # the file but resolved at call time.
+        target = {"as": "as_"}.get(name)
+        if target is None:
+            raise AttributeError(name)
+        return object.__getattribute__(self, target)
+
+    def to_column_expr(self) -> str:
+        if hasattr(self.ref, "func"): # it's an AggregateColumn or WindowColumn
+            base_expr = self.ref.to_column_expr()
+        else:
+            base_expr = self.ref.name
+        
+        if self.caption:
+            return f"{base_expr}${self.caption} AS {self.alias}"
+        return f"{base_expr} AS {self.alias}"
+
+# ---------------------------------------------------------------------------
+# JS-keyword aliases — let scripts call ``.as("foo")`` (matching the Java JS
+# fixtures and Java fluent API). ``as`` is a Python keyword, so we cannot
+# define a method named ``as``; we expose it via ``__getattr__`` returning
+# the existing ``as_`` method. Same trick is used for ``QueryFactory.from``.
+#
+# These aliases live at the class level (not via a metaclass) so frozen
+# dataclasses don't need to mutate field state. ``__getattr__`` is only
+# called when normal lookup fails — i.e. when the script writes ``.as(...)``
+# rather than ``.as_(...)``.
+# ---------------------------------------------------------------------------
+
+_JS_KEYWORD_ALIASES: Dict[str, str] = {
+    "as": "as_",  # JS reserved word in some contexts, Python keyword always
+}
+
+
+def _alias_js_keyword(self: Any, name: str) -> Any:
+    """Return ``self.<alias>`` when ``name`` is a JS-keyword alias.
+
+    Raises :class:`AttributeError` if no alias matches — the caller's
+    normal :meth:`object.__getattribute__` fallback kicks in.
+    """
+    target = _JS_KEYWORD_ALIASES.get(name)
+    if target is None:
+        raise AttributeError(name)
+    # ``getattr`` with a 3-arg form would silently swallow legitimate
+    # missing-attribute bugs; let it propagate AttributeError.
+    return getattr(self, target)
+
+
+@dataclass(frozen=True)
+class PlanColumnRef:
+    plan: "QueryPlan"
+    name: str
+
+    def as_(self, alias: str, caption: Optional[str] = None) -> "ProjectedColumn":
+        return ProjectedColumn(self, alias, caption)
+
+    def __getattr__(self, name: str) -> Any:
+        return _alias_js_keyword(self, name)
+
+    def to_column_expr(self) -> str:
+        return self.name
+
+    def sum(self) -> "AggregateColumn":
+        return AggregateColumn(self, "SUM")
+
+    def count(self) -> "AggregateColumn":
+        return AggregateColumn(self, "COUNT")
+
+    def avg(self) -> "AggregateColumn":
+        return AggregateColumn(self, "AVG")
+
+    def max(self) -> "AggregateColumn":
+        return AggregateColumn(self, "MAX")
+
+    def min(self) -> "AggregateColumn":
+        return AggregateColumn(self, "MIN")
+
+    def lag(self, offset: int = 1) -> "WindowColumnBuilder":
+        return WindowColumnBuilder("LAG", self, (offset,))
+
+    def lead(self, offset: int = 1) -> "WindowColumnBuilder":
+        return WindowColumnBuilder("LEAD", self, (offset,))
+
+@dataclass(frozen=True)
+class AggregateColumn:
+    ref: "PlanColumnRef"
+    func: str
+
+    def as_(self, alias: str, caption: Optional[str] = None) -> "ProjectedColumn":
+        return ProjectedColumn(self, alias, caption)
+
+    def __getattr__(self, name: str) -> Any:
+        return _alias_js_keyword(self, name)
+
+    def to_column_expr(self) -> str:
+        return f"{self.func}({self.ref.name})"
+
+    def over(self, config: Dict[str, Any]) -> "WindowColumn":
+        return WindowColumn(self.func, self.ref, (), OverClause.from_dict(config))
+
+@dataclass(frozen=True)
+class OverClause:
+    partition_by: Tuple[str, ...] = ()
+    order_by: Tuple[str, ...] = ()
+
+    @classmethod
+    def from_dict(cls, config: Dict[str, Any]) -> "OverClause":
+        pb = config.get("partitionBy", [])
+        pb_parsed = tuple(x.name if hasattr(x, "name") else str(x) for x in pb)
+        
+        ob = config.get("orderBy", [])
+        ob_parsed = tuple(x.name if hasattr(x, "name") else str(x) for x in ob)
+        
+        return cls(partition_by=pb_parsed, order_by=ob_parsed)
+
+@dataclass(frozen=True)
+class WindowColumn:
+    func: str
+    ref: Optional["PlanColumnRef"]
+    args: Tuple[Any, ...]
+    over: OverClause
+
+    def as_(self, alias: str, caption: Optional[str] = None) -> "ProjectedColumn":
+        return ProjectedColumn(self, alias, caption)
+
+    def __getattr__(self, name: str) -> Any:
+        return _alias_js_keyword(self, name)
+
+    def to_column_expr(self) -> str:
+        parts = []
+        if self.ref:
+            parts.append(self.ref.name)
+        if self.args:
+            parts.extend(str(a) for a in self.args)
+        
+        args_str = ", ".join(parts)
+        base = f"{self.func}({args_str}) OVER ("
+        
+        over_parts = []
+        if self.over.partition_by:
+            over_parts.append("PARTITION BY " + ", ".join(self.over.partition_by))
+        
+        if self.over.order_by:
+            ob_strs = []
+            for col in self.over.order_by:
+                if col.startswith("-"):
+                    ob_strs.append(f"{col[1:]} DESC")
+                else:
+                    ob_strs.append(f"{col} ASC")
+            over_parts.append("ORDER BY " + ", ".join(ob_strs))
+            
+        return base + " ".join(over_parts) + ")"
+
+@dataclass(frozen=True)
+class WindowColumnBuilder:
+    func: str
+    ref: Optional["PlanColumnRef"]
+    args: Tuple[Any, ...]
+
+    def over(self, config: Dict[str, Any]) -> "WindowColumn":
+        return WindowColumn(self.func, self.ref, self.args, OverClause.from_dict(config))
+
+class ComposeJoinBuilder:
+    def __init__(self, left: "QueryPlan", right: "QueryPlan", join_type: str):
+        self.left = left
+        self.right = right
+        self.join_type = join_type
+
+    def on(self, left_col: "PlanColumnRef", right_col: "PlanColumnRef") -> "JoinPlan":
+        return JoinPlan(
+            left=self.left,
+            right=self.right,
+            type=self.join_type,
+            on=(JoinOn(left_col.name, "=", right_col.name),)
+        )
+
 
 
 class QueryPlan(ABC):
@@ -63,8 +252,116 @@ class QueryPlan(ABC):
     """
 
     # ------------------------------------------------------------------
-    # Layer-C public surface — 5 methods, no more.
+    # Layer-C public surface — 5 methods, no more. (M2 Core)
     # ------------------------------------------------------------------
+
+    # Layer-C forbidden names — must NOT be exposed as field references.
+    # These are the names that the sandbox scanner rejects; __getattr__
+    # must agree, otherwise hasattr() returns True and the security
+    # invariant breaks.
+    _LAYER_C_FORBIDDEN = frozenset({
+        "raw", "raw_sql", "memory_filter", "for_each", "forEach",
+        "memoryFilter", "items", "rows", "to_array", "toArray",
+    })
+
+    def __getattr__(self, name: str) -> PlanColumnRef:
+        if name.startswith("_") or name in self._LAYER_C_FORBIDDEN:
+            raise AttributeError(name)
+        return PlanColumnRef(self, name)
+
+    # ---- Window Function Builders ----
+
+    def rowNumber(self) -> WindowColumnBuilder:
+        return WindowColumnBuilder("ROW_NUMBER", None, ())
+
+    def rank(self) -> WindowColumnBuilder:
+        return WindowColumnBuilder("RANK", None, ())
+
+    def denseRank(self) -> WindowColumnBuilder:
+        return WindowColumnBuilder("DENSE_RANK", None, ())
+
+    def where(self, slice_: List[Dict[str, Any]]) -> "DerivedQueryPlan":
+        return self.query(slice=slice_)
+
+    def groupBy(self, *fields) -> "DerivedQueryPlan":
+        # support both strings and PlanColumnRef/ProjectedColumn
+        resolved = []
+        for f in fields:
+            if isinstance(f, PlanColumnRef):
+                resolved.append(f.name)
+            elif isinstance(f, ProjectedColumn):
+                resolved.append(f.alias)
+            elif isinstance(f, str):
+                resolved.append(f)
+            else:
+                resolved.append(str(f))
+        return self.query(group_by=resolved)
+
+    def orderBy(self, *fields) -> "DerivedQueryPlan":
+        resolved = []
+        for f in fields:
+            if isinstance(f, PlanColumnRef):
+                resolved.append(f.name)
+            elif isinstance(f, str):
+                resolved.append(f)
+            else:
+                resolved.append(str(f))
+        return self.query(order_by=resolved)
+
+    def limit(self, n: int) -> "DerivedQueryPlan":
+        return self.query(limit=n)
+
+    def offset(self, n: int) -> "DerivedQueryPlan":
+        return self.query(start=n)
+
+    def select(self, *args) -> "DerivedQueryPlan":
+        columns = []
+        seen_aliases = set()
+        for arg in args:
+            if isinstance(arg, ProjectedColumn):
+                expr = arg.to_column_expr()
+                alias = arg.alias
+            elif isinstance(arg, PlanColumnRef):
+                expr = arg.to_column_expr()
+                alias = arg.name
+            elif isinstance(arg, AggregateColumn):
+                expr = arg.to_column_expr()
+                alias = expr  # without alias it's just the function string
+            elif isinstance(arg, WindowColumn):
+                expr = arg.to_column_expr()
+                alias = expr
+            elif isinstance(arg, str):
+                expr = arg
+                parts = arg.split(" AS ")
+                if len(parts) == 2:
+                    alias = parts[1].strip()
+                elif " as " in arg.lower():
+                    alias = arg.lower().split(" as ")[1].strip()
+                else:
+                    alias = arg
+            else:
+                raise TypeError(f"Invalid select argument type: {type(arg)}")
+            
+            if alias in seen_aliases:
+                raise ValueError(
+                    f"Column '{alias}' is ambiguous. Please use .as_('new_name') to disambiguate."
+                )
+            seen_aliases.add(alias)
+            columns.append(expr)
+        return self.query(columns=columns)
+
+    def leftJoin(self, other: "QueryPlan") -> "ComposeJoinBuilder":
+        return ComposeJoinBuilder(self, other, "left")
+
+    def innerJoin(self, other: "QueryPlan") -> "ComposeJoinBuilder":
+        return ComposeJoinBuilder(self, other, "inner")
+
+    def rightJoin(self, other: "QueryPlan") -> "ComposeJoinBuilder":
+        return ComposeJoinBuilder(self, other, "right")
+
+    def fullJoin(self, other: "QueryPlan") -> "ComposeJoinBuilder":
+        return ComposeJoinBuilder(self, other, "full")
+
 
     def query(
         self,
@@ -442,6 +739,10 @@ class JoinPlan(QueryPlan):
                     f"{type(condition).__name__}"
                 )
 
+    def and_(self, left_col: "PlanColumnRef", right_col: "PlanColumnRef") -> "JoinPlan":
+        new_on = self.on + (JoinOn(left_col.name, "=", right_col.name),)
+        return JoinPlan(left=self.left, right=self.right, type=self.type, on=new_on)
+
     def base_model_plans(self) -> Tuple[BaseModelPlan, ...]:
         return self.left.base_model_plans() + self.right.base_model_plans()
 
@@ -496,7 +797,7 @@ def _require_plan(value: Any, field_name: str) -> None:
 
 def _validate_columns(columns: Tuple[str, ...], field_name: str) -> None:
     if not columns:
-        raise ValueError(f"{field_name} must be non-empty")
+        return  # Allow empty columns for chained base plan
     for i, c in enumerate(columns):
         if not isinstance(c, str) or not c:
             raise ValueError(
@@ -521,9 +822,9 @@ def _validate_pagination(
             )
 
 
-def _freeze_columns(columns: List[str]) -> Tuple[str, ...]:
+def _freeze_columns(columns: Optional[List[str]]) -> Tuple[str, ...]:
     if columns is None:
-        raise ValueError("columns must not be None")
+        return ()
     return tuple(columns)
 
 

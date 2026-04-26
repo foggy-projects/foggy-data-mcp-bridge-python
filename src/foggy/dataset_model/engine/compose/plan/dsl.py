@@ -64,7 +64,6 @@ def from_(
     Validation
     ----------
     * Exactly one of ``model`` or ``source`` must be set.
-    * ``columns`` is required and non-empty.
     * ``limit`` / ``start`` are non-negative ints or ``None``.
     * ``source``, when given, must be a ``QueryPlan`` instance.
 
@@ -87,8 +86,12 @@ def from_(
     # Run column / pagination validation once, up-front, so the error
     # message is uniform across both shapes.
     if columns is None:
-        raise ValueError("from_().columns must be non-empty")
+        columns = []
     cols = _freeze_columns(columns)
+    # Legacy from_() always requires columns — OO API (Query.from) handles
+    # columns via .select() later, but from_() is the dict-based path.
+    if not cols:
+        raise ValueError("from_().columns must be non-empty")
     _validate_columns(cols, "from_().columns")
     _validate_pagination(limit, start, "from_()")
 

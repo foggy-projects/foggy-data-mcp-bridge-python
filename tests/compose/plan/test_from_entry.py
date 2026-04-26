@@ -41,9 +41,9 @@ class TestFromValidation:
             from_("X", ["id"])  # type: ignore[misc]
 
     def test_columns_required(self):
-        with pytest.raises(TypeError):
-            # missing columns kwarg
-            from_(model="X")  # type: ignore[call-arg]
+        with pytest.raises(ValueError):
+            # missing columns kwarg — raises ValueError now, columns defaults to None → empty
+            from_(model="X")
 
     def test_columns_must_not_be_none(self):
         with pytest.raises(ValueError):

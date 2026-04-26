@@ -28,9 +28,11 @@ class TestBaseModelPlanConstruction:
         with pytest.raises(ValueError):
             BaseModelPlan(model=None, columns=("id",))  # type: ignore[arg-type]
 
-    def test_columns_required_non_empty(self):
-        with pytest.raises(ValueError):
-            BaseModelPlan(model="X", columns=())
+    def test_columns_empty_allowed_for_oo_api(self):
+        """Empty columns allowed — OO API specifies columns later via .select()."""
+        p = BaseModelPlan(model="X", columns=())
+        assert p.columns == ()
+        assert p.model == "X"
 
     def test_columns_entries_must_be_non_empty_str(self):
         with pytest.raises(ValueError):

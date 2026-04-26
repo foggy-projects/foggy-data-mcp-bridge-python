@@ -28,9 +28,10 @@ class TestDerivedQueryPlanConstruction:
         with pytest.raises(TypeError):
             DerivedQueryPlan(source=None, columns=("id",))  # type: ignore[arg-type]
 
-    def test_columns_required_non_empty(self):
-        with pytest.raises(ValueError):
-            DerivedQueryPlan(source=_base(), columns=())
+    def test_columns_empty_allowed_for_intermediate_stages(self):
+        """Empty columns allowed — intermediate stages (groupBy, where) may not have columns yet."""
+        d = DerivedQueryPlan(source=_base(), columns=())
+        assert d.columns == ()
 
     def test_pagination_validated(self):
         with pytest.raises(ValueError):

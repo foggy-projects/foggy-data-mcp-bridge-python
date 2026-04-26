@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from .context_bridge import to_compose_context
 from .plan_execution import execute_plan, pick_route_model
+from .plans_interceptor import intercept_plans
 from .script_runtime import (
     ALLOWED_SCRIPT_GLOBALS,
     ComposeRuntimeBundle,
@@ -36,6 +37,7 @@ __all__ = [
     "ScriptResult",
     "current_bundle",
     "execute_plan",
+    "intercept_plans",
     "pick_route_model",
     "run_script",
     "set_bundle",

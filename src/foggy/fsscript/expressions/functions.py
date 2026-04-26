@@ -43,6 +43,13 @@ class FunctionCallExpression(Expression):
             if callable(method):
                 return method(*args)
 
+            # Fallback: instance attribute (e.g. dataclass field) may shadow
+            # a method defined on a base class. Walk MRO to find it.
+            for cls in type(obj_val).__mro__:
+                class_attr = cls.__dict__.get(method_name)
+                if callable(class_attr):
+                    return class_attr(obj_val, *args)
+
             raise RuntimeError(f"Unknown method '{method_name}' on {type(obj_val).__name__}")
 
         # Regular function call
@@ -267,6 +274,13 @@ class MethodCallExpression(Expression):
         method = getattr(obj_val, self.method, None)
         if callable(method):
             return method(*args)
+
+        # Fallback: instance attribute (e.g. dataclass field) may shadow
+        # a method defined on a base class. Walk MRO to find it.
+        for cls in type(obj_val).__mro__:
+            class_attr = cls.__dict__.get(self.method)
+            if callable(class_attr):
+                return class_attr(obj_val, *args)
 
         raise RuntimeError(f"Unknown method '{self.method}' on {type(obj_val).__name__}")
 

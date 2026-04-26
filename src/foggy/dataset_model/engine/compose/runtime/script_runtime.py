@@ -36,6 +36,8 @@ from foggy.fsscript.parser import COMPOSE_QUERY_DIALECT, FsscriptParser
 from .. import ComposedSql
 from ..context.compose_query_context import ComposeQueryContext
 from ..plan import from_ as _plan_from
+from ..plan.plan import QueryPlan
+from ..plan.query_factory import INSTANCE as _query_factory
 
 from ..sandbox import (
     scan_script_source,
@@ -43,6 +45,8 @@ from ..sandbox import (
     validate_security_param,
     validate_slice,
 )
+
+from .plans_interceptor import intercept_plans
 
 __all__ = [
     "ALLOWED_SCRIPT_GLOBALS",
@@ -158,7 +162,8 @@ ALLOWED_SCRIPT_GLOBALS: frozenset = frozenset({
     "isNaN", "isFinite",
     "Array", "Object", "Function",
     "typeof",
-    "from", "dsl",
+    "from", "dsl", "Query",
+    "params",
 })
 
 
@@ -204,6 +209,7 @@ def run_script(
     *,
     semantic_service: Any,
     dialect: str = "mysql",
+    preview_mode: bool = False,
 ) -> ScriptResult:
     """Execute ``script`` under a fresh compose runtime bundle.
 
@@ -220,10 +226,30 @@ def run_script(
         Must expose ``execute_sql(sql, params, *, route_model)``.
     dialect:
         SQL dialect forwarded to the compiler. Default ``"mysql"``.
+    preview_mode:
+        When ``True``, any :class:`QueryPlan` returned in the result
+        envelope (under ``plans``) — or returned bare — is converted to
+        :class:`ComposedSql` via ``.to_sql()`` instead of being executed.
+        Used by the controller's ``preview`` parameter to surface the SQL
+        for human review before committing to a database round-trip.
+        Default ``False`` (execute normally).
 
     Returns
     -------
     ScriptResult
+
+    Notes
+    -----
+    The post-script processing (``plans`` interception) follows the
+    contract documented in :mod:`plans_interceptor`. Three return shapes
+    are recognised:
+
+    1. ``{ "plans": <plans>, ... }`` — named/list/single plan envelope.
+       Each plan is auto-executed (or previewed) and the dict is rebuilt
+       with the evaluated values in place of the plans.
+    2. Bare :class:`QueryPlan` — backward-compat from the M7 baseline.
+       Auto-executed (or previewed).
+    3. Anything else — passed through unchanged.
 
     Raises
     ------
@@ -266,6 +292,8 @@ def run_script(
         # Supplement: compose-query plan constructor + alias.
         evaluator.context["from"] = _from_dsl
         evaluator.context["dsl"] = _from_dsl
+        # OO entry point: Query.from("ModelName")
+        evaluator.context["Query"] = _query_factory
         # Inject read-only business params
         if ctx.params:
             evaluator.context["params"] = dict(ctx.params)
@@ -273,10 +301,21 @@ def run_script(
             evaluator.context["params"] = {}
 
         try:
-            value = evaluator.evaluate(program)
+            raw_value = evaluator.evaluate(program)
         except ReturnException as ret_exc:
             # Top-level `return expr;` lifts out of the program scope.
-            value = getattr(ret_exc, "value", None)
+            raw_value = getattr(ret_exc, "value", None)
+
+        # Plans interception — Phase 4 contract. This MUST run inside the
+        # ``try/finally`` block while the runtime bundle is still active,
+        # because ``QueryPlan.execute()`` and ``QueryPlan.to_sql()`` read
+        # the bundle from the ContextVar.
+        value = intercept_plans(raw_value, preview_mode=preview_mode)
+
+        # Best-effort SQL/params capture — only when the value reduces
+        # to a single ComposedSql. With the new ``plans`` envelope the
+        # value is typically a dict (preview mode) or a list (rows), so
+        # these stay None except in the legacy single-plan path.
         result_sql = None
         result_params = None
         if isinstance(value, ComposedSql):
