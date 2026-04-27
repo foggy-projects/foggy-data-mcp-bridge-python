@@ -90,6 +90,24 @@ COLUMN_PLAN_NOT_BOUND: str = _qualify("column/plan-not-bound")
 # column in the plan's ``OutputSchema``.
 COLUMN_FIELD_NOT_FOUND: str = _qualify("column/field-not-found")
 
+# G5 Phase 2 (F5) · An F5 plan-qualified column entry
+# (``{plan, field, ...}``) carries a ``plan`` value that is not a
+# ``QueryPlan`` instance. Surfaces at the DSL parse stage in
+# ``column_normalizer._normalize_map()`` as a ``ValueError`` with this
+# code as message prefix — same convention as the F4 parser-stage
+# codes (``COLUMN_FIELD_REQUIRED`` etc.). Listed here for cross-language
+# parity (Java ``ComposeSchemaErrorCodes`` carries the same string).
+COLUMN_PLAN_TYPE_INVALID: str = _qualify("column/plan-type-invalid")
+
+# G5 Phase 2 (F5) · An F5 plan-qualified column references a plan
+# that is not in the current plan's visibility lineage per spec §5.1.
+# Identity-keyed: same model name referenced via two distinct ``dsl()``
+# calls produces two distinct plan instances that are NOT
+# interchangeable. Surfaces at plan build stage as a ``ValueError`` with
+# this code as message prefix. Distinct from ``COLUMN_PLAN_NOT_BOUND``
+# (PR4 permission-validate stage).
+COLUMN_PLAN_NOT_VISIBLE: str = _qualify("column/plan-not-visible")
+
 
 # ---------------------------------------------------------------------------
 # Phase tags (kept compatible with the sandbox-error phase set so error
@@ -125,5 +143,7 @@ ALL_CODES: frozenset = frozenset(
         FIELD_ACCESS_DENIED,
         COLUMN_PLAN_NOT_BOUND,
         COLUMN_FIELD_NOT_FOUND,
+        COLUMN_PLAN_TYPE_INVALID,
+        COLUMN_PLAN_NOT_VISIBLE,
     }
 )

@@ -153,14 +153,19 @@ class TestF4ErrorCodes:
 
 
 class TestF5PlaceholderFailLoud:
+    # G5 PR-P1: F5 is now wired (Python flattens F5 dict to F4 string at
+    # parse time; see test_f5_column_object.py for the full contract). The
+    # pre-PR-P1 placeholder fail-loud (any plan key → COLUMN_PLAN_NOT_VISIBLE)
+    # is replaced by COLUMN_PLAN_TYPE_INVALID, which fires when `plan` is
+    # not a QueryPlan instance — the correct semantic check now that F5
+    # is real.
+
     def test_plan_key_raises_plan_not_visible(self):
-        # F5 plan-qualified form is Phase 2; Phase 1 fails loudly with a
-        # clear error explaining the workaround.
-        with pytest.raises(ValueError, match="COLUMN_PLAN_NOT_VISIBLE"):
+        with pytest.raises(ValueError, match="COLUMN_PLAN_TYPE_INVALID"):
             normalize({"plan": object(), "field": "name", "as": "x"}, 0)
 
     def test_plan_key_alone_also_rejected(self):
-        with pytest.raises(ValueError, match="COLUMN_PLAN_NOT_VISIBLE"):
+        with pytest.raises(ValueError, match="COLUMN_PLAN_TYPE_INVALID"):
             normalize({"plan": object(), "field": "name"}, 0)
 
 
@@ -248,7 +253,10 @@ class TestFromIntegration:
             )
 
     def test_from_rejects_f5_phase_2_fail_loud(self):
-        with pytest.raises(ValueError, match="COLUMN_PLAN_NOT_VISIBLE"):
+        # G5 PR-P1: F5 is wired; passing a non-QueryPlan as `plan` now
+        # fails at parse stage with COLUMN_PLAN_TYPE_INVALID instead of
+        # the pre-PR-P1 COLUMN_PLAN_NOT_VISIBLE placeholder.
+        with pytest.raises(ValueError, match="COLUMN_PLAN_TYPE_INVALID"):
             from_(
                 model="FactSalesQueryModel",
                 columns=[{"plan": object(), "field": "name"}],

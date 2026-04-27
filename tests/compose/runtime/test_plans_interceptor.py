@@ -58,6 +58,10 @@ class _FakePlan(QueryPlan):
     def base_model_plans(self):  # type: ignore[override]
         return ()
 
+    def collect_visible_plans(self):  # type: ignore[override]
+        # G5 Phase 2 (F5) abstract — leaf-style stub for the fake plan
+        return (self,)
+
 
 # ---------------------------------------------------------------------------
 # Pass-through behaviour: non-envelope inputs are returned verbatim.

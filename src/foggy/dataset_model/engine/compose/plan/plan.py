@@ -577,6 +577,29 @@ class QueryPlan(ABC):
         node, in left-to-right preorder. Used by the authority-resolution
         pipeline (M5) to batch-resolve bindings before compilation."""
 
+    @abstractmethod
+    def collect_visible_plans(self) -> "Tuple[QueryPlan, ...]":
+        """G5 Phase 2 (F5) · Return all plans visible from this plan node
+        for F5 plan-qualified column reference validation per spec §5.1.
+
+        The returned tuple includes ``self`` plus every plan transitively
+        reachable through structural children:
+
+        * ``BaseModelPlan`` — leaf, returns ``(self,)``
+        * ``DerivedQueryPlan`` — ``(self,) + source.collect_visible_plans()``
+        * ``JoinPlan`` / ``UnionPlan`` — ``(self,) + left.visible + right.visible``
+
+        **Identity-keyed** per spec §5.1 warning: visibility-membership
+        checks at call sites must use ``is`` (object identity), not
+        ``==``. Same model name referenced via two distinct ``dsl()``
+        calls produces two distinct plan instances that are NOT
+        interchangeable.
+
+        Returns a tuple (not a set) so duplicate plan instances in the
+        same lineage stay distinguishable; membership testing uses
+        ``any(p is needle for p in visible)``.
+        """
+
 
 # ---------------------------------------------------------------------------
 # Join condition carrier
@@ -643,8 +666,19 @@ class BaseModelPlan(QueryPlan):
             raise ValueError("BaseModelPlan.model must be non-empty")
         _validate_columns(self.columns, "BaseModelPlan.columns")
         _validate_pagination(self.limit, self.start, "BaseModelPlan")
+        # G5 Phase 2 (F5) · Python plan IR is `Tuple[str, ...]` so any
+        # plan-expression object that survived normalize would already
+        # be rejected by `_validate_columns`. The visibility check here
+        # is a no-op for the string-only path, but kept for parity with
+        # Java and as a hook for future relaxation of the columns type.
+        # No work needed — strings have no plan reference to validate.
 
     def base_model_plans(self) -> Tuple["BaseModelPlan", ...]:
+        return (self,)
+
+    def collect_visible_plans(self) -> Tuple[QueryPlan, ...]:
+        # BaseModelPlan is a leaf — visible set is just `(self,)`.
+        # Identity comparison at call sites uses `is`.
         return (self,)
 
 
@@ -671,9 +705,16 @@ class DerivedQueryPlan(QueryPlan):
         _require_plan(self.source, "DerivedQueryPlan.source")
         _validate_columns(self.columns, "DerivedQueryPlan.columns")
         _validate_pagination(self.limit, self.start, "DerivedQueryPlan")
+        # G5 Phase 2 (F5) · Visibility check no-op for string-only columns;
+        # see note in `BaseModelPlan.__post_init__`.
 
     def base_model_plans(self) -> Tuple[BaseModelPlan, ...]:
         return self.source.base_model_plans()
+
+    def collect_visible_plans(self) -> Tuple[QueryPlan, ...]:
+        # Derived = (self,) + source.visible — source's visible already
+        # includes source itself recursively.
+        return (self,) + self.source.collect_visible_plans()
 
 
 @dataclass(frozen=True)
@@ -695,6 +736,10 @@ class UnionPlan(QueryPlan):
 
     def base_model_plans(self) -> Tuple[BaseModelPlan, ...]:
         return self.left.base_model_plans() + self.right.base_model_plans()
+
+    def collect_visible_plans(self) -> Tuple[QueryPlan, ...]:
+        # Union = (self,) + left.visible + right.visible
+        return (self,) + self.left.collect_visible_plans() + self.right.collect_visible_plans()
 
 
 @dataclass(frozen=True)
@@ -727,12 +772,16 @@ class JoinPlan(QueryPlan):
                     f"{type(condition).__name__}"
                 )
 
+    def base_model_plans(self) -> Tuple[BaseModelPlan, ...]:
+        return self.left.base_model_plans() + self.right.base_model_plans()
+
+    def collect_visible_plans(self) -> Tuple[QueryPlan, ...]:
+        # Join = (self,) + left.visible + right.visible — each branch's full subtree.
+        return (self,) + self.left.collect_visible_plans() + self.right.collect_visible_plans()
+
     def and_(self, left_col: "PlanColumnRef", right_col: "PlanColumnRef") -> "JoinPlan":
         new_on = self.on + (JoinOn(left_col.name, "=", right_col.name),)
         return JoinPlan(left=self.left, right=self.right, type=self.type, on=new_on)
-
-    def base_model_plans(self) -> Tuple[BaseModelPlan, ...]:
-        return self.left.base_model_plans() + self.right.base_model_plans()
 
 
 # ---------------------------------------------------------------------------

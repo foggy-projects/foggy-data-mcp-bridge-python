@@ -155,5 +155,8 @@ class TestFailClosed:
             def base_model_plans(self):  # type: ignore[override]
                 return ("NOT A PLAN",)  # type: ignore[return-value]
 
+            def collect_visible_plans(self):  # type: ignore[override]
+                return (self,)
+
         with pytest.raises(TypeError, match="non-BaseModelPlan"):
             collect_base_models(Rogue())
