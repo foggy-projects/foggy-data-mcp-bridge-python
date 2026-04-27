@@ -129,31 +129,31 @@ class TestBareField:
         assert ei.value.offending_field == "totallyMissing"
 
     def test_ambiguous_field_rejected(self):
+        # The conftest autouse ``_clear_g10_override`` fixture restores
+        # the default flag on teardown, so no try/finally needed here.
         from foggy.dataset_model.engine.compose import feature_flags
         feature_flags.override_g10_enabled(True)
-        try:
-            customers = _base("CustomerQM", ["name"])
-            orders = _base("OrderQM", ["name"])
-            wrapper = DerivedQueryPlan(source=customers, columns=("name",))
 
-            # mimics PR2 derive_join output: both occurrences ambiguous,
-            # distinct provenance.
-            schema = OutputSchema.of([
-                _spec_with_provenance("name", customers, ambiguous=True),
-                _spec_with_provenance("name", orders, ambiguous=True),
-            ])
-            ctx = (
-                PlanFieldAccessContext()
-                .bind(customers, ModelBinding(field_access=["name"]))
-                .bind(orders, ModelBinding(field_access=["name"]))
-            )
+        customers = _base("CustomerQM", ["name"])
+        orders = _base("OrderQM", ["name"])
+        wrapper = DerivedQueryPlan(source=customers, columns=("name",))
 
-            with pytest.raises(ComposeSchemaError) as ei:
-                plan_aware_permission_validator.validate(wrapper, schema, ctx)
-            assert ei.value.code == error_codes.JOIN_AMBIGUOUS_COLUMN
-            assert "plan-qualified" in str(ei.value)
-        finally:
-            feature_flags.override_g10_enabled(None)
+        # mimics PR2 derive_join output: both occurrences ambiguous,
+        # distinct provenance.
+        schema = OutputSchema.of([
+            _spec_with_provenance("name", customers, ambiguous=True),
+            _spec_with_provenance("name", orders, ambiguous=True),
+        ])
+        ctx = (
+            PlanFieldAccessContext()
+            .bind(customers, ModelBinding(field_access=["name"]))
+            .bind(orders, ModelBinding(field_access=["name"]))
+        )
+
+        with pytest.raises(ComposeSchemaError) as ei:
+            plan_aware_permission_validator.validate(wrapper, schema, ctx)
+        assert ei.value.code == error_codes.JOIN_AMBIGUOUS_COLUMN
+        assert "plan-qualified" in str(ei.value)
 
     def test_unique_resolved_routes_via_provenance_allow(self):
         order = _base("OrderQM", ["orderId"])

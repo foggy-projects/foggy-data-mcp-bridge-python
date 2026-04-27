@@ -19,8 +19,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
-
 from foggy.dataset_model.engine.compose import feature_flags
 from foggy.dataset_model.engine.compose.compilation.compose_planner import (
     _CompileState,
@@ -29,10 +27,8 @@ from foggy.dataset_model.engine.compose.compilation.compose_planner import (
 from foggy.dataset_model.engine.compose.plan.plan import BaseModelPlan
 
 
-@pytest.fixture(autouse=True)
-def _clear_override():
-    yield
-    feature_flags.override_g10_enabled(None)
+# G10 flag override is cleared by the autouse fixture in
+# ``tests/compose/conftest.py`` — no per-file teardown needed.
 
 
 def _state(g10: bool) -> _CompileState:

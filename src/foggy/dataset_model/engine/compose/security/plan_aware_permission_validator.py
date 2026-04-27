@@ -160,7 +160,10 @@ def _validate_bare_field(
             phase=error_codes.PHASE_PERMISSION_VALIDATE,
             offending_field=field_name,
         )
-    if schema.is_ambiguous(field_name):
+    # Ambiguity derived from ``len(matches)`` directly — saves a second
+    # O(n) scan over ``schema.columns`` (``schema.is_ambiguous(name)``
+    # would walk the same list ``get_all`` already walked).
+    if len(matches) > 1:
         raise ComposeSchemaError(
             code=error_codes.JOIN_AMBIGUOUS_COLUMN,
             message=(

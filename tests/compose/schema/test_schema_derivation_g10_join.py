@@ -37,10 +37,8 @@ def _partner_join() -> JoinPlan:
     )
 
 
-@pytest.fixture(autouse=True)
-def _clear_override():
-    yield
-    feature_flags.override_g10_enabled(None)
+# G10 flag override is cleared by the autouse fixture in
+# ``tests/compose/conftest.py`` — no per-file teardown needed.
 
 
 # ---------------------------------------------------------------------------
