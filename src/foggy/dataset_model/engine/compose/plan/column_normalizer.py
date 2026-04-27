@@ -82,8 +82,12 @@ ALLOWED_AGG = frozenset({"sum", "avg", "count", "max", "min", "count_distinct"})
 ALLOWED_F4_KEYS = frozenset({"field", "agg", "as"})
 
 # Allowed keys in F5 object form. Adds `plan` on top of F4 keys.
-# Detected by the presence of the `plan` key in the input dict.
+# Detected by the presence of the `F5_PLAN_KEY` sentinel in the input dict.
 ALLOWED_F5_KEYS = frozenset({"plan", "field", "agg", "as"})
+
+# Sentinel key whose presence in a column-object dict triggers the F5
+# plan-qualified path. Mirrors Java `ColumnObjectNormalizer.F5_PLAN_KEY`.
+F5_PLAN_KEY = "plan"
 
 
 def normalize(item: Any, index: int) -> Any:
@@ -182,8 +186,10 @@ def normalize_columns_to_strings(raw_columns: Optional[List[Any]]) -> List[str]:
 
 
 def _normalize_map(raw: dict, index: int) -> str:
-    # F5 detection: presence of `plan` key triggers the plan-qualified path.
-    is_f5 = "plan" in raw
+    # F5 detection via the F5_PLAN_KEY sentinel. The dispatch fans out into
+    # different keysets and (in Java) different return shapes; in Python F5
+    # flattens to a string equivalent of F4 — see module docstring.
+    is_f5 = F5_PLAN_KEY in raw
     allowed_keys = ALLOWED_F5_KEYS if is_f5 else ALLOWED_F4_KEYS
 
     # Validate keys
@@ -202,7 +208,7 @@ def _normalize_map(raw: dict, index: int) -> str:
         # (plan.py imports from this module via its `validate_columns`
         # path).
         from .plan import QueryPlan as _QueryPlan
-        plan_obj = raw.get("plan")
+        plan_obj = raw.get(F5_PLAN_KEY)
         if not isinstance(plan_obj, _QueryPlan):
             raise ValueError(
                 f"COLUMN_PLAN_TYPE_INVALID: columns[{index}] 'plan' must be a "

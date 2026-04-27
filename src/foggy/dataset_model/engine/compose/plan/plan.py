@@ -666,12 +666,9 @@ class BaseModelPlan(QueryPlan):
             raise ValueError("BaseModelPlan.model must be non-empty")
         _validate_columns(self.columns, "BaseModelPlan.columns")
         _validate_pagination(self.limit, self.start, "BaseModelPlan")
-        # G5 Phase 2 (F5) · Python plan IR is `Tuple[str, ...]` so any
-        # plan-expression object that survived normalize would already
-        # be rejected by `_validate_columns`. The visibility check here
-        # is a no-op for the string-only path, but kept for parity with
-        # Java and as a hook for future relaxation of the columns type.
-        # No work needed — strings have no plan reference to validate.
+        # No F5 plan-visibility check here: `_validate_columns` already
+        # rejects non-string entries, and Python flattens F5 dicts to
+        # strings at parse time (column_normalizer module docstring).
 
     def base_model_plans(self) -> Tuple["BaseModelPlan", ...]:
         return (self,)
@@ -705,8 +702,7 @@ class DerivedQueryPlan(QueryPlan):
         _require_plan(self.source, "DerivedQueryPlan.source")
         _validate_columns(self.columns, "DerivedQueryPlan.columns")
         _validate_pagination(self.limit, self.start, "DerivedQueryPlan")
-        # G5 Phase 2 (F5) · Visibility check no-op for string-only columns;
-        # see note in `BaseModelPlan.__post_init__`.
+        # F5 visibility no-op — see `BaseModelPlan.__post_init__`.
 
     def base_model_plans(self) -> Tuple[BaseModelPlan, ...]:
         return self.source.base_model_plans()
