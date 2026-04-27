@@ -18,8 +18,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, Iterator, List, Optional, Tuple
 
+from ..plan.plan_id import PlanId
 
-@dataclass(frozen=True)
+
+@dataclass(frozen=True, eq=False)
 class ColumnSpec:
     """One column in an :class:`OutputSchema`.
 
@@ -42,6 +44,28 @@ class ColumnSpec:
     has_explicit_alias:
         ``True`` iff the user wrote ``... AS <alias>``. Used only for
         error-message disambiguation; does not change behaviour.
+    plan_provenance:
+        **G10 PR1** · Plan-level identity of the node that produced this
+        column, captured as a :class:`PlanId` (transient weak reference).
+        ``None`` in PR1 — no producer sets it yet. Filled in by G10 PR2
+        (flag-gated SchemaDerivation refactor) so post-join disambiguation
+        (G5 F5) and plan-routed permissions can resolve a column back to
+        its plan.
+    is_ambiguous:
+        **G10 PR1** · ``True`` when this column name occurs in multiple
+        side schemas of a join (the same name appears on both ``left``
+        and ``right``). ``False`` in PR1 — no producer sets it yet.
+        Filled in by G10 PR2.
+
+    G10 PR1 真零行为变化保证
+    -----------------------
+    The new ``plan_provenance`` / ``is_ambiguous`` fields default to
+    ``None`` / ``False`` and are *not* read by any compiler / validator /
+    lookup path in PR1. They are also **excluded** from ``__eq__`` /
+    ``__hash__`` — the existing equality contract (name + expression +
+    source_model + data_type + has_explicit_alias) is preserved
+    bitwise. PR2 (when fields actually get set) will revisit whether to
+    include ``plan_provenance`` in equality.
     """
 
     name: str
@@ -49,6 +73,9 @@ class ColumnSpec:
     source_model: Optional[str] = None
     data_type: Optional[str] = None
     has_explicit_alias: bool = False
+    # G10 PR1 — types only, no producer sets these yet
+    plan_provenance: Optional[PlanId] = None
+    is_ambiguous: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.name, str) or not self.name:
@@ -60,6 +87,32 @@ class ColumnSpec:
                 f"ColumnSpec.expression must be a non-empty str, got "
                 f"{self.expression!r}"
             )
+
+    # G10 PR1 真零行为：equality unchanged from M4 era. ``plan_provenance``
+    # / ``is_ambiguous`` are excluded from equality so existing tests / compare
+    # paths see no behavior shift. PR2 will revisit when fields actually carry
+    # meaningful values.
+    def __eq__(self, other: object) -> bool:
+        if self is other:
+            return True
+        if not isinstance(other, ColumnSpec):
+            return NotImplemented
+        return (
+            self.name == other.name
+            and self.expression == other.expression
+            and self.source_model == other.source_model
+            and self.data_type == other.data_type
+            and self.has_explicit_alias == other.has_explicit_alias
+        )
+
+    def __hash__(self) -> int:
+        return hash((
+            self.name,
+            self.expression,
+            self.source_model,
+            self.data_type,
+            self.has_explicit_alias,
+        ))
 
 
 @dataclass(frozen=True)
