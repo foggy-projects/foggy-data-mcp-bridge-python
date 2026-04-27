@@ -30,6 +30,7 @@ from __future__ import annotations
 
 from typing import Any, List, Optional
 
+from .column_normalizer import normalize_columns_to_strings as _normalize_columns_to_strings
 from .plan import (
     BaseModelPlan,
     DerivedQueryPlan,
@@ -82,6 +83,17 @@ def from_(
         raise ValueError(
             "from_() requires exactly one of model= or source="
         )
+
+    # G5 Phase 1 (F4): normalize {field, agg?, as?} dict entries to canonical
+    # string form (e.g. "SUM(amount) AS total"). String entries pass through
+    # unchanged. count_distinct lowers to "COUNT_DISTINCT(field)" which the
+    # SQL engine auto-translates to COUNT(DISTINCT field).
+    #
+    # `from_()` is the dict-based path; downstream BaseModelPlan / DerivedQueryPlan
+    # validation strictly requires strings (see `_validate_columns`), so we
+    # normalize to strings here.
+    if columns is not None:
+        columns = _normalize_columns_to_strings(columns)
 
     # Run column / pagination validation once, up-front, so the error
     # message is uniform across both shapes.

@@ -36,6 +36,7 @@ from foggy.fsscript.parser import COMPOSE_QUERY_DIALECT, FsscriptParser
 from .. import ComposedSql
 from ..context.compose_query_context import ComposeQueryContext
 from ..plan import from_ as _plan_from
+from ..plan.column_normalizer import normalize_columns as _normalize_columns
 from ..plan.plan import QueryPlan
 from ..plan.query_factory import INSTANCE as _query_factory
 
@@ -190,6 +191,15 @@ def _from_dsl(options: Dict[str, Any], *args):
     """
     if isinstance(options, dict):
         validate_security_param(options, "script-eval")
+
+        # G5 Phase 1 (F4): normalize {field, agg?, as?} dict entries in
+        # `columns` to their canonical string form BEFORE validate_columns
+        # (which still expects strings / heterogeneous list).
+        raw_columns = options.get("columns")
+        if raw_columns is not None:
+            options = dict(options)  # shallow copy — don't mutate caller's dict
+            options["columns"] = _normalize_columns(raw_columns)
+
         validate_columns(options.get("columns"), "script-eval")
         validate_slice(options.get("slice"), "script-eval")
         kwargs = {}
@@ -200,11 +210,11 @@ def _from_dsl(options: Dict[str, Any], *args):
                 kwargs["order_by"] = v
             else:
                 kwargs[k] = v
-                
+
         # If columns is missing, add it as None so we don't get TypeError
         if "columns" not in kwargs:
             kwargs["columns"] = None
-            
+
         return _plan_from(**kwargs)
     # fall back — if the caller passes a plan + option dict, forward
     # literally
