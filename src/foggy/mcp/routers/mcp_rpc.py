@@ -255,16 +255,44 @@ def create_mcp_router(
                 tool_args = params.get("arguments", {})
 
                 if tool_name in ("list_models", "dataset.list_models"):
-                    models = _get_service().get_all_model_names()
+                    svc = _get_service()
+                    models = svc.get_all_model_names()
+                    
+                    lines = [
+                        "### 📚 可用数据模型列表 (Available Models)",
+                        "",
+                        "**AI 助手请注意**：",
+                        "1. 这是当前工作空间中 **全部可用** 的数据模型。请根据用户的业务意图（如“分析销售”、“查看库存”）选择合适的模型。",
+                        "2. 选择模型后，请务必使用 `dataset.describe_model_internal` 深入了解该模型的可用字段（Dimensions/Measures）。",
+                        "",
+                        "| 模型名称 | 别名/说明 | 时间轴角色 | 推荐提示词 |",
+                        "|---|---|---|---|",
+                    ]
+                    
+                    for model_name in models:
+                        qm = svc.get_model(model_name)
+                        if not qm:
+                            continue
+                            
+                        alias = qm.alias or "-"
+                        
+                        time_role_str = "-"
+                        for dim in qm.dimensions.values():
+                            if dim.is_time_dimension():
+                                time_role_str = "✓ TIME"
+                                break
+                                
+                        lines.append(f"| `{model_name}` | {alias} | {time_role_str} | `使用 {model_name} 查询...` |")
+                        
+                    lines.append("")
+                    lines.append("> 💡 **提示**：如果有多个模型名称相似，请优先参考 `别名/说明` 列来确定最匹配业务意图的模型。")
+                    
                     return McpJsonRpcResponse(
                         id=request.id,
                         result={
                             "content": [{
                                 "type": "text",
-                                "text": json.dumps({
-                                    "models": models,
-                                    "count": len(models)
-                                }, ensure_ascii=False)
+                                "text": "\n".join(lines)
                             }]
                         }
                     )

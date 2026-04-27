@@ -41,6 +41,7 @@ ADDON_SCHEMAS = {
 # Files to sync
 SCHEMA_FILES = [
     "get_metadata_schema.json",
+    "list_models_schema.json",
     "describe_model_internal_schema.json",
     "query_model_v3_schema.json",
     "compose_query_schema.json",
@@ -52,6 +53,7 @@ SCHEMA_FILES = [
 
 DESCRIPTION_FILES = [
     "descriptions/get_metadata.md",
+    "descriptions/list_models.md",
     "descriptions/describe_model_internal.md",
     "descriptions/query_model_v3.md",
     "descriptions/query_model_v3_basic.md",

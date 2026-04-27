@@ -24,23 +24,16 @@
 ### columns (必填)
 支持内联聚合表达式，系统自动处理groupBy：
 ```json
-[
-  "product$categoryName",
-  "sum(salesAmount) as totalSales",
-  "sum(if(orderStatus == 'COMPLETED', salesAmount, 0)) as completedSales",
-  "avg(if(orderStatus == 'COMPLETED', salesAmount, null)) as avgCompletedSales",
-  "count(if(orderStatus == 'COMPLETED', 1, null)) as completedCount"
-]
+["product$categoryName", "sum(salesAmount) as totalSales", "count(orderId) as orderCount"]
 ```
 聚合函数：`sum`、`avg`、`count`、`max`、`min`、`group_concat`、`countd`(去重计数)、`stddev_pop`、`stddev_samp`、`var_pop`、`var_samp`
 
 **重要**：
 - 当使用聚合表达式后，系统自动推断 groupBy，通常无需手动指定
-- columns 支持简单的 `agg(field) as alias`，以及 `sum/avg/count(if(...)) as alias`
-- `if(...)` 条件中相等判断使用 `==`，多条件使用 `&&` / `||`
-- Python 引擎会把 `if(...)` 统一降级为 SQL `CASE WHEN ... THEN ... ELSE ... END`
-- DSL 不支持直接输出原始 `CASE WHEN`，也不提供 `count_if / sum_if / avg_if`
-- 超出上述边界的复杂表达式仍使用 calculatedFields
+- columns 仅支持简单的 `agg(field) as alias`，复杂计算用 calculatedFields
+- 不要生成 SQL 风格 `case when ... then ... else ... end`
+- 不要生成 `count_if`、`sum_if`、`avg_if` 这类未定义函数
+- 条件聚合统一改写为 `sum/avg/count(if(...))`
 
 ### calculatedFields (可选)
 需要指定agg或复杂表达式时使用：
@@ -68,6 +61,19 @@
 | 统计 | `STDDEV_POP`, `STDDEV_SAMP`, `VAR_POP`, `VAR_SAMP` (SQLite 不支持) |
 
 *常用数学函数如 ABS、ROUND、FLOOR、CEIL 等均支持*
+
+**条件聚合推荐写法**：
+- 条件计数：`sum(if(stage$caption == 'Won', 1, 0)) as wonCount`
+- 条件求和：`sum(if(state == 'sale', amountTotal, 0)) as confirmedAmount`
+- 条件均值：`avg(if(stage$caption == 'Won', amountTotal, null)) as avgWonAmount`
+- 条件计数（只统计命中行）：`count(if(stage$caption == 'Won', 1, null)) as wonOrderCount`
+
+**条件表达式规则**：
+- 相等判断用 `==`，不要写 SQL 风格 `=`
+- 多个条件用 `&&` / `||`
+- `avg(if(...))` 的 else 分支通常应为 `null`
+- `count(if(...))` 的 else 分支通常应为 `null`
+- 对外写法使用 `if(...)`，内部会归一化并降级到 SQL `CASE WHEN`
 
 ### slice (可选)
 过滤条件（数组内条件默认 AND 连接）：

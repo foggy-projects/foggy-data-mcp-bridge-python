@@ -37,6 +37,10 @@ BUILTIN_TOOLS: Dict[str, Dict[str, str]] = {
         "description_file": "get_metadata.md",
         "schema_file": "get_metadata_schema.json",
     },
+    "dataset.list_models": {
+        "description_file": "list_models.md",
+        "schema_file": "list_models_schema.json",
+    },
     "dataset.describe_model_internal": {
         "description_file": "describe_model_internal.md",
         "schema_file": "describe_model_internal_schema.json",

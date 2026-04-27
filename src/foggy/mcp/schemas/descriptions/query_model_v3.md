@@ -25,24 +25,16 @@
 ### columns (必填)
 支持内联聚合表达式，系统自动处理groupBy：
 ```json
-[
-  "product$categoryName",
-  "sum(salesAmount) as totalSales",
-  "sum(if(orderStatus == 'COMPLETED', salesAmount, 0)) as completedSales",
-  "avg(if(orderStatus == 'COMPLETED', salesAmount, null)) as avgCompletedSales",
-  "count(if(orderStatus == 'COMPLETED', 1, null)) as completedCount"
-]
+["product$categoryName", "sum(salesAmount) as totalSales", "count(orderId) as orderCount"]
 ```
 聚合函数：`sum`、`avg`、`count`、`max`、`min`、`group_concat`、`countd`(去重计数)、`stddev_pop`、`stddev_samp`、`var_pop`、`var_samp`
 
 **重要**：
 - 当使用聚合表达式后，系统自动推断 groupBy，通常无需手动指定
-- columns 支持 `agg(field) as alias`，也支持条件聚合写法 `sum/avg/count(if(...)) as alias`
-- 条件聚合里的条件表达式使用 DSL 语法：相等判断写 `==`，多条件写 `&&` / `||`
-- Python 引擎会把 `if(...)` 统一降级为标准 SQL `CASE WHEN ... THEN ... ELSE ... END`
-- 不支持直接在 DSL 中输出原始 `CASE WHEN ...` 片段
-- 不新增 `count_if / sum_if / avg_if` 契约；条件聚合统一使用 `sum/avg/count(if(...))`
-- 超出上述范围的复杂表达式继续使用 calculatedFields
+- columns 仅支持简单的 `agg(field) as alias`，复杂计算用 calculatedFields
+- 不要生成 SQL 风格 `case when ... then ... else ... end`
+- 不要生成 `count_if`、`sum_if`、`avg_if` 这类未定义函数
+- 条件聚合统一改写为 `sum/avg/count(if(...))`
 
 ### calculatedFields (可选)
 需要指定agg或复杂表达式时使用：
@@ -70,6 +62,47 @@
 | 统计 | `STDDEV_POP`, `STDDEV_SAMP`, `VAR_POP`, `VAR_SAMP` (SQLite 不支持) |
 
 *常用数学函数如 ABS、ROUND、FLOOR、CEIL 等均支持*
+
+### timeWindow (可选)
+声明式时间窗口分析。遇到同比、环比、周同比、年初至今、月累计、滚动 7/30/90 天这类需求，优先使用 `timeWindow`，不要手写窗口 SQL。
+
+```json
+{
+  "columns": ["salesDate$id", "salesAmount", "salesAmount__rolling_7d"],
+  "groupBy": ["salesDate$id"],
+  "timeWindow": {
+    "field": "salesDate$id",
+    "grain": "day",
+    "comparison": "rolling_7d",
+    "targetMetrics": ["salesAmount"]
+  }
+}
+```
+
+字段说明：
+- `field`：业务时间字段，优先选择 `timeRole=business_date` 的维度 id 字段，如 `salesDate$id`
+- `grain`：`day` / `week` / `month` / `quarter` / `year`
+- `comparison`：`yoy` / `mom` / `wow` / `ytd` / `mtd` / `rolling_7d` / `rolling_30d` / `rolling_90d`
+- `targetMetrics`：需要派生时间窗口列的度量字段，如 `["salesAmount"]`
+- `rollingAggregator`：rolling 场景可选，`sum` / `avg` / `count`，默认 `sum`
+
+派生列命名：
+- 同环比：`{metric}__prior`、`{metric}__diff`、`{metric}__ratio`
+- 累计：`{metric}__ytd`、`{metric}__mtd`
+- 滚动：`{metric}__rolling_7d`、`{metric}__rolling_30d`、`{metric}__rolling_90d`
+
+**条件聚合推荐写法**：
+- 条件计数：`sum(if(stage$caption == 'Won', 1, 0)) as wonCount`
+- 条件求和：`sum(if(state == 'sale', amountTotal, 0)) as confirmedAmount`
+- 条件均值：`avg(if(stage$caption == 'Won', amountTotal, null)) as avgWonAmount`
+- 条件计数（只统计命中行）：`count(if(stage$caption == 'Won', 1, null)) as wonOrderCount`
+
+**条件表达式规则**：
+- 相等判断用 `==`，不要写 SQL 风格 `=`
+- 多个条件用 `&&` / `||`
+- `avg(if(...))` 的 else 分支通常应为 `null`
+- `count(if(...))` 的 else 分支通常应为 `null`
+- 对外写法使用 `if(...)`，内部会归一化并降级到 SQL `CASE WHEN`
 
 ### slice (可选)
 过滤条件（数组内条件默认 AND 连接）：
