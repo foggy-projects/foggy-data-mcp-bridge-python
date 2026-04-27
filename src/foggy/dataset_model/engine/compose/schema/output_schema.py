@@ -16,9 +16,12 @@ aligns columns positionally.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Dict, Iterator, List, Optional, Tuple
 
+from .. import feature_flags
 from ..plan.plan_id import PlanId
+from . import error_codes
 
 
 @dataclass(frozen=True, eq=False)
@@ -115,23 +118,90 @@ class ColumnSpec:
         ))
 
 
+class _DuplicateOutcome(Enum):
+    """Classification of a same-name duplicate against the active flag policy."""
+
+    REJECT_LEGACY = "reject-legacy"
+    REJECT_MIXED_FLAG = "reject-mixed-flag"
+    REJECT_PURE_DUPLICATE = "reject-pure-duplicate"
+    ACCEPT_AMBIGUOUS = "accept-ambiguous"
+
+
+def _classify_duplicate(first: ColumnSpec, current: ColumnSpec, g10: bool) -> _DuplicateOutcome:
+    if not g10:
+        return _DuplicateOutcome.REJECT_LEGACY
+    if not first.is_ambiguous or not current.is_ambiguous:
+        return _DuplicateOutcome.REJECT_MIXED_FLAG
+    if first.plan_provenance == current.plan_provenance:
+        return _DuplicateOutcome.REJECT_PURE_DUPLICATE
+    return _DuplicateOutcome.ACCEPT_AMBIGUOUS
+
+
+def _duplicate_message(outcome: _DuplicateOutcome, name: str,
+                       first: ColumnSpec, current: ColumnSpec,
+                       first_index: int, i: int) -> str:
+    prefix = (f"OutputSchema contains duplicate output column {name!r} "
+              f"(first at index {first_index}, again at index {i})")
+    if outcome is _DuplicateOutcome.REJECT_LEGACY:
+        return prefix
+    if outcome is _DuplicateOutcome.REJECT_MIXED_FLAG:
+        return (prefix
+                + f". G10 allows duplicates only when every occurrence has "
+                + f"is_ambiguous=True; [first_ambiguous={first.is_ambiguous}, "
+                + f"current_ambiguous={current.is_ambiguous}]")
+    if outcome is _DuplicateOutcome.REJECT_PURE_DUPLICATE:
+        return (f"OutputSchema rejects pure duplicate ambiguous column {name!r} "
+                f"— both occurrences carry the same plan_provenance, which "
+                f"indicates a plan-tree construction bug rather than a join "
+                f"overlap (first at index {first_index}, again at index {i})")
+    raise AssertionError(f"unreachable: {outcome}")
+
+
 @dataclass(frozen=True)
 class OutputSchema:
-    """Ordered, duplicate-free list of :class:`ColumnSpec`.
+    """Ordered list of :class:`ColumnSpec`.
 
-    Duplicate output names are rejected at construction — the spec
-    requires ``JoinPlan`` to resolve column-name conflicts via explicit
-    alias, so any duplicate surviving into an OutputSchema is a
-    derivation bug the caller must fix (usually by writing ``... AS <x>``).
+    Duplicate-name handling
+    -----------------------
 
-    Iteration order follows construction order. Positional lookup is
-    ``O(1)`` via ``columns[i]``; name lookup is ``O(n)`` via
-    :meth:`get` or ``O(1)`` via :meth:`index_of` (cached map).
+    The duplicate-name policy depends on the
+    :func:`feature_flags.g10_enabled` flag:
+
+    * **Flag OFF (legacy)** — duplicate output names are rejected at
+      construction. ``JoinPlan`` must resolve column-name conflicts
+      via explicit alias; any duplicate surviving into an
+      ``OutputSchema`` is a derivation bug.
+    * **Flag ON (G10)** — duplicate names are *allowed* when *every*
+      column carrying that name has ``is_ambiguous=True``. Such
+      duplicates are produced by ``derive_join`` when both join sides
+      emit the same name. Each ambiguous occurrence must record a
+      distinct ``plan_provenance`` — pure duplicates (same
+      ``plan_provenance``) remain rejected. Non-ambiguous duplicates
+      (any column lacking the ``is_ambiguous`` flag) are still
+      rejected.
+
+    Lookup API (G10 PR2)
+    --------------------
+
+    * :meth:`get` — fail-fast on ambiguity. Returns the single column
+      for non-ambiguous names; raises ``ComposeSchemaError`` with
+      code ``OUTPUT_SCHEMA_AMBIGUOUS_LOOKUP`` when the name resolves
+      to multiple ambiguous columns. Returns ``None`` when absent.
+    * :meth:`require_unique` — same fail-fast semantics, but raises
+      ``KeyError`` on absent.
+    * :meth:`get_all` — returns every :class:`ColumnSpec` with this
+      name (single-element list for non-ambiguous, multi-element for
+      ambiguous, empty for absent).
+    * :meth:`is_ambiguous` — ``True`` iff the name resolves to two or
+      more columns.
+    * :meth:`index_of` — fail-fast on ambiguity, raises ``KeyError``
+      on absent.
     """
 
     columns: Tuple[ColumnSpec, ...] = ()
 
     def __post_init__(self) -> None:
+        g10 = feature_flags.g10_enabled()
         seen: Dict[str, int] = {}
         for i, c in enumerate(self.columns):
             if not isinstance(c, ColumnSpec):
@@ -139,13 +209,15 @@ class OutputSchema:
                     f"OutputSchema.columns[{i}] must be ColumnSpec, got "
                     f"{type(c).__name__}"
                 )
-            if c.name in seen:
-                raise ValueError(
-                    f"OutputSchema contains duplicate output column "
-                    f"{c.name!r} (first at index {seen[c.name]}, "
-                    f"again at index {i})"
-                )
-            seen[c.name] = i
+            if c.name not in seen:
+                seen[c.name] = i
+                continue
+            first_index = seen[c.name]
+            first = self.columns[first_index]
+            outcome = _classify_duplicate(first, c, g10)
+            if outcome is not _DuplicateOutcome.ACCEPT_AMBIGUOUS:
+                raise ValueError(_duplicate_message(
+                    outcome, c.name, first, c, first_index, i))
 
     # ------------------------------------------------------------------
     # Construction helpers
@@ -168,30 +240,107 @@ class OutputSchema:
         return len(self.columns)
 
     def names(self) -> List[str]:
-        """Ordered list of output names — primary lookup surface for
-        downstream plan validation."""
+        """Ordered list of output names. Ambiguous names appear once
+        per occurrence (mirrors the ``columns`` tuple)."""
         return [c.name for c in self.columns]
 
     def name_set(self) -> frozenset:
-        """Immutable set of output names; ``O(n)`` construction but
-        convenient for membership tests."""
+        """Immutable set of distinct output names — ambiguous names
+        appear exactly once."""
         return frozenset(c.name for c in self.columns)
 
     def get(self, name: str) -> Optional[ColumnSpec]:
-        """Return the :class:`ColumnSpec` with the given output name,
-        or ``None`` when absent. ``O(n)``; fine for the low cardinality
-        schemas Compose Query produces."""
+        """Single-column lookup by name.
+
+        Returns ``None`` when absent. **Raises** ``ComposeSchemaError``
+        with code ``OUTPUT_SCHEMA_AMBIGUOUS_LOOKUP`` when the name
+        resolves to multiple ambiguous columns — callers that may
+        encounter ambiguity should use :meth:`get_all` or
+        :meth:`require_unique` for explicit semantics.
+        """
+        i = self._unique_index_or_none(name)
+        if i is None:
+            return None
+        return self.columns[i]
+
+    def get_all(self, name: str) -> List[ColumnSpec]:
+        """G10 PR2 · Return every :class:`ColumnSpec` carrying ``name``.
+
+        Returns an empty list when absent, single-element list for
+        non-ambiguous names, or multi-element list for ambiguous
+        (join-overlap) names. Preserves construction order.
+        """
+        return [c for c in self.columns if c.name == name]
+
+    def is_ambiguous(self, name: str) -> bool:
+        """G10 PR2 · ``True`` iff ``name`` resolves to two or more
+        columns (only possible when the G10 flag is on and an upstream
+        join produced an overlap)."""
+        count = 0
         for c in self.columns:
             if c.name == name:
-                return c
-        return None
+                count += 1
+                if count > 1:
+                    return True
+        return False
+
+    def require_unique(self, name: str) -> ColumnSpec:
+        """G10 PR2 · Same as :meth:`get` but raises ``KeyError`` when
+        absent. Use when the caller logically expects a unique hit."""
+        return self.columns[self._require_unique_index(name)]
 
     def index_of(self, name: str) -> int:
-        """Positional index of ``name``; raises ``KeyError`` when absent."""
-        for i, c in enumerate(self.columns):
-            if c.name == name:
-                return i
-        raise KeyError(name)
+        """Positional index of ``name``; **fails fast on ambiguity**
+        with ``OUTPUT_SCHEMA_AMBIGUOUS_LOOKUP``; raises ``KeyError``
+        when absent."""
+        return self._require_unique_index(name)
 
     def contains(self, name: str) -> bool:
         return any(c.name == name for c in self.columns)
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _unique_index_or_none(self, name: str) -> Optional[int]:
+        """Bucket → unique index, or None when absent.
+        Raises ``OUTPUT_SCHEMA_AMBIGUOUS_LOOKUP`` on multi-element
+        buckets."""
+        first: Optional[int] = None
+        ambiguous = False
+        for i, c in enumerate(self.columns):
+            if c.name != name:
+                continue
+            if first is None:
+                first = i
+            else:
+                ambiguous = True
+                break
+        if first is None:
+            return None
+        if not ambiguous:
+            return first
+        raise self._ambiguous_lookup(name)
+
+    def _require_unique_index(self, name: str) -> int:
+        i = self._unique_index_or_none(name)
+        if i is None:
+            raise KeyError(name)
+        return i
+
+    def _ambiguous_lookup(self, name: str) -> "Exception":
+        # Local import avoids circular dependency at module load.
+        from .errors import ComposeSchemaError
+        candidates = [c for c in self.columns if c.name == name]
+        rendered = ", ".join(
+            f"{{plan_provenance={c.plan_provenance!r}}}" for c in candidates
+        )
+        return ComposeSchemaError(
+            error_codes.OUTPUT_SCHEMA_AMBIGUOUS_LOOKUP,
+            f"OutputSchema lookup of {name!r} is ambiguous — "
+            f"{len(candidates)} candidate columns. Use a plan-qualified "
+            f"reference ({{plan: <handle>, field: {name!r}}}) or call "
+            f"OutputSchema.get_all(name) explicitly. Candidates: [{rendered}]",
+            phase=error_codes.PHASE_SCHEMA_DERIVE,
+            offending_field=name,
+        )

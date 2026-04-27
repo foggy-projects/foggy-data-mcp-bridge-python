@@ -28,8 +28,9 @@ What the rules do NOT yet do (deferred)
 from __future__ import annotations
 
 import re
-from typing import Iterable, List, Optional, Set
+from typing import Iterable, List, Optional, Set, Tuple
 
+from .. import feature_flags
 from ..plan import (
     BaseModelPlan,
     DerivedQueryPlan,
@@ -37,6 +38,7 @@ from ..plan import (
     QueryPlan,
     UnionPlan,
 )
+from ..plan.plan_id import PlanId
 from . import error_codes
 from .alias import ColumnAliasParts, extract_column_alias
 from .errors import ComposeSchemaError
@@ -234,10 +236,18 @@ def _derive_join(plan: JoinPlan, *, path: str) -> OutputSchema:
                 offending_field=j.right,
             )
 
-    # Merge outputs. Any name collision = user mistake; force them to
-    # disambiguate via a following ``.query()`` with explicit aliases.
+    # G10 PR2 · Flag-gated branch.
+    # flag=False (legacy): any overlap throws JOIN_OUTPUT_COLUMN_CONFLICT
+    #                      and source_model is cleared on merge.
+    # flag=True  (G10):    overlap is allowed; each overlapping column is
+    #                      marked is_ambiguous=True and carries a PlanId
+    #                      pointing at the producing side. source_model is
+    #                      preserved so downstream consumers (PR3 / PR4)
+    #                      can route reads back to the origin plan.
     overlap = left_names & right_names
-    if overlap:
+    g10 = feature_flags.g10_enabled()
+
+    if not g10 and overlap:
         raise ComposeSchemaError(
             code=error_codes.JOIN_OUTPUT_COLUMN_CONFLICT,
             message=(
@@ -250,21 +260,59 @@ def _derive_join(plan: JoinPlan, *, path: str) -> OutputSchema:
             offending_field=next(iter(sorted(overlap))),
         )
 
-    merged: List[ColumnSpec] = list(left_schema.columns) + list(
-        right_schema.columns
+    merged: List[ColumnSpec] = []
+    if g10:
+        left_pid = PlanId.of(plan.left)
+        right_pid = PlanId.of(plan.right)
+        _append_annotated_side(merged, left_schema.columns, left_pid, overlap)
+        _append_annotated_side(merged, right_schema.columns, right_pid, overlap)
+    else:
+        # Legacy merge: source_model cleared (per-side attribution dropped).
+        for c in list(left_schema.columns) + list(right_schema.columns):
+            merged.append(_with_source_model_cleared(c))
+    return OutputSchema.of(merged)
+
+
+def _with_source_model_cleared(c: ColumnSpec) -> ColumnSpec:
+    """Legacy merge: drop ``source_model`` on the merged column. Reuses
+    the same instance when it already lacks attribution to avoid an
+    allocation per stacked plan."""
+    if c.source_model is None and c.plan_provenance is None and not c.is_ambiguous:
+        return c
+    return ColumnSpec(
+        name=c.name,
+        expression=c.expression,
+        source_model=None,
+        data_type=c.data_type,
+        has_explicit_alias=c.has_explicit_alias,
+        plan_provenance=c.plan_provenance,
+        is_ambiguous=c.is_ambiguous,
     )
-    # Strip source_model on merged output — once joined, which side the
-    # column came from is not a reliable attribute downstream.
-    merged = [
-        ColumnSpec(
+
+
+def _append_annotated_side(
+    out: List[ColumnSpec],
+    side_columns: Tuple[ColumnSpec, ...],
+    side_pid: PlanId,
+    overlap: frozenset,
+) -> None:
+    """G10 PR2 · Append each side's columns with plan provenance + the
+    join-overlap ambiguity flag set. Preserves ``source_model`` so PR3
+    consumers that route via ``plan_provenance`` still see useful
+    attribution."""
+    for c in side_columns:
+        if c.plan_provenance == side_pid and c.is_ambiguous == (c.name in overlap):
+            out.append(c)
+            continue
+        out.append(ColumnSpec(
             name=c.name,
             expression=c.expression,
-            source_model=None,
+            source_model=c.source_model,
+            data_type=c.data_type,
             has_explicit_alias=c.has_explicit_alias,
-        )
-        for c in merged
-    ]
-    return OutputSchema.of(merged)
+            plan_provenance=side_pid,
+            is_ambiguous=c.name in overlap,
+        ))
 
 
 # ---------------------------------------------------------------------------

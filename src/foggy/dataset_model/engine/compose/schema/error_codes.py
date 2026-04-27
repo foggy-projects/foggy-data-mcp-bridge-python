@@ -49,7 +49,30 @@ JOIN_ON_RIGHT_UNKNOWN_FIELD: str = _qualify("join/on-right-unknown-field")
 
 # Join left.output + right.output share an output column name without
 # explicit alias disambiguation.
+#
+# G10: Only thrown when ``g10_enabled() == False`` (legacy behaviour).
+# When G10 is enabled, the column is marked ``is_ambiguous=True`` and the
+# conflict is detected at downstream reference resolution as
+# ``JOIN_AMBIGUOUS_COLUMN``.
 JOIN_OUTPUT_COLUMN_CONFLICT: str = _qualify("join/output-column-conflict")
+
+# G10 PR2 · A lookup against ``OutputSchema.get(name)`` or
+# ``require_unique(name)`` resolved a column name marked
+# ``is_ambiguous=True`` (multiple plans contribute the same name).
+#
+# The error message lists every candidate column's plan provenance so
+# the caller can disambiguate via F5 plan-qualified column ref
+# (``{plan: <handle>, field: <name>}``).
+OUTPUT_SCHEMA_AMBIGUOUS_LOOKUP: str = _qualify("output-schema/ambiguous-lookup")
+
+# G10 PR3 · Downstream reference (in derived/projected expression,
+# group-by, or order-by) targets a column that the upstream join marked
+# ``is_ambiguous=True``, and the reference itself is not plan-qualified
+# (F5).
+#
+# Reserved here so PR3 / PR4 producers can throw a stable code; not yet
+# emitted by PR2.
+JOIN_AMBIGUOUS_COLUMN: str = _qualify("join/ambiguous-column")
 
 
 # ---------------------------------------------------------------------------
@@ -78,5 +101,7 @@ ALL_CODES: frozenset = frozenset(
         JOIN_ON_LEFT_UNKNOWN_FIELD,
         JOIN_ON_RIGHT_UNKNOWN_FIELD,
         JOIN_OUTPUT_COLUMN_CONFLICT,
+        OUTPUT_SCHEMA_AMBIGUOUS_LOOKUP,
+        JOIN_AMBIGUOUS_COLUMN,
     }
 )

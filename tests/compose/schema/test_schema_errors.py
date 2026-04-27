@@ -18,6 +18,9 @@ EXPECTED_CODES = {
     "compose-schema-error/join/on-left-unknown-field",
     "compose-schema-error/join/on-right-unknown-field",
     "compose-schema-error/join/output-column-conflict",
+    # G10 PR2 — append two ambiguity-related codes; ALL_CODES = 9.
+    "compose-schema-error/output-schema/ambiguous-lookup",
+    "compose-schema-error/join/ambiguous-column",
 }
 
 
@@ -30,7 +33,7 @@ EXPECTED_PHASES = {
 class TestCatalogue:
     def test_all_codes_matches_expected(self):
         assert error_codes.ALL_CODES == frozenset(EXPECTED_CODES)
-        assert len(error_codes.ALL_CODES) == 7
+        assert len(error_codes.ALL_CODES) == 9
 
     def test_constants_expose_full_namespace(self):
         assert (
