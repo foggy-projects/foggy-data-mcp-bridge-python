@@ -38,6 +38,7 @@ from foggy.dataset_model.engine.compose import (
     CteUnit,
     JoinSpec,
 )
+from foggy.dataset_model.engine.compose import feature_flags
 from foggy.dataset_model.engine.compose.compilation import error_codes
 from foggy.dataset_model.engine.compose.compilation.errors import (
     ComposeCompileError,
@@ -193,6 +194,19 @@ class _CompileState:
     # ``enter_depth`` / ``exit_depth``; enforces ``MAX_PLAN_DEPTH`` at
     # entry to detect DOS-shaped plans before they eat the executor.
     current_depth: int = 0
+    # G10 PR3 · Snapshot of ``feature_flags.g10_enabled()`` taken once at
+    # construction so per-plan compile loops don't re-read env-var per
+    # column. Ungated default = False; legacy hot path consults the
+    # flag exactly zero times after this snapshot.
+    g10_enabled: bool = False
+    # G10 PR3 · Plan-tree → CTE alias mapping, identity-keyed via
+    # ``id(plan)`` (plans are frozen dataclasses with value-equality, so
+    # we cannot key by the plan itself — two structurally-equal plans
+    # would collide). Populated by ``_compile_base`` / ``_compile_derived``
+    # only when ``g10_enabled`` is True; legacy compile keeps the dict
+    # empty so downstream consumers (PR4 validator routing) short-circuit
+    # without consulting the flag again per column.
+    plan_alias_map: Dict[int, str] = field(default_factory=dict)
 
     def next_alias(self) -> str:
         alias = f"cte_{self.alias_counter}"
@@ -237,6 +251,7 @@ def compile_to_composed_sql(
         bindings=bindings,
         semantic_service=semantic_service,
         dialect=dialect,
+        g10_enabled=feature_flags.g10_enabled(),
     )
     result = _compile_any(plan, state)
     if isinstance(result, ComposedSql):
@@ -344,6 +359,7 @@ def _compile_base(plan: BaseModelPlan, state: _CompileState) -> CteUnit:
             ),
         )
     alias = state.next_alias()
+    _register_plan_alias(state, plan, alias)
     return compile_base_model(
         plan,
         binding,
@@ -351,6 +367,15 @@ def _compile_base(plan: BaseModelPlan, state: _CompileState) -> CteUnit:
         alias=alias,
         governance_cache=state.governance_cache,
     )
+
+
+def _register_plan_alias(state: _CompileState, plan: QueryPlan, alias: str) -> None:
+    """G10 PR3 · Register ``plan → alias`` when the G10 flag is on.
+    Skipping the put when the flag is off keeps ``state.plan_alias_map``
+    empty so the PR4 validator's short-circuit path doesn't consult the
+    flag again per column."""
+    if state.g10_enabled:
+        state.plan_alias_map[id(plan)] = alias
 
 
 def _compile_derived(plan: DerivedQueryPlan, state: _CompileState) -> CteUnit:
@@ -383,8 +408,10 @@ def _compile_derived(plan: DerivedQueryPlan, state: _CompileState) -> CteUnit:
         inner_alias=inner.alias,
         inner_sql=inner.sql,
     )
+    derived_alias = state.next_alias()
+    _register_plan_alias(state, plan, derived_alias)
     return CteUnit(
-        alias=state.next_alias(),
+        alias=derived_alias,
         sql=outer_sql,
         params=list(inner.params) + list(outer_params),
         select_columns=list(plan.columns),
