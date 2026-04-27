@@ -18,22 +18,28 @@ EXPECTED_CODES = {
     "compose-schema-error/join/on-left-unknown-field",
     "compose-schema-error/join/on-right-unknown-field",
     "compose-schema-error/join/output-column-conflict",
-    # G10 PR2 — append two ambiguity-related codes; ALL_CODES = 9.
+    # G10 PR2 — append two ambiguity-related codes.
     "compose-schema-error/output-schema/ambiguous-lookup",
     "compose-schema-error/join/ambiguous-column",
+    # G10 PR4 — append three permission-validation codes; ALL_CODES = 12.
+    "compose-schema-error/field-access/denied",
+    "compose-schema-error/column/plan-not-bound",
+    "compose-schema-error/column/field-not-found",
 }
 
 
 EXPECTED_PHASES = {
     "plan-build",
     "schema-derive",
+    # G10 PR4 — plan-aware permission validation.
+    "permission-validate",
 }
 
 
 class TestCatalogue:
     def test_all_codes_matches_expected(self):
         assert error_codes.ALL_CODES == frozenset(EXPECTED_CODES)
-        assert len(error_codes.ALL_CODES) == 9
+        assert len(error_codes.ALL_CODES) == 12
 
     def test_constants_expose_full_namespace(self):
         assert (

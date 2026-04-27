@@ -70,9 +70,25 @@ OUTPUT_SCHEMA_AMBIGUOUS_LOOKUP: str = _qualify("output-schema/ambiguous-lookup")
 # ``is_ambiguous=True``, and the reference itself is not plan-qualified
 # (F5).
 #
-# Reserved here so PR3 / PR4 producers can throw a stable code; not yet
-# emitted by PR2.
+# Emitted by ``ComposePlanAwarePermissionValidator`` (G10 PR4) during
+# bare-field resolution; reserved here since PR2 so producers have a
+# stable code.
 JOIN_AMBIGUOUS_COLUMN: str = _qualify("join/ambiguous-column")
+
+# G10 PR4 · Field access denied. Either a plan-qualified
+# ``PlanColumnRef`` was rejected by its plan's ``fieldAccess`` whitelist,
+# or a bare field was uniquely resolved to a plan whose whitelist
+# excludes it.
+FIELD_ACCESS_DENIED: str = _qualify("field-access/denied")
+
+# G10 PR4 · A ``PlanColumnRef`` targets a ``QueryPlan`` that is not
+# registered in the active ``PlanFieldAccessContext``. Fail-closed
+# safeguard.
+COLUMN_PLAN_NOT_BOUND: str = _qualify("column/plan-not-bound")
+
+# G10 PR4 · A bare-field column reference does not resolve to any
+# column in the plan's ``OutputSchema``.
+COLUMN_FIELD_NOT_FOUND: str = _qualify("column/field-not-found")
 
 
 # ---------------------------------------------------------------------------
@@ -82,12 +98,15 @@ JOIN_AMBIGUOUS_COLUMN: str = _qualify("join/ambiguous-column")
 
 PHASE_PLAN_BUILD: str = "plan-build"
 PHASE_SCHEMA_DERIVE: str = "schema-derive"
+# G10 PR4 · plan-aware permission validation.
+PHASE_PERMISSION_VALIDATE: str = "permission-validate"
 
 
 VALID_PHASES: frozenset = frozenset(
     {
         PHASE_PLAN_BUILD,
         PHASE_SCHEMA_DERIVE,
+        PHASE_PERMISSION_VALIDATE,
     }
 )
 
@@ -103,5 +122,8 @@ ALL_CODES: frozenset = frozenset(
         JOIN_OUTPUT_COLUMN_CONFLICT,
         OUTPUT_SCHEMA_AMBIGUOUS_LOOKUP,
         JOIN_AMBIGUOUS_COLUMN,
+        FIELD_ACCESS_DENIED,
+        COLUMN_PLAN_NOT_BOUND,
+        COLUMN_FIELD_NOT_FOUND,
     }
 )

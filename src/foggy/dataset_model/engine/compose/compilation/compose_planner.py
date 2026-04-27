@@ -40,6 +40,13 @@ from foggy.dataset_model.engine.compose import (
 )
 from foggy.dataset_model.engine.compose import feature_flags
 from foggy.dataset_model.engine.compose.compilation import error_codes
+from foggy.dataset_model.engine.compose.schema.derive import derive_schema
+from foggy.dataset_model.engine.compose.security import (
+    plan_aware_permission_validator,
+)
+from foggy.dataset_model.engine.compose.security.plan_field_access_context import (
+    PlanFieldAccessContext,
+)
 from foggy.dataset_model.engine.compose.compilation.errors import (
     ComposeCompileError,
 )
@@ -253,6 +260,12 @@ def compile_to_composed_sql(
         dialect=dialect,
         g10_enabled=feature_flags.g10_enabled(),
     )
+    # G10 PR4 · plan-aware permission validation. Runs only when the
+    # G10 flag is on; under flag=off the legacy single-QM
+    # ``SemanticServiceV3._resolve_effective_visible`` path continues
+    # to enforce flat-whitelist semantics without any change.
+    if state.g10_enabled:
+        _run_plan_aware_permission_check(plan, bindings)
     result = _compile_any(plan, state)
     if isinstance(result, ComposedSql):
         return result
@@ -376,6 +389,61 @@ def _register_plan_alias(state: _CompileState, plan: QueryPlan, alias: str) -> N
     flag again per column."""
     if state.g10_enabled:
         state.plan_alias_map[id(plan)] = alias
+
+
+# ---------------------------------------------------------------------------
+# G10 PR4 — plan-aware permission validation entry
+# ---------------------------------------------------------------------------
+
+
+def _run_plan_aware_permission_check(
+    plan: QueryPlan, bindings: Dict[str, ModelBinding]
+) -> None:
+    """Walk the plan tree to build a :class:`PlanFieldAccessContext`,
+    derive the root plan's :class:`OutputSchema`, then run the
+    plan-aware permission validator.
+
+    Pure pre-compile sub-step: no SQL is emitted here, no compile-state
+    side effects beyond the validator's own throws. Failure surfaces as
+    :class:`ComposeSchemaError` with phase ``permission-validate``.
+    """
+    plan_ctx = PlanFieldAccessContext()
+    visited: set = set()
+    _collect_plan_bindings(plan, bindings, plan_ctx, visited)
+    schema = derive_schema(plan)
+    plan_aware_permission_validator.validate(plan, schema, plan_ctx)
+
+
+def _collect_plan_bindings(
+    plan: Optional[QueryPlan],
+    bindings: Dict[str, ModelBinding],
+    plan_ctx: PlanFieldAccessContext,
+    visited: set,
+) -> None:
+    """Tree walk: every :class:`BaseModelPlan` pairs with its model's
+    :class:`ModelBinding`; ``visited`` prevents quadratic walks on
+    shared plan subtrees (identity-keyed via ``id(plan)``)."""
+    if plan is None:
+        return
+    plan_key = id(plan)
+    if plan_key in visited:
+        return
+    visited.add(plan_key)
+    if isinstance(plan, BaseModelPlan):
+        binding = bindings.get(plan.model)
+        if binding is not None:
+            plan_ctx.bind(plan, binding)
+        return
+    if isinstance(plan, DerivedQueryPlan):
+        _collect_plan_bindings(plan.source, bindings, plan_ctx, visited)
+        return
+    if isinstance(plan, JoinPlan):
+        _collect_plan_bindings(plan.left, bindings, plan_ctx, visited)
+        _collect_plan_bindings(plan.right, bindings, plan_ctx, visited)
+        return
+    if isinstance(plan, UnionPlan):
+        _collect_plan_bindings(plan.left, bindings, plan_ctx, visited)
+        _collect_plan_bindings(plan.right, bindings, plan_ctx, visited)
 
 
 def _compile_derived(plan: DerivedQueryPlan, state: _CompileState) -> CteUnit:
