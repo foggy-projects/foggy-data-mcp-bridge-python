@@ -110,7 +110,7 @@ def _seed_time_window_db(db_path) -> None:
                 year INTEGER NOT NULL,
                 quarter INTEGER NOT NULL,
                 month INTEGER NOT NULL,
-                week INTEGER NOT NULL,
+                week_of_year INTEGER NOT NULL,
                 month_name TEXT,
                 day_of_week INTEGER,
                 is_weekend INTEGER
@@ -125,7 +125,7 @@ def _seed_time_window_db(db_path) -> None:
         conn.executemany(
             """
             INSERT INTO dim_date (
-                date_key, full_date, year, quarter, month, week,
+                date_key, full_date, year, quarter, month, week_of_year,
                 month_name, day_of_week, is_weekend
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
