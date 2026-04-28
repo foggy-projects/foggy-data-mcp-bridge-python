@@ -64,22 +64,22 @@ v1.4 已经让 fsscript 语法层支持 `v in (...)` / `v not in (...)`，且借
 - `P1-Phase3-AST-Visitor-架构对齐-progress.md`
 - 实际规模：~1 人日（比预估 1.5 人周快很多，因用 feature flag 双轨策略规避了 Python fsscript parser 未达 Java 级别的部分）
 - 产出：
-  - `fsscript_to_sql_visitor.py` (~440 行，AST visitor + `_preprocess_if`)
+  - `fsscript_to_sql_visitor.py`（AST visitor + `_preprocess_if`）
   - feature flag `use_ast_expression_compiler` (默认 False)
   - 方法调用（`startsWith`/`endsWith`/`contains`/`toUpperCase`/`toLowerCase`/`trim`/`length`）方言路由
   - Ternary `a ? b : c` + `??` null-coalesce 新能力
-  - AST-first + char-fallback 策略，对 SQL-specific 语法（`IS NULL`/`BETWEEN`/`LIKE`）自动回落
+  - Stage 6 已补齐 `IS NULL` / `BETWEEN` / `LIKE` / `CAST` 原生 AST 编译与保守字符串 `+` 拼接推导；char fallback 仅保留给 `EXTRACT(YEAR FROM ...)`、显式 `CASE WHEN ... END` 等未迁移构造
 - 状态：`ready-for-quality-gate`，回归 2133 → 2209（+76，0 failed）
 
 ### v1.5 完整达成度
 
-11 项能力中 11 项完成 Python 侧实现（含 Phase 3 的 AST-path 实现）；剩 2 项低优先级（`+` 类型推导、Python fsscript parser 升级以覆盖 SQL-specific 关键字走 AST）可在 Phase 4 单独评估。
+11 项能力中 11 项完成 Python 侧实现（含 Phase 3 的 AST-path 实现）；post-v1.5 Stage 6 已补齐原 Phase 4 optional 中的 SQL-specific AST 覆盖与保守字符串 `+` 推导。`use_ast_expression_compiler` 默认仍为 `False`，默认翻转与 char tokenizer 下线仍独立评估。
 
-### Phase 4（可选）— Python fsscript parser 升级
+### Stage 6（已完成）— Python fsscript parser 升级
 
-- 目的：补齐 `IS NULL` / `BETWEEN` / `LIKE` / `CAST AS` 等 SQL-specific 关键字，让所有表达式都走 AST（而不是部分回落 char tokenizer），然后翻默认到 AST + 下线 char tokenizer
-- 规模：约 1 人周
-- 优先级：低 —— 当前双轨已经覆盖用户实际使用场景
+- 已完成：`IS NULL` / `BETWEEN` / `LIKE` / `CAST AS` 等 SQL-specific 关键字走 AST；字符串字面量参与 `+` 时走方言拼接。
+- 未翻默认：`use_ast_expression_compiler=True` 与 char tokenizer 下线仍需单独生产化签收。
+- 证据：`S6-phase4-ast-expression-compiler-progress.md`。
 
 ## 风险与决策点
 

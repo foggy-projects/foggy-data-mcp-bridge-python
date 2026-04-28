@@ -111,16 +111,16 @@ evidence_count: 11
 - **G3 —— Phase 3 AST visitor 79% 行覆盖**：未覆盖 51 行全是 defensive 错误分支。ROI 低。**非阻断**。
 - **G4 —— 无 performance / load 测试**：新开销均为 bounded O(n)；`_FUNCTION_MAPPINGS` 类级常量化后反而比 pre-v1.5 更快。**非阻断**。
 - **G5 —— Phase 3 AST 路径无 production-like manual evidence**：flag 默认关闭，未来翻默认时补即可。**非阻断**。
-- **Phase 4 候选**（独立立项，本版本不做）：
-  - Python fsscript parser 升级支持 `IS NULL` / `BETWEEN` / `LIKE` / `CASE WHEN ... END`
-  - `+` 运算符按操作数类型推导字符串拼接 vs 数值加法
-  - 翻默认 `use_ast_expression_compiler=True` + 下线 char tokenizer
+- **Post-signoff Stage 6 更新**（不改变 2026-04-20 签收结论）：
+  - Python fsscript parser 已支持 `IS NULL` / `BETWEEN` / `LIKE` / `CAST AS` 原生 AST 编译
+  - `+` 运算符已支持字符串字面量参与时的保守方言拼接；field+field 仍保守保持数值 `+`
+  - 仍未翻默认 `use_ast_expression_compiler=True`，char tokenizer 下线需独立生产化签收
 
 ## Final Decision
 
 - 结论：**accepted-with-risks**
 - 原因：Phase 1 + Phase 2 均 `accepted`；Phase 3 `accepted-with-risks`（风险均为非阻断长期跟进项），版本整体采其上界结论
-- **版本目标达成情况**：README 宣告的 11/13 Java 对齐能力全部交付（仅 2 项 scope-out 到 Phase 4）
+- **版本目标达成情况**：README 宣告的 11/13 Java 对齐能力全部交付；原 2 项 Phase 4 scope-out 已在 post-signoff Stage 6 补齐实现，默认翻转仍延期
 - **下一步建议**：
   - 短期无需跟进
   - 中期若决定启用 AST 路径作为默认，先跑一轮 integration-test 真实 DB 验证（对应 G1 + G5），再翻默认
@@ -143,4 +143,4 @@ evidence_count: 11
 - timeWindow_parity: 已完成并签收，见 `docs/v1.5/acceptance/P1-timeWindow-Python-parity-acceptance.md`
 - timeWindow_calculatedFields: 已按 Java `foggy-data-mcp-bridge-wt-dev-compose` 8.4.0.beta 契约 / 8.5.0.beta runtime fixture 对齐并签收，见 `docs/v1.5/acceptance/P1-timeWindow-calculatedFields-acceptance.md`
 - overall_closeout: `docs/v1.5/v1.4+v1.5-overall-progress-closeout.md`
-- current_summary: Python 与 Java 在当前文档定义的 CTE baseline、timeWindow signed-off subset、后置 scalar calculatedFields subset 上已对齐；剩余项均记录为 Phase 4 optional、长期基础设施或未来契约扩展。
+- current_summary: Python 与 Java 在当前文档定义的 CTE baseline、timeWindow signed-off subset、后置 scalar calculatedFields subset 上已对齐；Python Stage 6 已补齐 SQL-specific AST 与保守字符串 `+` 推导；剩余项为 AST 默认翻转、长期基础设施或未来 Java 契约扩展。

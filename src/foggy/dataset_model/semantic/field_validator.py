@@ -103,6 +103,7 @@ def _extract_field_dependencies(expr: str) -> Set[str]:
     if not expr:
         return set()
     cleaned = _STRING_LITERAL_RE.sub("", expr)
+    cleaned = _strip_cast_type_names(cleaned)
     # Collect tokens with preceding-char context to decide method vs field.
     results: Set[str] = set()
     for m in _TOKEN_RE.finditer(cleaned):
@@ -117,6 +118,79 @@ def _extract_field_dependencies(expr: str) -> Set[str]:
             continue
         results.add(token)
     return results
+
+
+def _strip_cast_type_names(expr: str) -> str:
+    """Remove the target type portion from ``CAST(field AS TYPE)``.
+
+    Dependency validation needs fields, not SQL type names.  Without this,
+    ``CAST(amountText AS INTEGER)`` incorrectly treats ``INTEGER`` as a
+    field candidate.
+    """
+    if not expr or "cast" not in expr.lower():
+        return expr
+
+    out: List[str] = []
+    pos = 0
+    lower = expr.lower()
+    while pos < len(expr):
+        match = re.search(r"\bcast\s*\(", lower[pos:])
+        if not match:
+            out.append(expr[pos:])
+            break
+
+        cast_start = pos + match.start()
+        open_paren = pos + match.end() - 1
+        close_paren = _find_matching_paren(expr, open_paren)
+        if close_paren < 0:
+            out.append(expr[pos:])
+            break
+
+        inner = expr[open_paren + 1:close_paren]
+        as_pos = _find_top_level_as(inner)
+        out.append(expr[pos:open_paren + 1])
+        if as_pos >= 0:
+            out.append(inner[:as_pos].rstrip())
+        else:
+            out.append(inner)
+        out.append(")")
+        pos = close_paren + 1
+
+    return "".join(out)
+
+
+def _find_matching_paren(expr: str, open_paren: int) -> int:
+    depth = 0
+    for idx in range(open_paren, len(expr)):
+        ch = expr[idx]
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return idx
+    return -1
+
+
+def _find_top_level_as(inner: str) -> int:
+    depth = 0
+    for match in re.finditer(r"\bas\b", inner, re.IGNORECASE):
+        depth = _paren_depth_at(inner, match.start(), depth_hint=depth)
+        if depth == 0:
+            return match.start()
+    return -1
+
+
+def _paren_depth_at(text: str, stop: int, *, depth_hint: int = 0) -> int:
+    # The hint is intentionally ignored; this stays tiny and predictable for
+    # validator-sized expressions.
+    depth = 0
+    for ch in text[:stop]:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth = max(0, depth - 1)
+    return depth
 
 
 @dataclass

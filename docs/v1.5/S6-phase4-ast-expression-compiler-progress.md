@@ -64,7 +64,11 @@
   - `TestPlusTypeBehavior` 6 用例（字符串字面量 → 拼接 / 数值 → + / field+string / MySQL 方言路由）
   - `TestFallback` 缩减至 1 用例（仅 EXTRACT 仍走 fallback）
   - 原有用例（Parity / Method / Ternary / Coalesce / Preprocess / Error / E2E）全部保留并通过
-- [x] 全量回归 `pytest -q` — **3356 passed, 0 failed**
+- [x] Stage 6b SQLite execution smoke — `SemanticQueryService(use_ast_expression_compiler=True)` 真实执行覆盖 `IS NULL` / `BETWEEN` / `LIKE` / `CAST` / 字符串 `+`
+- [x] Stage 6b 集成缺口修复：
+  - `field_validator` 不再把 `CAST(... AS TYPE)` 的 SQL type name 当作字段依赖
+  - `CalculatedFieldDef` 早期校验允许 Stage 6 AST-only 节点，由 AST-on service path 继续负责实际编译
+- [x] 全量回归 `pytest -q` — **3363 passed, 0 failed**
 
 ## 契约对齐证据
 
@@ -95,6 +99,7 @@
 | `use_ast_expression_compiler` 默认 `False` | ✅ `test_default_is_off` |
 | formula compiler `between()` 函数调用不受影响 | ✅ `SQL_EXPRESSION_DIALECT` 解保留 + 3 测试通过 |
 | 方言字符串拼接路由 | ✅ MySQL CONCAT / Postgres `\|\|` / SQL Server `+` |
+| AST-on 真实执行链路 | ✅ SQLite executor smoke 覆盖 SQL predicates / CAST / 字符串拼接 |
 
 ## 改动文件清单
 
@@ -107,13 +112,19 @@
 - `src/foggy/fsscript/parser/parser.py` — precedence, NOT lookahead, 4 parse methods, CAST prefix
 - `src/foggy/fsscript/parser/dialect.py` — SQL_EXPRESSION_DIALECT `between` 解保留
 - `src/foggy/dataset_model/semantic/fsscript_to_sql_visitor.py` — 4 visit methods, + type infer, docstring
+- `src/foggy/dataset_model/semantic/field_validator.py` — CAST type name dependency stripping
+- `src/foggy/dataset_model/definitions/query_request.py` — Stage 6 AST-only calc-field early validation carve-out
 - `tests/test_dataset_model/test_ast_expression_compiler.py` — 102 用例（+26 新增）
+- `tests/test_dataset_model/test_ast_expression_compiler_sqlite_execution.py` — Stage 6b AST-on SQLite execution smoke
+- `tests/test_dataset_model/test_calculated_field_def.py` — Stage 6 AST-only calc-field load tests
+- `tests/test_column_governance.py` — CAST dependency extraction tests
 
 ## 回归基线
 
 - Phase 3 基线：2209 passed（含 76 AST 测试）
 - Stage 5 基线：3278 passed
 - Stage 6 结果：**3356 passed**（+78 = Stage 5 新增 + Stage 6 26 新 AST 测试）
+- Stage 6b 结果：**3363 passed**（新增 AST-on SQLite execution smoke + field validator / calc-field definition guard tests）
 
 ## v1.5 Java 对齐总览（更新）
 

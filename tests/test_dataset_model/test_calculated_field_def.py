@@ -7,8 +7,9 @@ field, instead of cryptic SQL errors at the first query.
 
 Scope carve-outs verified here:
   - Window-function calcs bypass the hook (``RANK() / ROW_NUMBER()`` etc.)
-  - Phase 3 AST-only nodes (method calls, ternary, null-coalescing) are
-    accepted at load time and validated later by the service.
+  - Phase 3 / Stage 6 AST-only nodes (method calls, ternary,
+    null-coalescing, SQL predicates, CAST) are accepted at load time and
+    validated later by the service.
 """
 
 from __future__ import annotations
@@ -114,6 +115,16 @@ class TestExpressionSyntaxEarlyFail:
         at the model level per §4.4's Phase 3 carve-out."""
         cf = CalculatedFieldDef(name="isA", expression="name.startsWith('A')")
         assert cf.expression == "name.startsWith('A')"
+
+    @pytest.mark.parametrize("expression", [
+        "category IS NULL",
+        "amount BETWEEN 10 AND 20",
+        "customerName LIKE 'A%'",
+        "CAST(amountText AS INTEGER)",
+    ])
+    def test_sql_predicate_expression_loads_stage6(self, expression):
+        cf = CalculatedFieldDef(name="stage6", expression=expression)
+        assert cf.expression == expression
 
     def test_empty_expression_skips_hook(self):
         """Empty-string ``expression`` bypasses the hook by design (same

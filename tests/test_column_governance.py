@@ -796,6 +796,14 @@ class TestExtractFieldDependencies:
         assert "b" in deps
         assert "round" not in deps
 
+    def test_cast_type_name_is_not_dependency(self):
+        deps = _extract_field_dependencies("CAST(amountText AS INTEGER)")
+        assert deps == {"amountText"}
+
+    def test_cast_precision_type_name_is_not_dependency(self):
+        deps = _extract_field_dependencies("CAST(amountText AS DECIMAL(10, 2))")
+        assert deps == {"amountText"}
+
 
 class TestExtractFieldDependenciesPublic:
     """Test the public extract_field_dependencies() API."""

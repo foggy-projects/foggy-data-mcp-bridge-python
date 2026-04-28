@@ -2174,13 +2174,13 @@ class SemanticQueryService(SemanticServiceResolver):
         ``_resolve_single_field`` call so that nested IF / function
         arguments also see the calc registry.
 
-        v1.5 Phase 3 opt-in: when ``self._use_ast_expression_compiler``
-        is True, first try compiling via the fsscript AST visitor
-        (``render_with_ast``).  Falls through to the character-level
-        tokenizer on parse error or unsupported-node error, so SQL
-        constructs the Python fsscript parser cannot handle yet
-        (``IS NULL``, ``BETWEEN``, ``LIKE``, ``CAST ... AS`` keyword
-        syntax) still compile.
+        v1.5 Phase 3 / Stage 6 opt-in: when
+        ``self._use_ast_expression_compiler`` is True, first try compiling
+        via the fsscript AST visitor (``render_with_ast``).  Stage 6 made
+        ``IS NULL``, ``BETWEEN``, ``LIKE``, and ``CAST ... AS`` native AST
+        forms.  The method still falls through to the character-level
+        tokenizer on parse error or unsupported-node error so legacy SQL
+        constructs such as ``EXTRACT(YEAR FROM ...)`` keep compiling.
         """
         if self._use_ast_expression_compiler:
             try:

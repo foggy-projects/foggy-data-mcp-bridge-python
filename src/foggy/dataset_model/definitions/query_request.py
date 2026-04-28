@@ -147,9 +147,10 @@ class CalculatedFieldDef(BaseModel):
             and other windowing primitives live outside the
             ``FormulaCompiler`` whitelist but are wrapped by ``OVER()``
             downstream.  The service routes them through the legacy path.
-          - Phase 3 AST-only constructs (method calls, ternary, null
-            coalescing) are accepted here because they are consumed by
-            the opt-in ``use_ast_expression_compiler=True`` path, not by
+          - Phase 3 / Stage 6 AST-only constructs (method calls,
+            ternary, null coalescing, SQL predicates, CAST) are accepted
+            here because they are consumed by the opt-in
+            ``use_ast_expression_compiler=True`` path, not by
             ``FormulaCompiler``.  When the service is in default mode
             those expressions will still fail at build time — this hook
             only catches the cases where no downstream path can accept
@@ -181,15 +182,19 @@ class CalculatedFieldDef(BaseModel):
         try:
             compiler.validate_syntax(self.expression)
         except FormulaNodeNotAllowedError as exc:
-            # Phase 3 AST-only node types are accepted — they are the
+            # Phase 3 / Stage 6 AST-only node types are accepted — they are the
             # deliberate carve-out above.  Anything else is rejected.
-            phase3_nodes = {
+            ast_only_nodes = {
                 "MemberAccessExpression",
                 "TernaryExpression",
                 "NullCoalescingExpression",
                 "MethodCallExpression",
+                "IsNullExpression",
+                "BetweenExpression",
+                "LikeExpression",
+                "CastExpression",
             }
-            if any(n in str(exc) for n in phase3_nodes):
+            if any(n in str(exc) for n in ast_only_nodes):
                 return self
             raise ValueError(
                 f"Invalid calculated field expression '{self.expression}' "
