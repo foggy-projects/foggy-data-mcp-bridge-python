@@ -10,7 +10,7 @@
 
 - version: post-v1.5 follow-up
 - priority: P2 overall; individual stages may be promoted by downstream demand
-- status: complete-through-stage-6b; stage-7-wait-for-java-contract
+- status: complete-through-stage-6b; stage-7-s7a-mirror-complete; s7b-planned
 - owning_repo: `foggy-data-mcp-bridge-python`
 - java_reference_repo: `foggy-data-mcp-bridge-wt-dev-compose`
 - related_closeout: `docs/v1.5/v1.4+v1.5-overall-progress-closeout.md`
@@ -210,10 +210,12 @@ Acceptance:
 
 ### Stage 7 - Future Java contract expansion
 
-- status: wait-for-java-contract
+- status: S7a Java POC + Python mirror complete; S7b contract freeze planned
 - priority: demand-driven
 - preflight: `docs/v1.5/S7-future-java-contract-expansion-preflight.md`
 - relation_contract: `docs/v1.5/S7a-plan-stable-view-relation-contract-preflight.md`
+- runtime_contract_plan: `docs/v1.5/S7b-stage7-runtime-contract-plan.md`
+- python_mirror_progress: `docs/v1.5/P2-S7a-stable-relation-python-mirror-progress.md`
 
 Items:
 
@@ -249,8 +251,11 @@ Precondition:
 
 Rule:
 
-- Java 契约未明确前，Python 保持 fail-closed 或 non-goal。
-- 一旦 Java 提供 contract + fixture，Python 新开独立 follow-up，对齐错误码、SQL 结构、实库矩阵和 LLM schema 描述。
+- S7b 先冻结 stable relation contract，不直接开放 runtime 能力。
+- S7c 由 Java 先接入真实 `compileToRelation(plan, context) -> CompiledRelation` 入口。
+- S7d 只开放 relation-as-source read-only 外层查询。
+- S7e / S7f 再分别评估 outer aggregate / outer window。
+- Python 继续作为 Java snapshot consumer / mirror，不在 Java runtime contract 未冻结前抢跑能力。
 
 ## Code Inventory
 
