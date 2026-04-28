@@ -98,6 +98,7 @@ v1.4 已经让 fsscript 语法层支持 `v in (...)` / `v not in (...)`，且借
 - 总体收口：`v1.4+v1.5-overall-progress-closeout.md` — 汇总 v1.4/v1.5 主线、Python timeWindow parity、`timeWindow + calculatedFields` follow-up、CTE/compose baseline 的当前双端对齐状态与剩余遗留项。
 - `P1-timeWindow-Python-parity-progress.md` — 跟踪 Java 已签收 `timeWindow` 能力在 Python 引擎的后续对齐。当前已完成 S4 并功能级签收：`accepted-with-risks`；覆盖 DTO / MCP payload passthrough + validator + rolling/cumulative expansion IR + rolling/ytd/mtd 两层 SQL path + value/range lowering + yoy/mom/wow comparative self-join SQL path + SQLite/MySQL8/Postgres 实库矩阵；MySQL8 已补 2025 sales fact seed 并验证 yoy prior/diff/ratio 非空；验收记录见 `docs/v1.5/acceptance/P1-timeWindow-Python-parity-acceptance.md`。该 follow-up 不改变本 README 中计算字段编译器三阶段的签收结论。
 - `P1-timeWindow-calculatedFields-design-progress.md` — 记录 P3 `timeWindow + calculatedFields` 后续增强。当前已按 Java `foggy-data-mcp-bridge-wt-dev-compose` 8.4.0.beta 契约 / 8.5.0.beta 实现对齐并完成签收：Python 支持 timeWindow 输出列之上的后置 scalar calculatedFields，并保留 targetMetrics 引用 calc field、后置 agg/window/缺失列的 Java 同名错误码 fail-closed。签收记录见 `docs/v1.5/acceptance/P1-timeWindow-calculatedFields-acceptance.md`。
+- `P2-post-v1.5-followup-execution-plan.md` — 记录 v1.4/v1.5 closeout 后的非阻断项执行顺序：F-7 datasource identity contract、formula parity snapshot CI 固化、normalized SQL golden diff harness、SQL Server real DB matrix、Phase 4 AST optional，以及未来 Java 契约扩展的启动条件。
 
 ## 参考文档
 
