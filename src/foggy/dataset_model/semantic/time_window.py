@@ -198,6 +198,125 @@ class TimeWindowValidator:
         return None
 
 
+@dataclass(frozen=True)
+class TimeWindowProjectedColumn:
+    """Generated rolling/cumulative projection before SQL lowering."""
+
+    metric: str
+    alias: str
+    agg: str
+    partition_by: Tuple[str, ...]
+    order_by: Tuple[str, ...]
+    window_frame: str
+
+    def to_calculated_field(self) -> Dict[str, Any]:
+        """Return a CalculatedFieldDef-compatible dict."""
+        return {
+            "name": self.alias,
+            "expression": self.metric,
+            "agg": self.agg,
+            "partition_by": list(self.partition_by),
+            "window_order_by": [
+                {"field": field, "dir": "asc"} for field in self.order_by
+            ],
+            "window_frame": self.window_frame,
+        }
+
+
+@dataclass(frozen=True)
+class TimeWindowExpansionResult:
+    """Intermediate expansion result aligned with Java ExpansionResult."""
+
+    additional_columns: Tuple[TimeWindowProjectedColumn, ...]
+    order_by_field: str
+    partition_by_fields: Tuple[str, ...]
+    window_frame: str
+    description: str
+
+
+class TimeWindowExpander:
+    """Expand supported timeWindow modes into window projection IR."""
+
+    @classmethod
+    def expand_rolling(
+        cls,
+        tw: TimeWindowDef,
+        group_by_fields: Iterable[str],
+        measure_fields: Set[str],
+    ) -> TimeWindowExpansionResult:
+        if not tw.is_rolling():
+            raise ValueError(f"Not a rolling time window: {tw.comparison}")
+
+        n_rows = tw.rolling_window_size()
+        frame = f"ROWS BETWEEN {n_rows - 1} PRECEDING AND CURRENT ROW"
+        partition_by = tuple(_non_time_group_by_fields(tw, group_by_fields))
+        agg = (tw.rolling_aggregator or "sum").upper()
+        additional = tuple(
+            TimeWindowProjectedColumn(
+                metric=metric,
+                alias=f"{metric}__{tw.comparison}",
+                agg=agg,
+                partition_by=partition_by,
+                order_by=(tw.field,),
+                window_frame=frame,
+            )
+            for metric in _resolve_target_metrics(tw, measure_fields)
+        )
+        return TimeWindowExpansionResult(
+            additional_columns=additional,
+            order_by_field=tw.field,
+            partition_by_fields=partition_by,
+            window_frame=frame,
+            description=(
+                f"{tw.comparison} window logic via OVER("
+                f"ROWS BETWEEN {n_rows - 1} PRECEDING AND CURRENT ROW)"
+            ),
+        )
+
+    @classmethod
+    def expand_cumulative(
+        cls,
+        tw: TimeWindowDef,
+        group_by_fields: Iterable[str],
+        measure_fields: Set[str],
+    ) -> TimeWindowExpansionResult:
+        if not tw.is_cumulative():
+            raise ValueError(f"Not a cumulative time window: {tw.comparison}")
+
+        frame = "ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW"
+        partition_by = list(_non_time_group_by_fields(tw, group_by_fields))
+        base_field = _base_time_field(tw.field)
+        if tw.comparison == "ytd":
+            partition_by.append(f"{base_field}$year")
+        elif tw.comparison == "mtd":
+            partition_by.append(f"{base_field}$year")
+            partition_by.append(f"{base_field}$month")
+
+        partition_tuple = tuple(partition_by)
+        agg = (tw.rolling_aggregator or "sum").upper()
+        additional = tuple(
+            TimeWindowProjectedColumn(
+                metric=metric,
+                alias=f"{metric}__{tw.comparison}",
+                agg=agg,
+                partition_by=partition_tuple,
+                order_by=(tw.field,),
+                window_frame=frame,
+            )
+            for metric in _resolve_target_metrics(tw, measure_fields)
+        )
+        return TimeWindowExpansionResult(
+            additional_columns=additional,
+            order_by_field=tw.field,
+            partition_by_fields=partition_tuple,
+            window_frame=frame,
+            description=(
+                f"{tw.comparison} window logic via OVER("
+                "ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)"
+            ),
+        )
+
+
 def collect_time_window_field_sets(
     model: DbTableModelImpl,
 ) -> Tuple[Set[str], Set[str], Set[str]]:
@@ -255,6 +374,26 @@ def _is_aggregate_measure(measure: DbModelMeasureImpl) -> bool:
 
 def _base_time_field(field: str) -> str:
     return field.rsplit("$", 1)[0] if "$" in field else field
+
+
+def _non_time_group_by_fields(
+    tw: TimeWindowDef,
+    group_by_fields: Iterable[str],
+) -> List[str]:
+    base_field = _base_time_field(tw.field)
+    result: List[str] = []
+    for field in group_by_fields or ():
+        if not isinstance(field, str):
+            continue
+        if field != base_field and not field.startswith(f"{base_field}$"):
+            result.append(field)
+    return result
+
+
+def _resolve_target_metrics(tw: TimeWindowDef, measure_fields: Set[str]) -> List[str]:
+    if tw.target_metrics:
+        return list(tw.target_metrics)
+    return sorted(measure_fields)
 
 
 def _is_absolute_date(value: str) -> bool:
