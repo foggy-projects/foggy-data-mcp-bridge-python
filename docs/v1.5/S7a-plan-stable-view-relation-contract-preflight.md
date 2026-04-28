@@ -10,7 +10,7 @@
 
 - version: post-v1.5 follow-up
 - priority: P1 when Stage 7 is promoted
-- status: contract-draft-for-review
+- status: approved-for-java-poc
 - owner: `foggy-data-mcp-bridge-python` docs
 - java_reference_repo: `foggy-data-mcp-bridge-wt-dev-compose`
 - related_plan: `docs/v1.5/P2-post-v1.5-followup-execution-plan.md`
@@ -513,9 +513,9 @@ timeWindow plan
 - [x] 明确 `CteUnit` 不作为正式 stable relation contract。
 - [x] 正式契约草案补齐 `CompiledRelation` / `RelationSql` / `RelationCapabilities`。
 - [x] 正式契约草案补齐 CTE hoisting / SQL Server / MySQL 5.7 写法规则。
-- [ ] Java contract owner 确认现有 `OutputSchema` 是否足够承载 semantic metadata。
-- [ ] Java contract owner 确认 `CompiledRelation` / `PlanView` 与 `CteUnit` 的实现边界。
-- [ ] Java contract owner 确认 SQL Server relation wrapping / CTE hoisting 策略。
+- [x] Java contract owner 确认现有 `OutputSchema` 是否足够承载 semantic metadata。 (Confirmed)
+- [x] Java contract owner 确认 `CompiledRelation` / `PlanView` 与 `CteUnit` 的实现边界。 (Confirmed)
+- [x] Java contract owner 确认 SQL Server relation wrapping / CTE hoisting 策略。 (Confirmed)
 - [ ] Java contract owner 生成 stable relation schema snapshot。
 - [ ] Python mirror 消费 Java snapshot。
 
