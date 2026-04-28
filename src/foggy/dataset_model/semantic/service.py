@@ -40,6 +40,7 @@ from foggy.mcp_spi import (
 )
 from foggy.mcp_spi.semantic import DeniedColumn, FieldAccessDef
 from foggy.dataset_model.semantic.field_validator import (
+    extract_field_dependencies,
     validate_field_access,
     filter_response_columns,
     validate_query_fields,
@@ -878,10 +879,7 @@ class SemanticQueryService(SemanticServiceResolver):
         #    ValueError).
         # 2. Initialize ``compiled_calcs`` per-query so subsequent
         #    slice/orderBy/having/etc. can reference calc fields by name.
-        calc_field_defs: List[CalculatedFieldDef] = [
-            CalculatedFieldDef(**cf_dict) if isinstance(cf_dict, dict) else cf_dict
-            for cf_dict in request.calculated_fields
-        ]
+        calc_field_defs = self._request_calculated_field_defs(request)
         if calc_field_defs:
             calc_field_defs = sort_calc_fields_by_dependencies(calc_field_defs)
         compiled_calcs: Dict[str, str] = {}
@@ -1011,12 +1009,6 @@ class SemanticQueryService(SemanticServiceResolver):
         """
         tw, measure_fields = self._validate_time_window(model, request)
 
-        if request.calculated_fields:
-            raise NotImplementedError(
-                "TIMEWINDOW_CALCULATED_FIELDS_NOT_IMPLEMENTED: combining "
-                "timeWindow with calculatedFields is not implemented yet."
-            )
-
         requested_metric_fields = (
             list(tw.target_metrics) if tw.target_metrics else sorted(measure_fields)
         )
@@ -1108,23 +1100,13 @@ class SemanticQueryService(SemanticServiceResolver):
             "FROM __time_window_base"
         )
 
-        order_parts = self._build_time_window_outer_order_by(
+        return self._finalize_time_window_query(
+            outer_sql,
+            params,
+            warnings,
+            columns_info,
             request,
             base_field_set | set(projected_aliases),
-        )
-        if order_parts:
-            outer_sql += "\nORDER BY " + ", ".join(order_parts)
-
-        limit = min(request.limit or self._default_limit, self._max_limit)
-        outer_sql += f"\nLIMIT {limit}"
-        if request.start:
-            outer_sql += f" OFFSET {request.start}"
-
-        return QueryBuildResult(
-            sql=outer_sql,
-            params=params,
-            warnings=warnings,
-            columns=columns_info,
         )
 
     def _build_time_window_comparative_query(
@@ -1202,24 +1184,131 @@ class SemanticQueryService(SemanticServiceResolver):
             f"LEFT JOIN __time_window_base prior ON {join_condition}"
         )
 
-        order_parts = self._build_time_window_outer_order_by(
+        return self._finalize_time_window_query(
+            outer_sql,
+            params,
+            warnings,
+            columns_info,
             request,
             base_field_set | set(projected_aliases),
         )
+
+    def _finalize_time_window_query(
+        self,
+        sql: str,
+        params: List[Any],
+        warnings: List[str],
+        columns_info: List[Dict[str, Any]],
+        request: SemanticQueryRequest,
+        available_columns: set[str],
+    ) -> QueryBuildResult:
+        calc_fields = self._request_calculated_field_defs(request)
+        if not calc_fields:
+            return QueryBuildResult(
+                sql=self._apply_time_window_order_limit(sql, request, available_columns),
+                params=params,
+                warnings=warnings,
+                columns=columns_info,
+            )
+
+        self._validate_time_window_post_calculated_fields(calc_fields, available_columns)
+        calc_selects, calc_params, calc_columns = self._build_time_window_post_calc_selects(
+            calc_fields,
+            available_columns,
+        )
+        wrapped_sql = (
+            "SELECT tw_result.*, "
+            + ", ".join(calc_selects)
+            + "\nFROM (\n"
+            + self._indent_sql(sql)
+            + "\n) tw_result"
+        )
+        wrapped_available = set(available_columns)
+        wrapped_available.update(column["name"] for column in calc_columns)
+        wrapped_sql = self._apply_time_window_order_limit(
+            wrapped_sql,
+            request,
+            wrapped_available,
+        )
+        return QueryBuildResult(
+            sql=wrapped_sql,
+            params=calc_params + params,
+            warnings=warnings,
+            columns=columns_info + calc_columns,
+        )
+
+    def _apply_time_window_order_limit(
+        self,
+        sql: str,
+        request: SemanticQueryRequest,
+        available_columns: set[str],
+    ) -> str:
+        order_parts = self._build_time_window_outer_order_by(request, available_columns)
         if order_parts:
-            outer_sql += "\nORDER BY " + ", ".join(order_parts)
+            sql += "\nORDER BY " + ", ".join(order_parts)
 
         limit = min(request.limit or self._default_limit, self._max_limit)
-        outer_sql += f"\nLIMIT {limit}"
+        sql += f"\nLIMIT {limit}"
         if request.start:
-            outer_sql += f" OFFSET {request.start}"
+            sql += f" OFFSET {request.start}"
+        return sql
 
-        return QueryBuildResult(
-            sql=outer_sql,
-            params=params,
-            warnings=warnings,
-            columns=columns_info,
-        )
+    def _validate_time_window_post_calculated_fields(
+        self,
+        calc_fields: List[CalculatedFieldDef],
+        available_columns: set[str],
+    ) -> None:
+        calc_names = {cf.name for cf in calc_fields}
+        for cf in calc_fields:
+            if cf.agg:
+                raise ValueError(TimeWindowValidator.POST_CALC_FIELD_AGG_UNSUPPORTED)
+            if cf.partition_by or cf.window_order_by or cf.window_frame:
+                raise ValueError(TimeWindowValidator.POST_CALC_FIELD_WINDOW_UNSUPPORTED)
+            for ref in extract_field_dependencies(cf.expression or ""):
+                if ref not in available_columns and ref not in calc_names:
+                    raise ValueError(TimeWindowValidator.POST_CALC_FIELD_NOT_FOUND)
+
+    def _build_time_window_post_calc_selects(
+        self,
+        calc_fields: List[CalculatedFieldDef],
+        available_columns: set[str],
+    ) -> Tuple[List[str], List[Any], List[Dict[str, Any]]]:
+        sorted_fields = sort_calc_fields_by_dependencies(calc_fields)
+        compiled_calcs: Dict[str, str] = {}
+        compiled_params: Dict[str, List[Any]] = {}
+        select_parts: List[str] = []
+        params: List[Any] = []
+        columns_info: List[Dict[str, Any]] = []
+
+        for cf in sorted_fields:
+            def _resolver(name: str):
+                if name in compiled_calcs:
+                    nested_params = list(compiled_params.get(name, []))
+                    if nested_params:
+                        return f"({compiled_calcs[name]})", nested_params
+                    return f"({compiled_calcs[name]})"
+                if name in available_columns:
+                    return f"tw_result.{self._qi(name)}"
+                raise ValueError(TimeWindowValidator.POST_CALC_FIELD_NOT_FOUND)
+
+            compiled = self._get_formula_compiler().compile(cf.expression, _resolver)
+            alias = cf.alias or cf.name
+            select_parts.append(
+                f"{compiled.sql_fragment} AS {self._qi(alias)}"
+            )
+            field_params = list(compiled.bind_params)
+            params.extend(field_params)
+            compiled_calcs[cf.name] = compiled.sql_fragment
+            compiled_params[cf.name] = field_params
+            columns_info.append({
+                "name": alias,
+                "fieldName": cf.name,
+                "expression": cf.expression,
+                "aggregation": None,
+                "timeWindowPostCalculated": True,
+            })
+
+        return select_parts, params, columns_info
 
     def _time_window_comparative_aliases(self, metric_fields: List[str]) -> List[str]:
         aliases: List[str] = []
@@ -1336,6 +1425,13 @@ class SemanticQueryService(SemanticServiceResolver):
         tw = TimeWindowDef.from_map(request.time_window)
         if tw is None:
             raise ValueError("timeWindow must be an object")
+        calc_names = {cf.name for cf in self._request_calculated_field_defs(request)}
+        if calc_names and tw.target_metrics:
+            for metric in tw.target_metrics:
+                if metric in calc_names:
+                    raise ValueError(
+                        TimeWindowValidator.TARGET_CALCULATED_FIELD_UNSUPPORTED
+                    )
         available_fields, time_fields, measure_fields = collect_time_window_field_sets(model)
         error_code = TimeWindowValidator.validate(
             tw,
@@ -1346,6 +1442,33 @@ class SemanticQueryService(SemanticServiceResolver):
         if error_code is not None:
             raise ValueError(error_code)
         return tw, measure_fields
+
+    @staticmethod
+    def _request_calculated_field_defs(
+        request: SemanticQueryRequest,
+    ) -> List[CalculatedFieldDef]:
+        """Return request calculatedFields with Java camelCase keys normalised."""
+        calc_fields: List[CalculatedFieldDef] = []
+        for cf in request.calculated_fields or []:
+            if isinstance(cf, CalculatedFieldDef):
+                calc_fields.append(cf)
+                continue
+            if isinstance(cf, dict):
+                payload = dict(cf)
+                aliases = {
+                    "returnType": "return_type",
+                    "dependsOn": "depends_on",
+                    "partitionBy": "partition_by",
+                    "windowOrderBy": "window_order_by",
+                    "windowFrame": "window_frame",
+                }
+                for java_key, py_key in aliases.items():
+                    if java_key in payload and py_key not in payload:
+                        payload[py_key] = payload[java_key]
+                calc_fields.append(CalculatedFieldDef(**payload))
+                continue
+            calc_fields.append(cf)
+        return calc_fields
 
     def _build_time_window_base_sql(
         self,
@@ -1545,10 +1668,15 @@ class SemanticQueryService(SemanticServiceResolver):
         if fields:
             return self._unique_fields(fields)
 
+        calc_names = {
+            cf.name for cf in self._request_calculated_field_defs(request)
+        }
         for column in request.columns or []:
             if not isinstance(column, str):
                 continue
             base_expr = parse_column_with_alias(column).base_expr
+            if base_expr in calc_names:
+                continue
             if "__" in base_expr:
                 continue
             fields.append(base_expr)
@@ -1561,10 +1689,14 @@ class SemanticQueryService(SemanticServiceResolver):
         metric_fields: List[str],
         projected_aliases: List[str],
     ) -> List[str]:
+        calc_names = {
+            cf.name for cf in self._request_calculated_field_defs(request)
+        }
         columns = [
             parse_column_with_alias(column).base_expr
             for column in (request.columns or [])
             if isinstance(column, str)
+            and parse_column_with_alias(column).base_expr not in calc_names
         ]
         if not columns:
             columns = list(group_fields) + list(metric_fields)

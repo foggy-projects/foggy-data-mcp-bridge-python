@@ -252,6 +252,78 @@ def test_real_db_comparative_windows_execute(
         _assert_non_null_numeric(row, "salesAmount", "salesAmount__prior", "salesAmount__diff", "salesAmount__ratio")
 
 
+@pytest.mark.parametrize(
+    ("query_request", "calc_field"),
+    [
+        (
+            SemanticQueryRequest(
+                columns=[
+                    "salesDate$year",
+                    "salesDate$month",
+                    "salesAmount",
+                    "salesAmount__prior",
+                    "salesAmount__diff",
+                    "salesAmount__ratio",
+                    "growthPercent",
+                ],
+                group_by=["salesDate$year", "salesDate$month"],
+                time_window={
+                    "field": "salesDate$id",
+                    "grain": "month",
+                    "comparison": "yoy",
+                    "targetMetrics": ["salesAmount"],
+                },
+                calculated_fields=[
+                    {
+                        "name": "growthPercent",
+                        "expression": "salesAmount__ratio * 100",
+                    }
+                ],
+                order_by=[
+                    {"field": "salesDate$year", "dir": "asc"},
+                    {"field": "salesDate$month", "dir": "asc"},
+                ],
+            ),
+            "growthPercent",
+        ),
+        (
+            SemanticQueryRequest(
+                columns=[
+                    "salesDate$id",
+                    "salesAmount",
+                    "salesAmount__rolling_7d",
+                    "rollingGap",
+                ],
+                group_by=["salesDate$id"],
+                time_window={
+                    "field": "salesDate$id",
+                    "grain": "day",
+                    "comparison": "rolling_7d",
+                    "range": "[)",
+                    "value": ["20240101", "20240108"],
+                    "targetMetrics": ["salesAmount"],
+                },
+                calculated_fields=[
+                    {
+                        "name": "rollingGap",
+                        "expression": "salesAmount - salesAmount__rolling_7d",
+                    }
+                ],
+                order_by=[{"field": "salesDate$id", "dir": "asc"}],
+            ),
+            "rollingGap",
+        ),
+    ],
+)
+def test_real_db_post_calculated_fields_execute(real_db_service, query_request, calc_field):
+    response = _query(real_db_service, query_request)
+
+    assert calc_field in response.items[0]
+    for row in response.items:
+        if row[calc_field] is not None:
+            _numeric(row[calc_field])
+
+
 def test_mysql8_2025_yoy_seed_returns_non_null_prior(mysql8_service):
     response = _query(
         mysql8_service,

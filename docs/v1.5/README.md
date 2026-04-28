@@ -96,7 +96,7 @@ v1.4 已经让 fsscript 语法层支持 `v in (...)` / `v not in (...)`，且借
 ## 后续独立 parity lane
 
 - `P1-timeWindow-Python-parity-progress.md` — 跟踪 Java 已签收 `timeWindow` 能力在 Python 引擎的后续对齐。当前已完成 S4 并功能级签收：`accepted-with-risks`；覆盖 DTO / MCP payload passthrough + validator + rolling/cumulative expansion IR + rolling/ytd/mtd 两层 SQL path + value/range lowering + yoy/mom/wow comparative self-join SQL path + SQLite/MySQL8/Postgres 实库矩阵；MySQL8 已补 2025 sales fact seed 并验证 yoy prior/diff/ratio 非空；验收记录见 `docs/v1.5/acceptance/P1-timeWindow-Python-parity-acceptance.md`。该 follow-up 不改变本 README 中计算字段编译器三阶段的签收结论。
-- `P1-timeWindow-calculatedFields-design-progress.md` — 记录 P3 `timeWindow + calculatedFields` 后续增强设计。当前以 Java `foggy-data-mcp-bridge-wt-dev-compose` worktree 的 8.3.0.beta 文档为准：G6 仍 open，Python 继续 fail-closed；若后续实现，第一阶段只建议开放 timeWindow 输出列之上的后置 scalar calculatedFields。
+- `P1-timeWindow-calculatedFields-design-progress.md` — 记录 P3 `timeWindow + calculatedFields` 后续增强。当前已按 Java `foggy-data-mcp-bridge-wt-dev-compose` 8.4.0.beta 契约 / 8.5.0.beta 实现对齐：Python 支持 timeWindow 输出列之上的后置 scalar calculatedFields，并保留 targetMetrics 引用 calc field、后置 agg/window/缺失列的 Java 同名错误码 fail-closed。
 
 ## 参考文档
 

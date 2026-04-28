@@ -82,6 +82,7 @@ def test_java_time_window_happy_fixture_matches_python_sql_contract(case):
             columns=columns,
             group_by=group_by,
             time_window=case["timeWindow"],
+            calculated_fields=case.get("calculatedFields", []),
         ),
         mode="validate",
     )
@@ -104,6 +105,14 @@ def test_java_time_window_happy_fixture_matches_python_sql_contract(case):
     if case["comparison"] == "mtd":
         assert 'PARTITION BY "salesDate$year", "salesDate$month"' in sql
         assert "ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW" in sql
+    if assertions.get("postCalcFieldPresent"):
+        assert "FROM (\n" in sql
+        for calc in case.get("calculatedFields", []):
+            assert f'AS "{calc["name"]}"' in sql
+    if assertions.get("growthPercentEqualsRatioTimes100"):
+        assert 'tw_result."salesAmount__ratio"' in sql
+    if assertions.get("rollingGapEqualsAmountMinusRolling"):
+        assert 'tw_result."salesAmount__rolling_7d"' in sql
 
 
 @pytest.mark.parametrize(
@@ -118,6 +127,7 @@ def test_java_time_window_negative_fixture_matches_python_error_code(case):
             columns=["salesDate$id", "salesAmount"],
             group_by=["salesDate$id"],
             time_window=case["timeWindow"],
+            calculated_fields=case.get("calculatedFields", []),
         ),
         mode="validate",
     )

@@ -52,7 +52,7 @@
 
 - P1 matrix 已从手动探针推进为自动化 pytest 集成测试。
 - 集成测试发现并修复了 `salesDate$week` 语义字段到物理列 `week_of_year` 的真实 schema 映射问题。
-- MySQL8 / Postgres 两个引擎当前在 CTE、rolling/cumulative/comparative timeWindow 的真实执行路径均通过矩阵校验。
+- MySQL8 / Postgres 两个引擎当前在 CTE、rolling/cumulative/comparative timeWindow，以及后置 scalar calculatedFields 的真实执行路径均通过矩阵校验。
 
 ### Self-check
 
@@ -64,4 +64,4 @@
 ## 后续
 
 - P2: 建设 Java ↔ Python `timeWindow` golden output diff，覆盖 SQL shape / params / columns。
-- P3: 单独设计 `timeWindow + calculatedFields` 支持方案，当前仍按 S4 签收结论 fail-closed。
+- P3: 已按 Java 8.5.0 契约补齐后置 scalar `timeWindow + calculatedFields` 子集，并纳入本实库矩阵。

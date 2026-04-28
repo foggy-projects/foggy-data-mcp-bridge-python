@@ -548,11 +548,16 @@ def validate_query_fields(model: Any, request: Any) -> Optional[InvalidQueryFiel
         if detail:
             return detail
 
-    for _, expr in calc_exprs:
-        for dep in _extract_field_dependencies(expr):
-            detail = _check_query_field(model, dep, schema_fields, dynamic_fields)
-            if detail:
-                return detail
+    # In a timeWindow query, request-level calculatedFields are post-window
+    # projections over the generated output schema.  The service validates
+    # them against that derived schema so Java-aligned TIMEWINDOW_POST_* error
+    # codes are preserved instead of surfacing generic model-field errors.
+    if not isinstance(time_window, dict):
+        for _, expr in calc_exprs:
+            for dep in _extract_field_dependencies(expr):
+                detail = _check_query_field(model, dep, schema_fields, dynamic_fields)
+                if detail:
+                    return detail
 
     return None
 

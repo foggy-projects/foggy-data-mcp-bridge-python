@@ -187,4 +187,4 @@ Java 侧 `timeWindow` 已完成 DSL 解析、QueryPlan 编译、MySQL/MySQL8 方
 - G1 follow-up 已启动并补齐 pytest 集成矩阵：`docs/v1.5/P1-timeWindow-real-db-integration-matrix-progress.md` / `tests/integration/test_time_window_real_db_matrix.py`。当前本地 MySQL8 + Postgres demo 库实跑 13 passed；CI docker-backed profile 仍可后续独立接入。
 - Java ↔ Python `timeWindow` golden output 自动化未建设，后续两端继续演进时可补。
 - G2 follow-up 已启动：`docs/v1.5/P1-timeWindow-java-python-golden-diff-progress.md` / `tests/test_dataset_model/test_time_window_java_parity_catalog.py`。Java fixture 来源为 `foggy-data-mcp-bridge-wt-dev-compose` 的 8.3.0.beta 已签收 timeWindow parity catalog。
-- G3/P3 follow-up 已启动设计记录：`docs/v1.5/P1-timeWindow-calculatedFields-design-progress.md`。当前结论是 Java `dev-compose` G6 仍 open，Python 保持 fail-closed；首个可落地子集建议限定为 timeWindow 结果列之上的后置 scalar calculatedFields。
+- G3/P3 follow-up 已完成 Java 8.5.0 契约对齐：`docs/v1.5/P1-timeWindow-calculatedFields-design-progress.md`。Python 已支持 timeWindow 结果列之上的后置 scalar calculatedFields；`targetMetrics` 引用 calc field、后置 agg/window/缺失列仍按 Java 同名错误码 fail-closed。

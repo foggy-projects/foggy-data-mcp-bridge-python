@@ -61,6 +61,53 @@ def test_rolling_range_executes_on_sqlite(sqlite_time_window_service):
     ]
 
 
+def test_rolling_post_calculated_field_executes_on_sqlite(sqlite_time_window_service):
+    response = sqlite_time_window_service.query_model(
+        "FactSalesModel",
+        SemanticQueryRequest(
+            columns=[
+                "salesDate$id",
+                "salesAmount",
+                "salesAmount__rolling_7d",
+                "rollingGap",
+            ],
+            group_by=["salesDate$id"],
+            time_window={
+                "field": "salesDate$id",
+                "grain": "day",
+                "comparison": "rolling_7d",
+                "range": "[)",
+                "value": ["20240101", "20240104"],
+                "targetMetrics": ["salesAmount"],
+            },
+            calculated_fields=[
+                {
+                    "name": "rollingGap",
+                    "expression": "salesAmount - salesAmount__rolling_7d",
+                }
+            ],
+            order_by=[{"field": "salesDate$id", "dir": "asc"}],
+        ),
+        mode="execute",
+    )
+
+    assert response.error is None
+    assert response.params == [20240101, 20240104]
+    assert [
+        (
+            row["salesDate$id"],
+            row["salesAmount"],
+            row["salesAmount__rolling_7d"],
+            row["rollingGap"],
+        )
+        for row in response.items
+    ] == [
+        (20240101, 150.0, 150.0, 0.0),
+        (20240102, 20.0, 170.0, -150.0),
+        (20240103, 30.0, 200.0, -170.0),
+    ]
+
+
 def test_yoy_comparative_executes_on_sqlite(sqlite_time_window_service):
     response = sqlite_time_window_service.query_model(
         "FactSalesModel",
@@ -97,6 +144,49 @@ def test_yoy_comparative_executes_on_sqlite(sqlite_time_window_service):
     assert row_2024_jan["salesAmount__prior"] == 100.0
     assert row_2024_jan["salesAmount__diff"] == 100.0
     assert row_2024_jan["salesAmount__ratio"] == 1.0
+
+
+def test_yoy_post_calculated_field_executes_on_sqlite(sqlite_time_window_service):
+    response = sqlite_time_window_service.query_model(
+        "FactSalesModel",
+        SemanticQueryRequest(
+            columns=[
+                "salesDate$year",
+                "salesDate$month",
+                "salesAmount",
+                "salesAmount__prior",
+                "salesAmount__diff",
+                "salesAmount__ratio",
+                "growthPercent",
+            ],
+            group_by=["salesDate$year", "salesDate$month"],
+            time_window={
+                "field": "salesDate$id",
+                "grain": "month",
+                "comparison": "yoy",
+                "targetMetrics": ["salesAmount"],
+            },
+            calculated_fields=[
+                {
+                    "name": "growthPercent",
+                    "expression": "salesAmount__ratio * 100",
+                }
+            ],
+            order_by=[
+                {"field": "salesDate$year", "dir": "asc"},
+                {"field": "salesDate$month", "dir": "asc"},
+            ],
+        ),
+        mode="execute",
+    )
+
+    assert response.error is None
+    assert response.params == [100]
+    row_2024_jan = next(
+        row for row in response.items
+        if row["salesDate$year"] == 2024 and row["salesDate$month"] == 1
+    )
+    assert row_2024_jan["growthPercent"] == 100.0
 
 
 def _seed_time_window_db(db_path) -> None:

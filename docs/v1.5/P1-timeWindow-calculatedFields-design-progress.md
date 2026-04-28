@@ -10,29 +10,30 @@
 
 - version: v1.5 follow-up
 - priority: P3
-- status: design-recorded / blocked-by-cross-engine-contract
+- status: implemented / ready-for-review
 - source_type: post-acceptance follow-up
 - owning_repo: `foggy-data-mcp-bridge-python`
 - java_source_repo: `foggy-data-mcp-bridge-wt-dev-compose`
 - java_contract_source:
-  - `docs/8.3.0.beta/P1-SemanticDSL-时间窗口能力设计.md`
+  - `docs/8.4.0.beta/P2-timeWindow-calculatedFields-interaction-contract.md`
   - `docs/8.3.0.beta/compose-query-manuals-gap-tracker.md`
+- java_implementation_commit: `ba7831e feat(timeWindow): support post calculatedFields in timeWindow context`
 - python_upstream_acceptance: `docs/v1.5/acceptance/P1-timeWindow-Python-parity-acceptance.md`
-- related_gap: G3 / Java G6 - `timeWindow + calculatedFields` still fail-closed
+- related_gap: G3 / Java G6 - `timeWindow + calculatedFields` post scalar subset
 
 ## 背景
 
 Python v1.5 已完成计算字段编译器三阶段签收，`timeWindow` parity lane 也已完成 S4 签收和 P1/P2 follow-up。当前唯一明确未开放的组合能力是 `timeWindow + calculatedFields`：
 
-- Python runtime 当前在 `_build_time_window_query()` 中显式抛出 `TIMEWINDOW_CALCULATED_FIELDS_NOT_IMPLEMENTED`。
-- Java `dev-compose` 侧文档允许 `calculatedFields` 与 `timeWindow` 共存，但红线是 `targetMetrics` 不得引用 `calculatedFields` 中定义的字段，避免循环依赖。
-- Java gap tracker 中 G6 仍为 `open`，目标版本为 8.4.0.beta，尚未明确"计算字段先于还是后于 timeWindow 展开"。
+- Python runtime 原先在 `_build_time_window_query()` 中显式抛出 `TIMEWINDOW_CALCULATED_FIELDS_NOT_IMPLEMENTED`。
+- Java `dev-compose` 侧 8.4.0.beta 契约已定义允许/禁止矩阵，8.5.0.beta 已实现后置 scalar calculatedFields。
+- Python 本轮按 Java 8.5.0 fixture 对齐实现，保留禁止 `targetMetrics` 引用 calculatedFields、禁止二次聚合/窗口的 fail-closed 行为。
 
 ## 目标结果
 
-- 在 Java G6 正式关闭前，Python 不提前承诺完整组合能力。
-- 明确首个可落地子集：只支持 `timeWindow` 结果列之上的后置计算字段。
-- 保留当前 fail-closed 行为，直到测试矩阵和跨引擎契约足够完整。
+- 对齐 Java 8.5.0 首个可落地子集：只支持 `timeWindow` 结果列之上的后置 scalar calculatedFields。
+- 对非法组合返回 Java 同名错误码。
+- 通过 Java 17 fixture、SQLite 执行、MySQL8/Postgres 实库矩阵验证。
 
 ## 设计原则
 
@@ -131,22 +132,25 @@ Python 现有 calculatedFields 编译器主要面向模型字段解析。后置 
 
 - [x] 确认 Java source worktree：`foggy-data-mcp-bridge-wt-dev-compose`
 - [x] 读取 Java timeWindow 设计中的 calculatedFields 共存规则
-- [x] 读取 Java gap tracker G6 状态：`open` / target `8.4.0.beta`
+- [x] 读取 Java 8.4.0.beta G6 契约和 8.5.0.beta 实现 fixture
 - [x] 确认 Python 当前 fail-closed guard
 - [x] 记录 Python 分阶段设计与错误码建议
-- [ ] 等待 Java G6 契约或产品确认后进入实现
+- [x] 移除 Python 全局 fail-closed guard，改为 Java 同名细分错误码
+- [x] 实现后置 scalar calculatedFields 外层 projection
+- [x] ORDER BY / LIMIT 保持在最终层
+- [x] 同步 Java timeWindow parity catalog 至 17 cases
 
 ## 测试计划
 
-实现前应先补以下测试：
-
-- negative: `targetMetrics` 引用 request `calculatedFields.name` 时返回 `TIMEWINDOW_TARGET_CALCULATED_FIELD_UNSUPPORTED`
-- negative: 后置 calculatedFields 引用不存在的 timeWindow 输出列时返回 `TIMEWINDOW_POST_CALCULATED_FIELD_FIELD_NOT_FOUND`
-- negative: 后置 calculatedFields 带 `agg` / window 配置时显式拒绝
-- positive: comparative 结果上计算 `growthPercent = salesAmount__ratio * 100`
-- positive: rolling 结果上计算 `rollingGap = salesAmount - salesAmount__rolling_7d`
-- integration: SQLite / MySQL8 / Postgres 至少各一条后置 scalar calc 实跑
-- parity: Java G6 fixture 可用后再补 Java/Python golden catalog 扩展
+- [x] Java parity catalog: 17 cases passed, including 2 post-calc happy + 4 post-calc negative
+- [x] SQLite execution: `growthPercent = salesAmount__ratio * 100`
+- [x] SQLite execution: `rollingGap = salesAmount - salesAmount__rolling_7d`
+- [x] MySQL8/Postgres real DB matrix: post-calc YoY + rolling cases passed
+- [x] Existing timeWindow / MCP regression passed
+- [x] Existing calculatedFields regression passed
+- [x] Full Python test suite: 3298 passed / 1 skipped / 1 xfailed
+  - skipped: `tests/integration/test_formula_parity.py` requires Java `_parity_snapshot.json`, unrelated to this work
+  - xfailed: cross-datasource union live detection is an existing deferred contract
 
 ## Experience Progress
 
@@ -157,19 +161,21 @@ Python 现有 calculatedFields 编译器主要面向模型字段解析。后置 
 
 ### Completed
 
-- 当前 P3 只完成设计记录，不修改 runtime 行为。
-- Python `timeWindow + calculatedFields` 仍保持 fail-closed。
-- 设计明确以 Java `dev-compose` worktree 为契约来源，不再引用 Java main worktree。
+- Python runtime 已支持 Java 8.5.0 契约中的后置 scalar calculatedFields 子集。
+- `targetMetrics` 引用 calc field 时返回 `TIMEWINDOW_TARGET_CALCULATED_FIELD_UNSUPPORTED`。
+- 后置 calc field 引用缺失列、使用 `agg`、使用 window clause 时分别返回 Java 同名错误码。
+- timeWindow 输出 SQL 在有后置 calc 时外包 `tw_result` projection，最终层再追加 ORDER BY / LIMIT。
+- Java fixture source 明确来自 `foggy-data-mcp-bridge-wt-dev-compose`，不是 Java main worktree。
 
 ### Self-check
 
 - [x] owning repo / version path correct
 - [x] Java source worktree correct
 - [x] development progress recorded
-- [x] testing progress recorded as plan, not falsely marked passed
+- [x] testing progress recorded with passing evidence
 - [x] experience progress explicitly marked N/A
-- [x] cross-engine blocker recorded
+- [x] Java 8.5.0 contract and fixture alignment recorded
 
 ## 后续衔接
 
-推荐下一步先做 Java G6 契约收口或产品侧场景确认。若要 Python 先行实现，只建议以 feature-flag 或 fail-closed 子集方式开放"后置 scalar calculatedFields"，并在文档中标注为 Python provisional behavior。
+后续如 Java 开放二次聚合、二次窗口或 calculatedFields 作为 targetMetrics 输入，Python 需另开 follow-up；当前实现只签收 Java 8.5.0 的后置 scalar 子集。

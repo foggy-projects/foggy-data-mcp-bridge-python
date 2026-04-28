@@ -15,11 +15,13 @@
 - owning_repo: `foggy-data-mcp-bridge-python`
 - java_source_repo: `foggy-data-mcp-bridge-wt-dev-compose`
 - java_acceptance: `docs/8.3.0.beta/acceptance/P1-SemanticDSL-TimeWindow-Java-acceptance.md`
+- java_followup_contract: `docs/8.4.0.beta/P2-timeWindow-calculatedFields-interaction-contract.md`
+- java_followup_commit: `ba7831e feat(timeWindow): support post calculatedFields in timeWindow context`
 - related_gap: G2 - Java/Python `timeWindow` golden output automation not built
 
 ## 目标
 
-- 固化 Java 8.3.0.beta 已签收的 11 个 `timeWindow` parity fixture，作为 Python 回归输入。
+- 固化 Java 已签收/后续实现的 17 个 `timeWindow` parity fixture，作为 Python 回归输入。
 - Python 正例校验输出列、窗口 frame、comparative self-join、ratio null guard 等关键 SQL 语义。
 - Python 反例校验 Java 对齐错误码，避免未来两端 validator 兼容矩阵漂移。
 
@@ -30,12 +32,13 @@
 - [x] 读取 Java parity fixture：`foggy-dataset-model/src/test/resources/parity/timeWindow/*.json`
 - [x] 在 Python repo 固化 fixture snapshot：`tests/fixtures/java_time_window_parity_catalog.json`
 - [x] 新增 golden catalog 测试：`tests/test_dataset_model/test_time_window_java_parity_catalog.py`
+- [x] 扩展到 Java 8.5.0 `timeWindow + calculatedFields` 6 个新增 fixture
 
 ## 测试进度
 
 - [x] `python -m pytest tests/test_dataset_model/test_time_window_java_parity_catalog.py -q`
-  - result: 11 passed
-  - coverage: Java 8.3.0.beta 11 fixture snapshot; 7 happy + 4 negative
+  - result: 17 passed
+  - coverage: Java 8.3.0.beta + 8.5.0.beta 17 fixture snapshot; includes 2 post-calc happy + 4 post-calc negative
 - [x] `python -m pytest tests/test_dataset_model/test_time_window.py tests/test_dataset_model/test_time_window_sqlite_execution.py tests/test_mcp/test_java_alignment.py -q`
   - result: 63 passed
   - coverage: existing timeWindow SQL preview, SQLite execution, MCP Java alignment
@@ -60,11 +63,11 @@
 
 - [x] fixture snapshot 记录了 Java source repo / version / acceptance path
 - [x] 未修改 Java worktree
-- [x] 未扩大到 `timeWindow + calculatedFields`
+- [x] 已按 Java 8.5.0 契约扩大到后置 scalar `timeWindow + calculatedFields`
 - [x] focused tests passed
 - [x] progress writeback completed after test run
 
 ## 后续
 
 - 若 Java 后续生成稳定 SQL golden 文件，可把当前结构断言升级为逐条 normalized SQL diff。
-- P3: 单独设计 `timeWindow + calculatedFields` 支持方案。
+- 若 Java 后续开放二次聚合/窗口或 targetMetrics 输入 calc field，需新增 fixture 后再对齐。
