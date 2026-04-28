@@ -542,6 +542,8 @@ class FsscriptLexer:
             TokenType.LPAREN,
             TokenType.IN,
             TokenType.LIKE,
+            TokenType.IS,       # SQL: x IS NULL
+            TokenType.BETWEEN,  # SQL: x BETWEEN a AND b
         )
 
     def _cannot_continue_statement(self, token_type: TokenType) -> bool:

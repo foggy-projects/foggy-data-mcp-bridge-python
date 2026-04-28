@@ -104,9 +104,11 @@ SQL_EXPRESSION_DIALECT: FsscriptDialect = FsscriptDialect(
     name="sql-expression",
     # 移除 `if` 保留字 → 让 `if(...)` 走 IDENTIFIER token 路径，被 parser
     # 识别为普通 FunctionCallExpression(function=VariableExpression('if'))。
+    # 移除 `between` 保留字 → formula 场景用 `between(age, 18, 65)` 函数形态
+    # （Stage 6 新增 BETWEEN keyword 会与此冲突，需在 formula dialect 中解保留）。
     # 其他控制流关键字（switch / for / while / try / ...）保持保留字身份，
     # 因为 SQL formula 表达式上下文不需要它们作为函数名。
-    keywords_override={"if": None},
+    keywords_override={"if": None, "between": None},
 )
 """SQL 表达式方言：用于 formula compiler / calculated field 等需要
 ``if(c, a, b)`` 函数形态的场景。

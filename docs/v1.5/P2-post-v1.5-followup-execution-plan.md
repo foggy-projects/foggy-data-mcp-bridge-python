@@ -183,9 +183,9 @@ Implementation:
 
 ### Stage 6 - Phase 4 AST optional
 
-- status: optional / wait
+- status: **complete**
 - priority: P3
-- trigger: 决定将 `use_ast_expression_compiler` 默认切到 True，或出现必须 AST-only 才能安全支持的新语法
+- delivered: `docs/v1.5/S6-phase4-ast-expression-compiler-progress.md`
 
 Requirement:
 
@@ -193,11 +193,18 @@ Requirement:
 - `+` 运算符按操作数类型区分字符串拼接和数值加法。
 - 评估 char tokenizer fallback 是否可以下线。
 
+Delivered:
+
+- IS [NOT] NULL / [NOT] BETWEEN / [NOT] LIKE / CAST(x AS type) 原生 AST 编译。
+- `+` 保守字符串字面量推断（StringExpression → dialect concat）。
+- char tokenizer fallback 仅剩 `EXTRACT(YEAR FROM d)` 和显式 `CASE WHEN ... END`。
+- 102 AST 测试通过，3356 全量回归 0 失败。
+
 Acceptance:
 
 - AST path 覆盖现有 SQL-specific expression catalog。
 - MySQL / Postgres / SQLite / SQL Server 方言函数和字符串拼接单测通过。
-- 默认 flag 变更需要单独质量闸门和覆盖审计。
+- 默认 flag 变更需要单独质量闸门和覆盖审计（未翻转，保持 False）。
 
 ### Stage 7 - Future Java contract expansion
 

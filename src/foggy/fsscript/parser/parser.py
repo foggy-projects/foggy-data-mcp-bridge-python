@@ -16,6 +16,12 @@ from foggy.fsscript.parser.errors import (
     InvalidSyntaxError,
 )
 from foggy.fsscript.expressions.base import Expression
+from foggy.fsscript.expressions.sql_predicates import (
+    IsNullExpression,
+    BetweenExpression,
+    LikeExpression,
+    CastExpression,
+)
 from foggy.fsscript.expressions.literals import (
     LiteralExpression,
     NullExpression,
@@ -106,6 +112,8 @@ PRECEDENCE = {
     TokenType.LIKE: 11,
     TokenType.IN: 11,
     TokenType.INSTANCEOF: 11,
+    TokenType.IS: 11,        # SQL: IS [NOT] NULL
+    TokenType.BETWEEN: 11,   # SQL: [NOT] BETWEEN x AND y
 
     # Addition/Subtraction
     TokenType.PLUS: 12,
@@ -972,15 +980,15 @@ class FsscriptParser:
             # NOT 本身没有中缀优先级（只作前缀逻辑非），默认会让外层循环退出；
             # 这里需要识别 NOT + IN 的组合，按 IN 的优先级（11）处理。
             if current.type == TokenType.NOT:
-                IN_PREC = PRECEDENCE.get(TokenType.IN, 11)
-                if IN_PREC <= min_prec:
+                COMP_PREC = PRECEDENCE.get(TokenType.IN, 11)
+                if COMP_PREC <= min_prec:
                     break
                 saved = self._save_state()
                 self._advance()  # 试探消费 NOT
                 if self._check(TokenType.IN):
                     not_token = saved["current_token"]
                     self._advance()  # 消费 IN
-                    right = self._parse_in_rhs(IN_PREC)
+                    right = self._parse_in_rhs(COMP_PREC)
                     left = BinaryExpression(
                         left=left,
                         operator=BinaryOperator.NOT_IN,
@@ -989,7 +997,19 @@ class FsscriptParser:
                         column=not_token.column,
                     )
                     continue
-                # 不是 NOT IN —— 回滚，让循环退出把 NOT 留给外层处理
+                # NOT BETWEEN x AND y
+                if self._check(TokenType.BETWEEN):
+                    not_token = saved["current_token"]
+                    self._advance()  # 消费 BETWEEN
+                    left = self._parse_between_rhs(left, not_token, negated=True)
+                    continue
+                # NOT LIKE pattern
+                if self._check(TokenType.LIKE):
+                    not_token = saved["current_token"]
+                    self._advance()  # 消费 LIKE
+                    left = self._parse_like_rhs(left, not_token, negated=True)
+                    continue
+                # 不是 NOT IN / NOT BETWEEN / NOT LIKE —— 回滚
                 self._restore_state(saved)
                 break
 
@@ -1080,6 +1100,10 @@ class FsscriptParser:
         # Typeof
         if token.type == TokenType.TYPEOF:
             return self._parse_typeof()
+
+        # CAST(expr AS type) — SQL prefix keyword function
+        if token.type == TokenType.CAST:
+            return self._parse_cast()
 
         # Spread (in array context)
         if token.type == TokenType.DOT_DOT_DOT:
@@ -1178,6 +1202,18 @@ class FsscriptParser:
                 column=token.column,
             )
 
+        # SQL: IS [NOT] NULL
+        if token.type == TokenType.IS:
+            return self._parse_is_rhs(left, token)
+
+        # SQL: BETWEEN low AND high
+        if token.type == TokenType.BETWEEN:
+            return self._parse_between_rhs(left, token, negated=False)
+
+        # SQL: LIKE pattern (positive case; NOT LIKE handled in the NOT-lookahead block)
+        if token.type == TokenType.LIKE:
+            return self._parse_like_rhs(left, token, negated=False)
+
         raise InvalidSyntaxError(f"Unknown infix operator: {token.type.name}")
 
     def _parse_in_rhs(self, prec: int) -> Expression:
@@ -1221,6 +1257,103 @@ class FsscriptParser:
 
         # `[1, 2, 3]` 或任意表达式走常规路径
         return self._parse_expression_with_precedence(prec)
+
+    # -- SQL predicate helpers (Stage 6 / Phase 4) ----------------------- #
+
+    def _parse_is_rhs(self, left: Expression, is_token: Token) -> Expression:
+        """Parse ``IS [NOT] NULL`` after the IS token has been consumed."""
+        negated = False
+        if self._check(TokenType.NOT):
+            self._advance()
+            negated = True
+        self._expect(TokenType.NULL, "Expected NULL after IS [NOT]")
+        return IsNullExpression(
+            operand=left,
+            negated=negated,
+            line=is_token.line,
+            column=is_token.column,
+        )
+
+    def _parse_between_rhs(
+        self, left: Expression, token: Token, *, negated: bool
+    ) -> Expression:
+        """Parse ``BETWEEN low AND high`` after BETWEEN has been consumed."""
+        # Parse `low` at a high enough precedence to stop before AND.
+        # We parse as a prefix + limited-precedence expression so that
+        # `BETWEEN 1+2 AND 10` correctly binds `1+2` as the low bound.
+        # Precedence 11 is comparison level; arithmetic (12/13) binds tighter.
+        low = self._parse_expression_with_precedence(
+            PRECEDENCE.get(TokenType.AND, 6)
+        )
+        self._expect(TokenType.AND, "Expected AND in BETWEEN expression")
+        high = self._parse_expression_with_precedence(
+            PRECEDENCE.get(TokenType.AND, 6)
+        )
+        return BetweenExpression(
+            operand=left,
+            low=low,
+            high=high,
+            negated=negated,
+            line=token.line,
+            column=token.column,
+        )
+
+    def _parse_like_rhs(
+        self, left: Expression, token: Token, *, negated: bool
+    ) -> Expression:
+        """Parse ``LIKE pattern`` after LIKE has been consumed."""
+        pattern = self._parse_expression_with_precedence(
+            PRECEDENCE.get(TokenType.LIKE, 11)
+        )
+        return LikeExpression(
+            operand=left,
+            pattern=pattern,
+            negated=negated,
+            line=token.line,
+            column=token.column,
+        )
+
+    def _parse_cast(self) -> Expression:
+        """Parse ``CAST(expr AS type_name)``.
+
+        Called from ``_parse_prefix`` when the current token is ``CAST``.
+        """
+        cast_token = self._advance()  # consume CAST keyword token
+        self._expect(TokenType.LPAREN, "Expected '(' after CAST")
+        expr = self.parse_expression()
+        self._expect(TokenType.AS, "Expected AS in CAST expression")
+        # Read type name: may be compound, e.g. ``INTEGER``, ``VARCHAR(100)``,
+        # ``DOUBLE PRECISION``.  Consume identifier tokens and optional
+        # parenthesized args.
+        type_parts = []
+        if not self._check(TokenType.IDENTIFIER):
+            raise InvalidSyntaxError("Expected type name after CAST ... AS")
+        type_parts.append(self._advance().value)
+        # Allow multi-word types like ``DOUBLE PRECISION``
+        while self._check(TokenType.IDENTIFIER):
+            type_parts.append(self._advance().value)
+        # Optional parenthesized precision: VARCHAR(100), DECIMAL(10, 2)
+        if self._check(TokenType.LPAREN):
+            self._advance()
+            inner = []
+            while not self._check(TokenType.RPAREN):
+                if self._check(TokenType.EOF):
+                    raise UnexpectedEndOfInputError("Expected ')' in CAST type precision")
+                token = self._advance()
+                if token.type == TokenType.COMMA:
+                    inner.append(", ")
+                else:
+                    inner.append(str(token.value))
+            self._expect(TokenType.RPAREN)
+            type_parts[-1] = f"{type_parts[-1]}({''.join(inner)})"
+        self._expect(TokenType.RPAREN, "Expected ')' after CAST expression")
+        type_name = " ".join(type_parts)
+        return CastExpression(
+            operand=expr,
+            type_name=type_name,
+            line=cast_token.line,
+            column=cast_token.column,
+        )
 
     def _parse_postfix(self, left: Expression) -> Expression:
         """Parse postfix expression (call, member access, etc.)."""

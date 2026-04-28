@@ -5,6 +5,10 @@ v1.5 Phase 3 — Architectural alignment with Java's ``CalculatedFieldService`` 
 ``SemanticQueryService._render_expression`` tokenizer for the subset of
 expressions the Python fsscript parser can handle.
 
+v1.5 Stage 6 / Phase 4 — Extended to natively compile SQL-specific
+predicates (``IS NULL``, ``BETWEEN``, ``LIKE``, ``CAST``) and added
+conservative ``+`` operator type inference for string concatenation.
+
 Scope
 -----
 SUPPORTED AST nodes (raises ``AstCompileError`` for anything else):
@@ -27,12 +31,17 @@ SUPPORTED AST nodes (raises ``AstCompileError`` for anything else):
     by :func:`_preprocess_if` before parsing
 
 UNSUPPORTED (calls ``AstCompileError`` to trigger fallback):
+  - ``EXTRACT(YEAR FROM expr)`` — handled by dialect YEAR() rewrite
+  - Explicit ``CASE WHEN ... END`` syntax (already handled via ``IF()``
+    and ternary ``a ? b : c``)
   - Anything else (assignment, function def, return, block, for/while, etc.)
 
-Expression kinds the Python fsscript parser **cannot** currently parse
-(``IS NULL``, ``BETWEEN``, ``LIKE``, ``CAST (x AS type)``, SQL ``CASE
-WHEN ... END``) do not reach this module at all — the caller catches the
-parser error and falls back to the character-level tokenizer.
+SQL-SPECIFIC PREDICATES (Stage 6 / Phase 4 additions):
+  - ``expr IS NULL`` / ``expr IS NOT NULL`` → ``IsNullExpression``
+  - ``expr BETWEEN low AND high`` → ``BetweenExpression``
+  - ``expr NOT BETWEEN low AND high`` → ``BetweenExpression(negated=True)``
+  - ``expr LIKE pattern`` / ``expr NOT LIKE pattern`` → ``LikeExpression``
+  - ``CAST(expr AS type)`` → ``CastExpression``
 """
 
 from __future__ import annotations
@@ -60,6 +69,12 @@ from foggy.fsscript.expressions.variables import (
     MemberAccessExpression,
 )
 from foggy.fsscript.expressions.functions import FunctionCallExpression
+from foggy.fsscript.expressions.sql_predicates import (
+    IsNullExpression,
+    BetweenExpression,
+    LikeExpression,
+    CastExpression,
+)
 from foggy.fsscript.parser import FsscriptParser
 from foggy.fsscript.parser.errors import ParseError
 from foggy.fsscript.parser.tokens import TokenType
@@ -232,6 +247,15 @@ class FsscriptToSqlVisitor:
         if isinstance(node, LiteralExpression):
             # Generic literal fallback (not typically hit for NUMBER/STRING)
             return self._emit_literal(node.value)
+        # SQL-specific predicate nodes (Stage 6 / Phase 4)
+        if isinstance(node, IsNullExpression):
+            return self._visit_is_null(node)
+        if isinstance(node, BetweenExpression):
+            return self._visit_between(node)
+        if isinstance(node, LikeExpression):
+            return self._visit_like(node)
+        if isinstance(node, CastExpression):
+            return self._visit_cast(node)
 
         raise AstCompileError(
             f"AST node not supported by SQL visitor: {type(node).__name__}"
@@ -400,6 +424,19 @@ class FsscriptToSqlVisitor:
         # same SQL string is embedded as a sub-expression elsewhere.
         left_sql = self._maybe_wrap(node.left, left_sql)
         right_sql = self._maybe_wrap(node.right, right_sql)
+
+        # Stage 6: Conservative `+` type inference for string concatenation.
+        # If either operand is a string literal, route through dialect concat
+        # instead of emitting SQL `+` (which is numeric in most dialects).
+        if sql_op == "+" and (
+            isinstance(node.left, StringExpression)
+            or isinstance(node.right, StringExpression)
+        ):
+            dialect = getattr(self.service, "_dialect", None)
+            if dialect is not None and hasattr(dialect, "get_string_concat_sql"):
+                return dialect.get_string_concat_sql(left_sql, right_sql)
+            return f"{left_sql} || {right_sql}"
+
         return f"{left_sql} {sql_op} {right_sql}"
 
     def _emit_in_rhs(self, node: Any) -> str:
@@ -577,3 +614,26 @@ class FsscriptToSqlVisitor:
         if dialect is not None and hasattr(dialect, "get_string_concat_sql"):
             return dialect.get_string_concat_sql(*parts_sql)
         return " || ".join(parts_sql)
+
+    # -- SQL predicate handlers (Stage 6 / Phase 4) ---------------------- #
+
+    def _visit_is_null(self, node: IsNullExpression) -> str:
+        sql = self.visit(node.operand)
+        return f"{sql} IS NOT NULL" if node.negated else f"{sql} IS NULL"
+
+    def _visit_between(self, node: BetweenExpression) -> str:
+        sql = self.visit(node.operand)
+        low = self.visit(node.low)
+        high = self.visit(node.high)
+        op = "NOT BETWEEN" if node.negated else "BETWEEN"
+        return f"{sql} {op} {low} AND {high}"
+
+    def _visit_like(self, node: LikeExpression) -> str:
+        sql = self.visit(node.operand)
+        pattern = self.visit(node.pattern)
+        op = "NOT LIKE" if node.negated else "LIKE"
+        return f"{sql} {op} {pattern}"
+
+    def _visit_cast(self, node: CastExpression) -> str:
+        sql = self.visit(node.operand)
+        return f"CAST({sql} AS {node.type_name})"

@@ -93,6 +93,11 @@ class TokenType(Enum):
     TYPEOF = auto()      # typeof
     INSTANCEOF = auto()  # instanceof
 
+    # SQL-specific keywords (Stage 6 / Phase 4)
+    IS = auto()          # IS NULL / IS NOT NULL
+    BETWEEN = auto()     # BETWEEN x AND y
+    CAST = auto()        # CAST(x AS type)
+
     # Operators - Update
     INCREMENT = auto()   # ++
     DECREMENT = auto()   # --
@@ -174,6 +179,10 @@ KEYWORDS: dict[str, TokenType] = {
     "request": TokenType.REQUEST,
     "typeof": TokenType.TYPEOF,
     "instanceof": TokenType.INSTANCEOF,
+    # SQL-specific keywords (Stage 6 / Phase 4)
+    "is": TokenType.IS,
+    "between": TokenType.BETWEEN,
+    "cast": TokenType.CAST,
 }
 
 
