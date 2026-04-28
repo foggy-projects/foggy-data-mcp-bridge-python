@@ -31,7 +31,8 @@ Java 侧 `timeWindow` 已完成 DSL 解析、QueryPlan 编译、MySQL/MySQL8 方
 - 已接入 rolling / cumulative 的两层 SQL preview / execution path：内层按时间粒度聚合，外层做窗口投影。
 - 已接入 rolling / cumulative 路径上的 `value` / `range` lowering：`[)` / `[]` 会进入 base CTE 的时间字段过滤，并通过 bind params 传参。
 - 已接入 comparative period 的 base CTE self-join path：yoy / mom / wow 输出 `__prior` / `__diff` / `__ratio` 派生列。
-- 已补真实 DB 执行矩阵第一轮：SQLite 自动化实跑覆盖 rolling range + yoy；本地 MySQL8 / Postgres demo 库手动探针覆盖 rolling range + yoy 自连接。
+- 已补真实 DB 执行矩阵：SQLite 自动化实跑覆盖 rolling range + yoy；本地 MySQL8 / Postgres demo 库手动探针覆盖 rolling range + yoy 自连接。
+- 已通过 MySQL8 2025 sales fact seed 复核 yoy 非空 prior/diff/ratio，避免只验证 SQL 可执行但 prior 全为空。
 
 ## 非目标
 
@@ -71,10 +72,12 @@ Java 侧 `timeWindow` 已完成 DSL 解析、QueryPlan 编译、MySQL/MySQL8 方
   - MySQL8 / Postgres 本地 demo 库通过 `SemanticQueryService + Executor` 真实执行 rolling range 和 yoy 自连接
   - 修复 executor 未显式传 dialect 时 MySQL timeWindow CTE alias 使用 ANSI 双引号的问题，改为从 `MySQLExecutor / PostgreSQLExecutor / SQLiteExecutor` 自动推断方言
   - 修复 Postgres strict bind 下 compact date key 被解析成字符串导致 integer 参数不匹配的问题，date-like `$id` + `*_key` 自动绑定为整数
+  - MySQL8 demo 侧补充确定性 2025 `fact_sales` seed 脚本：`foggy-data-mcp-bridge/foggy-dataset-demo/docker/mysql/init/04-seed-2025-sales.sql`（commit `9f63739`）
 - [x] S3c. Comparative period SQL path
   - yoy / mom / wow 使用 base CTE self-join 展开，不复用 rolling/cumulative 窗口 IR
   - compare period 输出 `metric__prior` / `metric__diff` / `metric__ratio`
   - `validate_query_fields` 已识别 comparative 派生列，避免预校验误拒
+  - 质量复核修复 wow/week join 条件与模型 week 字段缺口，防止周粒度比较退化或字段不可用（commit `479ca3a`）
 - [ ] S4. 覆盖审计与验收
   - 回补 QueryPlan 单测、SQL 快照测试和必要的集成测试
   - 进入 coverage audit / acceptance signoff
@@ -91,7 +94,7 @@ Java 侧 `timeWindow` 已完成 DSL 解析、QueryPlan 编译、MySQL/MySQL8 方
   - result: 2 passed
   - coverage: SQLite real execution for rolling range and yoy comparative period
 - [x] `python -m pytest tests/test_dataset_model/test_time_window.py tests/test_dataset_model/test_time_window_sqlite_execution.py tests/test_dataset_model/test_window_functions.py tests/test_mcp/test_java_alignment.py -q`
-  - result: 85 passed
+  - result: 86 passed
   - coverage: timeWindow S3b.2/S3c + SQLite real execution + existing calculatedFields window functions + MCP Java alignment
 - [x] `python -m pytest tests/test_dataset_model/test_sql_quoting_and_errors.py tests/test_dataset_model/test_conditional_aggregate_if_alignment.py -q`
   - result: 37 passed
@@ -99,6 +102,7 @@ Java 侧 `timeWindow` 已完成 DSL 解析、QueryPlan 编译、MySQL/MySQL8 方
 - [x] Real DB / dialect parity probes
   - SQLite: automated pytest, rolling range returns expected daily window sums; yoy Jan 2024 returns current/prior/diff/ratio
   - MySQL8: local `foggy-demo-mysql8` (`localhost:13308`, MySQL 8.0.44), rolling range returned 7 rows with numeric rolling values; yoy self-join executed successfully
+  - MySQL8 2025 seed verification: `fact_sales` has 3179 `TW2025%` rows, `date_key` range `20250101..20250331`; Python `SemanticQueryService` yoy query returned 3 rows for 2025 with non-null `salesAmount__prior`, `salesAmount__diff`, and `salesAmount__ratio`
   - Postgres: local `foggy-demo-postgres` (`localhost:15432`, PostgreSQL 15.17), rolling range returned 7 rows with numeric rolling values; yoy self-join executed successfully
 
 ## Experience Progress
@@ -119,10 +123,12 @@ Java 侧 `timeWindow` 已完成 DSL 解析、QueryPlan 编译、MySQL/MySQL8 方
 - Python 已补 rolling / ytd / mtd 两层 SQL 生成路径，避免单层聚合窗口混用。
 - Python 已补 rolling / cumulative 路径上的 `value` / `range` lowering，支持 `[)` / `[]` 和 absolute / relative / now 值解析。
 - Python 已补 yoy / mom / wow comparative self-join SQL path，输出 prior / diff / ratio 派生列。
+- Python 质量复核已修复 wow/week 语义对齐问题，并补齐 demo model 的 `salesDate$week` 字段暴露。
 - `validate_query_fields` 已识别 timeWindow 动态列，Java 风格 columns 不再被预校验误拒。
 - Python 已补 timeWindow SQLite 自动化实库测试，并完成 MySQL8 / Postgres 本地 demo 库真实执行探针。
 - `SemanticQueryService` 已支持从 executor 自动推断 SQL dialect，MySQL 执行链路不再因为双引号 alias 生成错误结果或语法错误。
 - compact date key 的 timeWindow range bind params 已按 date-like `$id` / `*_key` 转为整数，避免 Postgres asyncpg 严格参数类型报错。
+- Java/demo 仓库已新增 MySQL8 2025 `fact_sales` 确定性 seed 脚本，Python 实库 yoy 已验证 2025 prior 不再为空。
 
 ### Touched Code Areas
 
@@ -131,6 +137,7 @@ Java 侧 `timeWindow` 已完成 DSL 解析、QueryPlan 编译、MySQL/MySQL8 方
 - `src/foggy/dataset_model/semantic/time_window.py`
 - `src/foggy/dataset_model/semantic/field_validator.py`
 - `src/foggy/dataset_model/semantic/service.py`
+- `src/foggy/demo/models/ecommerce_models.py`
 - `tests/test_mcp/test_java_alignment.py`
 - `tests/test_dataset_model/test_time_window.py`
 - `tests/test_dataset_model/test_time_window_sqlite_execution.py`
@@ -149,18 +156,19 @@ Java 侧 `timeWindow` 已完成 DSL 解析、QueryPlan 编译、MySQL/MySQL8 方
 - [x] S3b.1 lowers `value` / `range` into base CTE time filters with bind params
 - [x] S3b.2 real DB execution covered for SQLite automated path and MySQL8/Postgres local demo probes
 - [x] S3c lowers comparative period into base CTE self-join SQL
+- [x] quality review fix for wow/week parity verified by focused tests
+- [x] MySQL8 2025 seed verified with non-null yoy prior/diff/ratio through Python service
 - [x] calculatedFields combination still fails closed
 - [x] focused tests passed
 - [x] remaining coverage audit / acceptance work recorded explicitly
 
 ### Acceptance Readiness
 
-- current_stage: S3b.2/S3c ready-for-review
+- current_stage: S3b.2/S3c implementation + quality-fix verified; S4 coverage audit pending
 - overall_item: not-ready-for-acceptance
-- reason: implementation and first real DB matrix are ready for review; full closure still requires coverage audit and formal acceptance signoff.
+- reason: implementation, quality fix, and real DB evidence are ready for review; full closure still requires coverage audit and formal acceptance signoff.
 
 ## 遗留项
 
 - 需进入 coverage audit / acceptance signoff，将 requirement、测试证据和真实 DB 探针结果做正式映射。
-- MySQL8 demo 数据当前只含 2024 年销售事实，yoy self-join 能执行但 prior 为 null；SQLite 自动化夹具已覆盖非 null prior/diff/ratio 断言。
 - Java 已签收，Python parity 后续应单独验收，不能借 Java 结论直接关闭。
