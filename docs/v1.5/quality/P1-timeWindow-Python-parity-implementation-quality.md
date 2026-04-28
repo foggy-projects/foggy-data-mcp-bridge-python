@@ -63,7 +63,7 @@ follow_up_required: no
 ## Risks / Follow-ups
 
 - MySQL8 / Postgres 实库验证目前是本地探针，不是 CI 自动化矩阵。该风险属于测试证据层面，交由 coverage audit 评估。
-- `timeWindow + calculatedFields` 仍 fail-closed，是当前记录的非目标，不作为质量阻断。
+- Historical note: this gate was produced before the later `timeWindow + calculatedFields` follow-up. That follow-up is now implemented and has its own quality record at `docs/v1.5/quality/P1-timeWindow-calculatedFields-implementation-quality.md`.
 
 ## Recommended Next Skills
 
@@ -75,4 +75,3 @@ follow_up_required: no
 - decision: `ready-for-coverage-audit`
 - blocker: none
 - follow_up_required: no
-

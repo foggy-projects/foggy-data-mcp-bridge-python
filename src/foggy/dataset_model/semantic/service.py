@@ -1204,8 +1204,14 @@ class SemanticQueryService(SemanticServiceResolver):
     ) -> QueryBuildResult:
         calc_fields = self._request_calculated_field_defs(request)
         if not calc_fields:
+            order_aliases = self._time_window_order_aliases(columns_info)
             return QueryBuildResult(
-                sql=self._apply_time_window_order_limit(sql, request, available_columns),
+                sql=self._apply_time_window_order_limit(
+                    sql,
+                    request,
+                    available_columns,
+                    order_aliases,
+                ),
                 params=params,
                 warnings=warnings,
                 columns=columns_info,
@@ -1225,10 +1231,12 @@ class SemanticQueryService(SemanticServiceResolver):
         )
         wrapped_available = set(available_columns)
         wrapped_available.update(column["name"] for column in calc_columns)
+        order_aliases = self._time_window_order_aliases(columns_info + calc_columns)
         wrapped_sql = self._apply_time_window_order_limit(
             wrapped_sql,
             request,
             wrapped_available,
+            order_aliases,
         )
         return QueryBuildResult(
             sql=wrapped_sql,
@@ -1242,8 +1250,13 @@ class SemanticQueryService(SemanticServiceResolver):
         sql: str,
         request: SemanticQueryRequest,
         available_columns: set[str],
+        order_aliases: Optional[Dict[str, str]] = None,
     ) -> str:
-        order_parts = self._build_time_window_outer_order_by(request, available_columns)
+        order_parts = self._build_time_window_outer_order_by(
+            request,
+            available_columns,
+            order_aliases or {},
+        )
         if order_parts:
             sql += "\nORDER BY " + ", ".join(order_parts)
 
@@ -1309,6 +1322,21 @@ class SemanticQueryService(SemanticServiceResolver):
             })
 
         return select_parts, params, columns_info
+
+    def _time_window_order_aliases(
+        self,
+        columns_info: List[Dict[str, Any]],
+    ) -> Dict[str, str]:
+        alias_map: Dict[str, str] = {}
+        for column in columns_info:
+            name = column.get("name")
+            field_name = column.get("fieldName")
+            if not name:
+                continue
+            alias_map[name] = name
+            if field_name:
+                alias_map[field_name] = name
+        return alias_map
 
     def _time_window_comparative_aliases(self, metric_fields: List[str]) -> List[str]:
         aliases: List[str] = []
@@ -1726,13 +1754,15 @@ class SemanticQueryService(SemanticServiceResolver):
         self,
         request: SemanticQueryRequest,
         available_columns: set[str],
+        order_aliases: Dict[str, str],
     ) -> List[str]:
         order_parts: List[str] = []
         for item in request.order_by or []:
             field_name = self._time_window_field_name(item)
             if not field_name:
                 continue
-            if field_name not in available_columns:
+            order_column = order_aliases.get(field_name, field_name)
+            if order_column not in available_columns:
                 raise ValueError(
                     f"TIMEWINDOW_ORDER_FIELD_NOT_AVAILABLE: order field "
                     f"{field_name!r} is not produced by the timeWindow plan."
@@ -1743,7 +1773,7 @@ class SemanticQueryService(SemanticServiceResolver):
             direction_upper = str(direction).upper()
             if direction_upper not in {"ASC", "DESC"}:
                 direction_upper = "ASC"
-            order_parts.append(f"{self._qi(field_name)} {direction_upper}")
+            order_parts.append(f"{self._qi(order_column)} {direction_upper}")
         return order_parts
 
     @staticmethod

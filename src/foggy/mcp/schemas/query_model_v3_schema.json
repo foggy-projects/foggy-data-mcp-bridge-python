@@ -13,7 +13,7 @@
       "properties": {
         "calculatedFields": {
           "type": "array",
-          "description": "计算字段定义（复杂表达式、窗口函数或需指定 agg 时使用）",
+          "description": "计算字段定义（复杂表达式、窗口函数或需指定 agg 时使用）。与 timeWindow 联用时，只支持作用于 timeWindow 输出列的后置标量表达式，不要设置 agg 或窗口字段。",
           "items": {
             "type": "object",
             "properties": {
@@ -123,7 +123,7 @@
         },
         "timeWindow": {
           "type": "object",
-          "description": "声明式时间窗口分析。用于同环比、累计、滚动窗口；优先于手写窗口 calculatedFields。派生列会自动生成，可在 columns 中引用，如 salesAmount__prior、salesAmount__diff、salesAmount__ratio、salesAmount__rolling_7d、salesAmount__mtd、salesAmount__ytd。",
+          "description": "声明式时间窗口分析。用于同环比、累计、滚动窗口；优先于手写窗口 calculatedFields。派生列会自动生成，可在 columns 中引用，如 salesAmount__prior、salesAmount__diff、salesAmount__ratio、salesAmount__rolling_7d、salesAmount__mtd、salesAmount__ytd。可再用后置标量 calculatedFields 引用这些派生列，例如 growthPercent = salesAmount__ratio * 100；targetMetrics 不可引用 calculatedFields，后置 calculatedFields 不支持 agg 或窗口字段。",
           "properties": {
             "field": {
               "type": "string",

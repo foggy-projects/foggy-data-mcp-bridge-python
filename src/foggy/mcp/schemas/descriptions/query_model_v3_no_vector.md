@@ -62,6 +62,46 @@
 
 *常用数学函数如 ABS、ROUND、FLOOR、CEIL 等均支持*
 
+### timeWindow (可选)
+声明式时间窗口分析。遇到同比、环比、周同比、年初至今、月累计、滚动 7/30/90 天这类需求，优先使用 `timeWindow`，不要手写窗口 SQL。
+
+```json
+{
+  "columns": ["salesDate$id", "salesAmount", "salesAmount__rolling_7d"],
+  "groupBy": ["salesDate$id"],
+  "timeWindow": {
+    "field": "salesDate$id",
+    "grain": "day",
+    "comparison": "rolling_7d",
+    "targetMetrics": ["salesAmount"]
+  }
+}
+```
+
+派生列命名：
+- 同环比：`{metric}__prior`、`{metric}__diff`、`{metric}__ratio`
+- 累计：`{metric}__ytd`、`{metric}__mtd`
+- 滚动：`{metric}__rolling_7d`、`{metric}__rolling_30d`、`{metric}__rolling_90d`
+
+可在 timeWindow 结果列之上追加后置标量 `calculatedFields`：
+```json
+{
+  "columns": ["salesDate$year", "salesDate$month", "salesAmount__ratio", "growthPercent"],
+  "groupBy": ["salesDate$year", "salesDate$month"],
+  "timeWindow": {
+    "field": "salesDate$id",
+    "grain": "month",
+    "comparison": "yoy",
+    "targetMetrics": ["salesAmount"]
+  },
+  "calculatedFields": [
+    {"name": "growthPercent", "expression": "salesAmount__ratio * 100"}
+  ]
+}
+```
+
+限制：`timeWindow.targetMetrics` 不可引用 calculatedFields；后置 calculatedFields 只能是标量表达式，不要设置 `agg`、`partitionBy`、`windowOrderBy`、`windowFrame`。
+
 **条件聚合推荐写法**：
 - 条件计数：`sum(if(stage$caption == 'Won', 1, 0)) as wonCount`
 - 条件求和：`sum(if(state == 'sale', amountTotal, 0)) as confirmedAmount`

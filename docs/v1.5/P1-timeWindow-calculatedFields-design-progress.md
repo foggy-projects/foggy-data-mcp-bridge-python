@@ -10,7 +10,7 @@
 
 - version: v1.5 follow-up
 - priority: P3
-- status: implemented / ready-for-review
+- status: signed-off
 - source_type: post-acceptance follow-up
 - owning_repo: `foggy-data-mcp-bridge-python`
 - java_source_repo: `foggy-data-mcp-bridge-wt-dev-compose`
@@ -20,6 +20,16 @@
 - java_implementation_commit: `ba7831e feat(timeWindow): support post calculatedFields in timeWindow context`
 - python_upstream_acceptance: `docs/v1.5/acceptance/P1-timeWindow-Python-parity-acceptance.md`
 - related_gap: G3 / Java G6 - `timeWindow + calculatedFields` post scalar subset
+
+## Acceptance Status
+
+- acceptance_status: signed-off
+- acceptance_decision: accepted
+- signed_off_by: execution-agent
+- signed_off_at: 2026-04-28
+- acceptance_record: docs/v1.5/acceptance/P1-timeWindow-calculatedFields-acceptance.md
+- blocking_items: none
+- follow_up_required: no
 
 ## 背景
 
@@ -139,16 +149,21 @@ Python 现有 calculatedFields 编译器主要面向模型字段解析。后置 
 - [x] 实现后置 scalar calculatedFields 外层 projection
 - [x] ORDER BY / LIMIT 保持在最终层
 - [x] 同步 Java timeWindow parity catalog 至 17 cases
+- [x] 质量闸门修复 post calculatedField `alias` 场景下按计算字段 `name` 排序的兼容缺口
+- [x] 完成测试覆盖审计
+- [x] 完成功能签收
+- [x] 同步 LLM-facing query_model v3 schema / descriptions
 
 ## 测试计划
 
 - [x] Java parity catalog: 17 cases passed, including 2 post-calc happy + 4 post-calc negative
 - [x] SQLite execution: `growthPercent = salesAmount__ratio * 100`
 - [x] SQLite execution: `rollingGap = salesAmount - salesAmount__rolling_7d`
+- [x] SQLite execution: post calculatedField declares `alias`, `orderBy.field` uses calc `name`, final SQL orders by output alias
 - [x] MySQL8/Postgres real DB matrix: post-calc YoY + rolling cases passed
 - [x] Existing timeWindow / MCP regression passed
 - [x] Existing calculatedFields regression passed
-- [x] Full Python test suite: 3298 passed / 1 skipped / 1 xfailed
+- [x] Full Python test suite: 3299 passed / 1 skipped / 1 xfailed
   - skipped: `tests/integration/test_formula_parity.py` requires Java `_parity_snapshot.json`, unrelated to this work
   - xfailed: cross-datasource union live detection is an existing deferred contract
 
@@ -166,6 +181,15 @@ Python 现有 calculatedFields 编译器主要面向模型字段解析。后置 
 - 后置 calc field 引用缺失列、使用 `agg`、使用 window clause 时分别返回 Java 同名错误码。
 - timeWindow 输出 SQL 在有后置 calc 时外包 `tw_result` projection，最终层再追加 ORDER BY / LIMIT。
 - Java fixture source 明确来自 `foggy-data-mcp-bridge-wt-dev-compose`，不是 Java main worktree。
+- 质量闸门已完成：`docs/v1.5/quality/P1-timeWindow-calculatedFields-implementation-quality.md`。
+- 覆盖审计已完成：`docs/v1.5/coverage/P1-timeWindow-calculatedFields-coverage-audit.md`。
+- 功能签收已完成：`docs/v1.5/acceptance/P1-timeWindow-calculatedFields-acceptance.md`。
+- post calculatedField `alias` 场景下，`orderBy.field` 可继续使用 calc `name`，最终 SQL 会映射到输出 alias。
+- LLM-facing docs 已同步：
+  - `src/foggy/mcp/schemas/query_model_v3_schema.json`
+  - `src/foggy/mcp/schemas/descriptions/query_model_v3.md`
+  - `src/foggy/mcp/schemas/descriptions/query_model_v3_no_vector.md`
+  - `src/foggy/mcp/schemas/descriptions/query_model_v3_basic.md`
 
 ### Self-check
 
@@ -175,7 +199,11 @@ Python 现有 calculatedFields 编译器主要面向模型字段解析。后置 
 - [x] testing progress recorded with passing evidence
 - [x] experience progress explicitly marked N/A
 - [x] Java 8.5.0 contract and fixture alignment recorded
+- [x] implementation quality gate completed
+- [x] coverage audit completed
+- [x] acceptance signoff completed
+- [x] LLM-facing schema / descriptions synced
 
 ## 后续衔接
 
-后续如 Java 开放二次聚合、二次窗口或 calculatedFields 作为 targetMetrics 输入，Python 需另开 follow-up；当前实现只签收 Java 8.5.0 的后置 scalar 子集。
+当前 follow-up 已签收。后续如 Java 开放二次聚合、二次窗口或 calculatedFields 作为 targetMetrics 输入，Python 需另开 follow-up；当前实现只签收 Java 8.5.0 的后置 scalar 子集。

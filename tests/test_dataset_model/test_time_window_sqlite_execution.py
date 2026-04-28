@@ -189,6 +189,40 @@ def test_yoy_post_calculated_field_executes_on_sqlite(sqlite_time_window_service
     assert row_2024_jan["growthPercent"] == 100.0
 
 
+def test_time_window_post_calculated_field_alias_is_orderable(sqlite_time_window_service):
+    response = sqlite_time_window_service.query_model(
+        "FactSalesModel",
+        SemanticQueryRequest(
+            columns=[
+                "salesDate$year",
+                "salesDate$month",
+                "salesAmount__ratio",
+                "growthPercent",
+            ],
+            group_by=["salesDate$year", "salesDate$month"],
+            time_window={
+                "field": "salesDate$id",
+                "grain": "month",
+                "comparison": "yoy",
+                "targetMetrics": ["salesAmount"],
+            },
+            calculated_fields=[
+                {
+                    "name": "growthPercent",
+                    "alias": "growth_pct",
+                    "expression": "salesAmount__ratio * 100",
+                }
+            ],
+            order_by=[{"field": "growthPercent", "dir": "desc"}],
+        ),
+        mode="execute",
+    )
+
+    assert response.error is None
+    assert 'ORDER BY "growth_pct" DESC' in response.sql
+    assert response.items[0]["growth_pct"] == 100.0
+
+
 def _seed_time_window_db(db_path) -> None:
     conn = sqlite3.connect(db_path)
     try:

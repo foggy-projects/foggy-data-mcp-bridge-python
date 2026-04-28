@@ -19,7 +19,7 @@
 ## 目标
 
 - 将 S4 签收时的 MySQL8 / Postgres 手动探针固化为可重复执行的 pytest integration matrix。
-- 覆盖 rolling range、ytd/mtd cumulative、yoy/mom/wow comparative period，以及 MySQL8 2025 yoy seed 非空 prior/diff/ratio。
+- 覆盖 rolling range、ytd/mtd cumulative、yoy/mom/wow comparative period、后置 scalar calculatedFields，以及 MySQL8 2025 yoy seed 非空 prior/diff/ratio。
 - 数据库不可用时跳过对应用例；数据库可用时必须执行真实 SQL 并校验结果。
 
 ## 开发进度
@@ -36,15 +36,17 @@
   - SQLite fixture 改为 `week_of_year`，保持与 Java/demo 数据库 schema 一致。
 - [x] 累计窗口排序参数收敛
   - ytd/mtd 集成测试统一按 `group_by` 排序，避免向 `SemanticQueryRequest` 传入 `None`。
+- [x] 补齐后置 scalar calculatedFields 实库矩阵
+  - MySQL8 / Postgres 分别执行 YoY `growthPercent` 与 rolling `rollingGap`。
 
 ## 测试进度
 
 - [x] `python -m pytest tests/integration/test_time_window_real_db_matrix.py -q`
-  - result: 13 passed
-  - coverage: MySQL8 + Postgres rolling range / ytd / mtd / yoy / mom / wow / MySQL8 2025 yoy seed
+  - result: 17 passed
+  - coverage: MySQL8 + Postgres rolling range / ytd / mtd / yoy / mom / wow / post scalar calculatedFields / MySQL8 2025 yoy seed
 - [x] `python -m pytest tests/test_dataset_model/test_time_window.py tests/test_dataset_model/test_time_window_sqlite_execution.py tests/test_mcp/test_java_alignment.py -q`
-  - result: 63 passed
-  - coverage: SQL preview, SQLite execution, MCP Java alignment
+  - result: covered by latest combined regression in `P1-timeWindow-calculatedFields-design-progress.md`
+  - coverage: SQL preview, SQLite execution, MCP Java alignment, post-calc alias order-by regression
 
 ## Execution Check-in
 

@@ -91,6 +91,25 @@
 - 累计：`{metric}__ytd`、`{metric}__mtd`
 - 滚动：`{metric}__rolling_7d`、`{metric}__rolling_30d`、`{metric}__rolling_90d`
 
+可在 timeWindow 结果列之上追加后置标量 `calculatedFields`，用于增长率百分比、滚动差值等行级计算：
+```json
+{
+  "columns": ["salesDate$year", "salesDate$month", "salesAmount__ratio", "growthPercent"],
+  "groupBy": ["salesDate$year", "salesDate$month"],
+  "timeWindow": {
+    "field": "salesDate$id",
+    "grain": "month",
+    "comparison": "yoy",
+    "targetMetrics": ["salesAmount"]
+  },
+  "calculatedFields": [
+    {"name": "growthPercent", "expression": "salesAmount__ratio * 100"}
+  ]
+}
+```
+
+限制：`timeWindow.targetMetrics` 不可引用 calculatedFields；后置 calculatedFields 只能是标量表达式，不要设置 `agg`、`partitionBy`、`windowOrderBy`、`windowFrame`。
+
 **条件聚合推荐写法**：
 - 条件计数：`sum(if(stage$caption == 'Won', 1, 0)) as wonCount`
 - 条件求和：`sum(if(state == 'sale', amountTotal, 0)) as confirmedAmount`

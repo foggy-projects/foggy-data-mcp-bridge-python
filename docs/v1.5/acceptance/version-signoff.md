@@ -135,3 +135,12 @@ evidence_count: 11
 - acceptance_record: docs/v1.5/acceptance/version-signoff.md
 - blocking_items: none
 - follow_up_required: no
+
+## Post-Signoff Addendum
+
+- addendum_date: 2026-04-28
+- addendum_scope: v1.5 后续 parity lane 收口，不改变 2026-04-20 Phase 1 / Phase 2 / Phase 3 版本签收结论
+- timeWindow_parity: 已完成并签收，见 `docs/v1.5/acceptance/P1-timeWindow-Python-parity-acceptance.md`
+- timeWindow_calculatedFields: 已按 Java `foggy-data-mcp-bridge-wt-dev-compose` 8.4.0.beta 契约 / 8.5.0.beta runtime fixture 对齐并签收，见 `docs/v1.5/acceptance/P1-timeWindow-calculatedFields-acceptance.md`
+- overall_closeout: `docs/v1.5/v1.4+v1.5-overall-progress-closeout.md`
+- current_summary: Python 与 Java 在当前文档定义的 CTE baseline、timeWindow signed-off subset、后置 scalar calculatedFields subset 上已对齐；剩余项均记录为 Phase 4 optional、长期基础设施或未来契约扩展。

@@ -54,6 +54,36 @@
 
 *常用数学函数如 ABS、ROUND、FLOOR、CEIL 等均支持*
 
+### timeWindow (可选)
+声明式时间窗口分析。同比、环比、周同比、年初至今、月累计、滚动 7/30/90 天优先使用 `timeWindow`。
+
+```json
+{
+  "columns": ["salesDate$id", "salesAmount", "salesAmount__rolling_7d"],
+  "groupBy": ["salesDate$id"],
+  "timeWindow": {
+    "field": "salesDate$id",
+    "grain": "day",
+    "comparison": "rolling_7d",
+    "targetMetrics": ["salesAmount"]
+  }
+}
+```
+
+派生列：`{metric}__prior`、`{metric}__diff`、`{metric}__ratio`、`{metric}__ytd`、`{metric}__mtd`、`{metric}__rolling_7d`。
+
+timeWindow 结果列可再接后置标量 `calculatedFields`：
+```json
+{
+  "columns": ["salesDate$year", "salesDate$month", "salesAmount__ratio", "growthPercent"],
+  "groupBy": ["salesDate$year", "salesDate$month"],
+  "timeWindow": {"field": "salesDate$id", "grain": "month", "comparison": "yoy", "targetMetrics": ["salesAmount"]},
+  "calculatedFields": [{"name": "growthPercent", "expression": "salesAmount__ratio * 100"}]
+}
+```
+
+限制：`targetMetrics` 不可引用 calculatedFields；后置 calculatedFields 不能设置 `agg` 或窗口字段。
+
 **条件聚合推荐写法**：
 - 条件计数：`sum(if(stage$caption == 'Won', 1, 0)) as wonCount`
 - 条件求和：`sum(if(state == 'sale', amountTotal, 0)) as confirmedAmount`
