@@ -128,4 +128,4 @@ Fixed 5 trailing blank line issues from Stage 1 that `git diff --check` flagged:
   - experience impact: N/A, backend regression infrastructure only
 - self_check_conclusion: self-check-only is sufficient for Stage 2 because no product semantics changed; formal acceptance can be compact evidence-based signoff if required.
 - acceptance_readiness: ready for acceptance; only external CI workflow wiring remains out of scope.
-- consolidated_quality_gate: `docs/v1.5/quality/S1-S2-post-v1.5-followup-implementation-quality.md`, decision `ready-with-risks` because Stage 1 Java mirror remains pending.
+- consolidated_quality_gate: `docs/v1.5/quality/S1-S2-post-v1.5-followup-implementation-quality.md`; original decision was `ready-with-risks` before Stage 1 Java mirror, and Java mirror follow-up is now closed by `f918343`.
