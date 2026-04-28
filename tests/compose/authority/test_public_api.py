@@ -1,6 +1,6 @@
 """Smoke: ``foggy.dataset_model.engine.compose.authority`` public API stability.
 
-The subpackage exports five symbols. If any of them disappear or rename,
+The subpackage exports six symbols. If any of them disappear or rename,
 downstream consumers (foggy-odoo-bridge-pro's ``OdooEmbeddedAuthorityResolver``
 integration, the script runner, future REST bridges) break at import time.
 Lock that surface here so drift is caught in unit tests rather than in
@@ -17,6 +17,7 @@ def test_public_exports_present():
     assert hasattr(authority, "ModelInfoProvider")
     assert hasattr(authority, "NullModelInfoProvider")
     assert hasattr(authority, "collect_base_models")
+    assert hasattr(authority, "collect_datasource_ids")
     assert hasattr(authority, "resolve_authority_for_plan")
     assert hasattr(authority, "apply_field_access_to_schema")
 
@@ -29,6 +30,7 @@ def test_all_matches_documented_set():
             "ModelInfoProvider",
             "NullModelInfoProvider",
             "collect_base_models",
+            "collect_datasource_ids",
             "resolve_authority_for_plan",
             "apply_field_access_to_schema",
         ]

@@ -164,3 +164,40 @@ def make_fixed_resolver():
         return _FixedBindingResolver(mapping)
 
     return _make
+
+
+# ---------------------------------------------------------------------------
+# F-7 · Datasource-aware ModelInfoProvider for cross-datasource tests
+# ---------------------------------------------------------------------------
+
+
+class _DatasourceAwareProvider:
+    """Returns configurable datasource IDs per model name.
+
+    Use in F-7 cross-datasource tests where we need to verify that the
+    compiler rejects union / join plans spanning multiple datasources.
+    """
+
+    def __init__(self, datasource_map: Dict[str, Optional[str]]) -> None:
+        self._datasource_map = datasource_map
+
+    def get_tables_for_model(
+        self, model_name: str, namespace: str
+    ) -> List[str]:
+        return []
+
+    def get_datasource_id(
+        self, model_name: str, namespace: str
+    ) -> Optional[str]:
+        return self._datasource_map.get(model_name)
+
+
+@pytest.fixture
+def make_ds_provider():
+    """Factory fixture: tests call ``make_ds_provider({"A": "ds1", "B": "ds2"})``
+    to get a ``ModelInfoProvider`` with configured datasource IDs."""
+
+    def _make(datasource_map: Dict[str, Optional[str]]):
+        return _DatasourceAwareProvider(datasource_map)
+
+    return _make

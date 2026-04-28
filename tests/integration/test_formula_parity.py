@@ -152,21 +152,120 @@ def test_normalizer_collapses_java_python_equivalent_shapes() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Java snapshot compare (optional — enabled when Java side has produced it)
+# Java snapshot compare (enabled when Java side has produced it)
 # --------------------------------------------------------------------------- #
 
+# Stage 2 (P2-post-v1.5): snapshot CI solidification.
+#
+# Artifact contract:
+#   - Java produces the snapshot by running:
+#       mvn test -pl foggy-dataset-model -Dtest=FormulaParitySnapshotTest
+#     This writes to:
+#       1. ../foggy-data-mcp-bridge-python/tests/integration/_parity_snapshot.json
+#          (cross-repo direct write — works when both repos live under the same
+#          foggy-data-mcp workspace)
+#       2. target/parity/_parity_snapshot.json (local copy for CI artifact upload)
+#
+#   - Python consumes the committed snapshot at the path below.
+#
+#   - In CI, either:
+#     (a) Both repos are checked out under the same workspace and the Java job
+#         runs first, writing the snapshot directly, OR
+#     (b) The Java job uploads target/parity/_parity_snapshot.json as an artifact
+#         and the Python job downloads it to tests/integration/ before running.
+#
+#   - The committed snapshot in git serves as a fallback and drift-detection
+#     baseline. When the catalog changes, the Java test must be re-run to
+#     regenerate; the drift check below catches staleness.
+#
+# Regeneration command (run from the Java worktree root):
+#   mvn test -pl foggy-dataset-model -Dtest=FormulaParitySnapshotTest
 
 _SNAPSHOT_PATH = Path(__file__).with_name("_parity_snapshot.json")
+
+_REGEN_HINT = (
+    "_parity_snapshot.json not present — regenerate by running:\n"
+    "  cd <java-worktree>\n"
+    "  mvn test -pl foggy-dataset-model -Dtest=FormulaParitySnapshotTest\n"
+    "See docs/v1.5/S2-formula-parity-snapshot-ci-progress.md for details."
+)
 
 
 def _load_snapshot() -> dict:
     if not _SNAPSHOT_PATH.exists():
-        pytest.skip(
-            "_parity_snapshot.json not present — regenerate by running "
-            "`mvn test -pl foggy-dataset-model "
-            "-Dtest=FormulaParitySnapshotTest` on the Java side"
-        )
+        pytest.skip(_REGEN_HINT)
     return json.loads(_SNAPSHOT_PATH.read_text(encoding="utf-8"))
+
+
+def test_snapshot_schema_integrity() -> None:
+    """Stage 2: committed snapshot has valid schema and expected source."""
+    snapshot = _load_snapshot()
+    assert snapshot.get("schema_version") == "1", (
+        "snapshot schema_version must be '1'; got "
+        f"{snapshot.get('schema_version')!r}"
+    )
+    assert snapshot.get("source") == "FormulaParitySnapshotTest", (
+        "snapshot source must be 'FormulaParitySnapshotTest'; got "
+        f"{snapshot.get('source')!r}"
+    )
+    snapshots = snapshot.get("snapshots", [])
+    assert len(snapshots) >= 30, (
+        f"snapshot has {len(snapshots)} entries, expected >= 30 "
+        "(per M5 Step 5.1 quota)"
+    )
+
+
+def test_snapshot_covers_full_catalog() -> None:
+    """Stage 2: every non-java_skip catalog entry appears in the snapshot.
+
+    Detects staleness: when new expressions are added to the catalog but
+    the Java snapshot has not been regenerated, this test fails with a
+    clear list of missing ids.
+    """
+    snapshot = _load_snapshot()
+    snapshot_ids = {row["id"] for row in snapshot.get("snapshots", [])}
+
+    catalog_ids = {
+        e["id"] for e in _CATALOG
+        if not e.get("java_skip", False)
+    }
+    missing = sorted(catalog_ids - snapshot_ids)
+    assert not missing, (
+        f"committed snapshot is stale — missing {len(missing)} catalog entries: "
+        f"{missing}. Regenerate by running:\n"
+        "  mvn test -pl foggy-dataset-model -Dtest=FormulaParitySnapshotTest"
+    )
+
+
+def test_committed_snapshot_not_hand_edited() -> None:
+    """Stage 2: every snapshot entry has exactly the expected fields and
+    corresponds to a catalog entry — hand-edits would add unknown fields or
+    orphan ids.
+    """
+    snapshot = _load_snapshot()
+    catalog_ids = {e["id"] for e in _CATALOG}
+    expected_fields = {"id", "expression", "dialect", "sql_normalized"}
+
+    orphans = []
+    bad_fields = []
+    for row in snapshot.get("snapshots", []):
+        rid = row.get("id", "<missing-id>")
+        if rid not in catalog_ids:
+            orphans.append(rid)
+        actual_fields = set(row.keys())
+        # bind_params is optional (Java currently doesn't emit it)
+        extra = actual_fields - expected_fields - {"bind_params"}
+        if extra:
+            bad_fields.append(f"[{rid}] unexpected fields: {extra}")
+
+    issues = []
+    if orphans:
+        issues.append(f"orphan snapshot entries not in catalog: {orphans}")
+    if bad_fields:
+        issues.append("hand-edited fields:\n  " + "\n  ".join(bad_fields))
+    assert not issues, (
+        "snapshot integrity check failed:\n  " + "\n  ".join(issues)
+    )
 
 
 def test_parity_matches_java_snapshot() -> None:

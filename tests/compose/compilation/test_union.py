@@ -5,9 +5,8 @@ layer — NOT through ``CteComposer`` (which is ON-condition-driven and
 for joins). Union is column-aligned; M4 already validated the column
 count match, so M6 only emits the SQL.
 
-``CROSS_DATASOURCE_REJECTED`` is tested via the error-code string
-assertion and mock path per D5; real cross-datasource detection is
-deferred to F-7 follow-up.
+``CROSS_DATASOURCE_REJECTED`` is tested via real compile-time detection
+using a datasource-aware ``ModelInfoProvider`` (F-7 post-v1.5 Stage 1).
 """
 from __future__ import annotations
 
@@ -139,10 +138,11 @@ class TestUnionMultipleWay:
 
 
 class TestUnionCrossDatasourceRejectedContract:
-    """D5 decision — CROSS_DATASOURCE_REJECTED defined but not live-detected.
+    """F-7 — CROSS_DATASOURCE_REJECTED live detection via ModelInfoProvider.
 
-    These tests verify the error contract is constructible and the code
-    is a valid namespace member. Real live-detection is deferred to F-7.
+    The error code was defined in M6; real detection was deferred to F-7
+    (post-v1.5 Stage 1). These tests verify the compile-time detection
+    path using a datasource-aware ``ModelInfoProvider``.
     """
 
     def test_error_code_constructible(self):
@@ -162,18 +162,137 @@ class TestUnionCrossDatasourceRejectedContract:
             == "compose-compile-error/cross-datasource-rejected"
         )
 
-    @pytest.mark.xfail(
-        reason=(
-            "cross-datasource detection deferred to post-M6 · F-7 "
-            "(requires ModelBinding.datasource_id or "
-            "ModelInfoProvider.get_datasource_id — neither exists yet in "
-            "M1/M5 frozen contract)"
-        ),
-        strict=True,
-    )
-    def test_cross_datasource_live_detection_via_real_plan(self):
-        """Flag xfail: live detection on a real cross-DS plan would
-        require a ModelBinding shape we haven't shipped yet."""
-        raise AssertionError(
-            "placeholder — live detection arrives in F-7"
+    def test_cross_datasource_live_detection_via_real_plan(
+        self, svc, ctx, make_ds_provider
+    ):
+        """F-7: live detection on a real cross-datasource plan raises
+        CROSS_DATASOURCE_REJECTED when the provider reports different
+        datasource IDs for the two models."""
+        provider = make_ds_provider({
+            "FactSalesModel": "mysql_main",
+            "FactOrderModel": "pg_analytics",
+        })
+        a = from_(model="FactSalesModel", columns=["orderStatus$caption", "salesAmount"])
+        b = from_(model="FactOrderModel", columns=["orderStatus$caption", "totalAmount"])
+        u = a.union(b)
+        with pytest.raises(ComposeCompileError) as exc_info:
+            compile_plan_to_sql(
+                u, ctx,
+                semantic_service=svc,
+                model_info_provider=provider,
+                dialect="mysql8",
+            )
+        assert exc_info.value.code == error_codes.CROSS_DATASOURCE_REJECTED
+        assert exc_info.value.phase == "plan-lower"
+        assert "mysql_main" in exc_info.value.message
+        assert "pg_analytics" in exc_info.value.message
+
+    def test_same_datasource_union_passes(
+        self, svc, ctx, make_ds_provider
+    ):
+        """F-7: union of two models on the SAME datasource compiles normally."""
+        provider = make_ds_provider({
+            "FactSalesModel": "mysql_main",
+            "FactOrderModel": "mysql_main",
+        })
+        a = from_(model="FactSalesModel", columns=["orderStatus$caption", "salesAmount"])
+        b = from_(model="FactOrderModel", columns=["orderStatus$caption", "totalAmount"])
+        u = a.union(b)
+        composed = compile_plan_to_sql(
+            u, ctx,
+            semantic_service=svc,
+            model_info_provider=provider,
+            dialect="mysql8",
         )
+        assert "UNION" in composed.sql
+
+    def test_unknown_datasource_permissive(
+        self, svc, ctx, make_ds_provider
+    ):
+        """F-7: when one or both models have None datasource ID (unknown),
+        the check is permissive — no rejection."""
+        provider = make_ds_provider({
+            "FactSalesModel": "mysql_main",
+            "FactOrderModel": None,  # unknown
+        })
+        a = from_(model="FactSalesModel", columns=["orderStatus$caption", "salesAmount"])
+        b = from_(model="FactOrderModel", columns=["orderStatus$caption", "totalAmount"])
+        u = a.union(b)
+        composed = compile_plan_to_sql(
+            u, ctx,
+            semantic_service=svc,
+            model_info_provider=provider,
+            dialect="mysql8",
+        )
+        assert "UNION" in composed.sql
+
+    def test_both_unknown_datasource_permissive(
+        self, svc, ctx, make_ds_provider
+    ):
+        """F-7: when both models have None datasource ID, no rejection."""
+        provider = make_ds_provider({
+            "FactSalesModel": None,
+            "FactOrderModel": None,
+        })
+        a = from_(model="FactSalesModel", columns=["orderStatus$caption", "salesAmount"])
+        b = from_(model="FactOrderModel", columns=["orderStatus$caption", "totalAmount"])
+        u = a.union(b)
+        composed = compile_plan_to_sql(
+            u, ctx,
+            semantic_service=svc,
+            model_info_provider=provider,
+            dialect="mysql8",
+        )
+        assert "UNION" in composed.sql
+
+    def test_no_provider_no_rejection(self, svc, ctx, base_sales, base_orders):
+        """F-7: backward-compatible — when no provider is given, the
+        cross-datasource check is skipped entirely."""
+        u = base_sales.union(base_orders)
+        composed = compile_plan_to_sql(
+            u, ctx, semantic_service=svc, dialect="mysql8",
+        )
+        assert "UNION" in composed.sql
+
+    def test_three_way_cross_datasource_rejected(
+        self, svc, ctx, make_ds_provider
+    ):
+        """F-7: 3-way union with a datasource mismatch in the nested
+        union is caught at the outermost union level."""
+        provider = make_ds_provider({
+            "FactSalesModel": "ds_alpha",
+            "FactOrderModel": "ds_alpha",
+            "FactPaymentModel": "ds_beta",
+        })
+        a = from_(model="FactSalesModel", columns=["orderStatus$caption", "salesAmount"])
+        b = from_(model="FactOrderModel", columns=["orderStatus$caption", "totalAmount"])
+        c = from_(model="FactPaymentModel", columns=["payMethod$caption", "payAmount"])
+        u = a.union(b).union(c)
+        with pytest.raises(ComposeCompileError) as exc_info:
+            compile_plan_to_sql(
+                u, ctx,
+                semantic_service=svc,
+                model_info_provider=provider,
+                dialect="mysql8",
+            )
+        assert exc_info.value.code == error_codes.CROSS_DATASOURCE_REJECTED
+
+    def test_union_all_cross_datasource_rejected(
+        self, svc, ctx, make_ds_provider
+    ):
+        """F-7: UNION ALL also triggers cross-datasource detection."""
+        provider = make_ds_provider({
+            "FactSalesModel": "ds1",
+            "FactOrderModel": "ds2",
+        })
+        a = from_(model="FactSalesModel", columns=["orderStatus$caption", "salesAmount"])
+        b = from_(model="FactOrderModel", columns=["orderStatus$caption", "totalAmount"])
+        u = a.union(b, all=True)
+        with pytest.raises(ComposeCompileError) as exc_info:
+            compile_plan_to_sql(
+                u, ctx,
+                semantic_service=svc,
+                model_info_provider=provider,
+                dialect="mysql8",
+            )
+        assert exc_info.value.code == error_codes.CROSS_DATASOURCE_REJECTED

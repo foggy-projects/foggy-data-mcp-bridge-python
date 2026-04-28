@@ -190,3 +190,110 @@ class TestJoinSQLiteFullOuterRejected:
             j, ctx, semantic_service=svc, dialect="postgres"
         )
         assert "FULL OUTER JOIN" in composed.sql
+
+
+# ===========================================================================
+# F-7 · Cross-datasource rejection for join
+# ===========================================================================
+
+
+class TestJoinCrossDatasourceRejected:
+    """F-7 — CROSS_DATASOURCE_REJECTED for JoinPlan (post-v1.5 Stage 1).
+
+    Mirrors the union cross-datasource tests in ``test_union.py``.
+    """
+
+    def test_cross_datasource_join_rejected(
+        self, svc, ctx, make_ds_provider
+    ):
+        """F-7: inner join across two different datasources raises
+        CROSS_DATASOURCE_REJECTED."""
+        provider = make_ds_provider({
+            "FactSalesModel": "mysql_main",
+            "FactOrderModel": "pg_analytics",
+        })
+        a = from_(model="FactSalesModel", columns=["orderStatus$caption", "salesAmount"])
+        b = from_(model="FactOrderModel", columns=["orderStatus$caption", "totalAmount"])
+        on = [JoinOn(left="orderStatus", op="=", right="orderStatus")]
+        j = a.join(b, type="inner", on=on)
+        with pytest.raises(ComposeCompileError) as exc_info:
+            compile_plan_to_sql(
+                j, ctx,
+                semantic_service=svc,
+                model_info_provider=provider,
+                dialect="mysql8",
+            )
+        assert exc_info.value.code == error_codes.CROSS_DATASOURCE_REJECTED
+        assert exc_info.value.phase == "plan-lower"
+
+    def test_same_datasource_join_passes(
+        self, svc, ctx, make_ds_provider
+    ):
+        """F-7: join of two models on the SAME datasource compiles normally."""
+        provider = make_ds_provider({
+            "FactSalesModel": "mysql_main",
+            "FactOrderModel": "mysql_main",
+        })
+        a = from_(model="FactSalesModel", columns=["orderStatus$caption", "salesAmount"])
+        b = from_(model="FactOrderModel", columns=["orderStatus$caption", "totalAmount"])
+        on = [JoinOn(left="orderStatus", op="=", right="orderStatus")]
+        j = a.join(b, type="inner", on=on)
+        composed = compile_plan_to_sql(
+            j, ctx,
+            semantic_service=svc,
+            model_info_provider=provider,
+            dialect="mysql8",
+        )
+        assert "INNER JOIN" in composed.sql
+
+    def test_unknown_datasource_join_permissive(
+        self, svc, ctx, make_ds_provider
+    ):
+        """F-7: when one model has None datasource ID, join is permissive."""
+        provider = make_ds_provider({
+            "FactSalesModel": "mysql_main",
+            "FactOrderModel": None,
+        })
+        a = from_(model="FactSalesModel", columns=["orderStatus$caption", "salesAmount"])
+        b = from_(model="FactOrderModel", columns=["orderStatus$caption", "totalAmount"])
+        on = [JoinOn(left="orderStatus", op="=", right="orderStatus")]
+        j = a.join(b, type="left", on=on)
+        composed = compile_plan_to_sql(
+            j, ctx,
+            semantic_service=svc,
+            model_info_provider=provider,
+            dialect="mysql8",
+        )
+        assert "LEFT JOIN" in composed.sql
+
+    def test_no_provider_join_no_rejection(
+        self, svc, ctx, base_sales, base_orders
+    ):
+        """F-7: backward-compatible — no provider means no cross-DS check."""
+        on = [JoinOn(left="orderStatus", op="=", right="orderStatus")]
+        j = base_sales.join(base_orders, type="inner", on=on)
+        composed = compile_plan_to_sql(
+            j, ctx, semantic_service=svc, dialect="mysql8",
+        )
+        assert "INNER JOIN" in composed.sql
+
+    def test_left_join_cross_datasource_rejected(
+        self, svc, ctx, make_ds_provider
+    ):
+        """F-7: left join across datasources also rejected."""
+        provider = make_ds_provider({
+            "FactSalesModel": "ds_alpha",
+            "FactOrderModel": "ds_beta",
+        })
+        a = from_(model="FactSalesModel", columns=["orderStatus$caption", "salesAmount"])
+        b = from_(model="FactOrderModel", columns=["orderStatus$caption", "totalAmount"])
+        on = [JoinOn(left="orderStatus", op="=", right="orderStatus")]
+        j = a.join(b, type="left", on=on)
+        with pytest.raises(ComposeCompileError) as exc_info:
+            compile_plan_to_sql(
+                j, ctx,
+                semantic_service=svc,
+                model_info_provider=provider,
+                dialect="mysql8",
+            )
+        assert exc_info.value.code == error_codes.CROSS_DATASOURCE_REJECTED

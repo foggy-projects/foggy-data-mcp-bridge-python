@@ -33,6 +33,9 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 from foggy.dataset_model.engine.compose import ComposedSql
+from foggy.dataset_model.engine.compose.authority.datasource_ids import (
+    collect_datasource_ids,
+)
 from foggy.dataset_model.engine.compose.authority.resolver import (
     resolve_authority_for_plan,
 )
@@ -50,6 +53,7 @@ def compile_plan_to_sql(
     semantic_service: Any,  # SemanticQueryService; Any avoids eager import
     bindings: Optional[Dict[str, ModelBinding]] = None,
     model_info_provider: Optional[Any] = None,  # ModelInfoProvider
+    datasource_ids: Optional[Dict[str, Optional[str]]] = None,
     dialect: str = "mysql",
 ) -> ComposedSql:
     """Compile a ``QueryPlan`` tree to dialect-aware SQL + bind params.
@@ -85,7 +89,15 @@ def compile_plan_to_sql(
         call.
     model_info_provider:
         Optional — forwarded to ``resolve_authority_for_plan`` on the
-        internal-resolve path. Ignored when ``bindings`` is provided.
+        internal-resolve path. Also used to collect datasource IDs
+        (F-7) when ``datasource_ids`` is not pre-supplied. Ignored
+        when both ``bindings`` and ``datasource_ids`` are provided.
+    datasource_ids:
+        Optional ``Dict[str, Optional[str]]`` — pre-collected datasource
+        identities keyed by QM model name (F-7). When ``None`` and
+        ``model_info_provider`` is available, datasource IDs are
+        collected automatically. When ``None`` and no provider, the
+        cross-datasource check is skipped (backward-compatible).
     dialect:
         ``"mysql"`` / ``"mysql8"`` / ``"postgres"`` / ``"mssql"`` /
         ``"sqlite"``. Drives CTE-vs-subquery fallback (see 6.5). Default
@@ -103,7 +115,9 @@ def compile_plan_to_sql(
     Raises
     ------
     ComposeCompileError
-        See :mod:`error_codes` — 4 codes total.
+        See :mod:`error_codes` — 4 codes total. Includes
+        ``CROSS_DATASOURCE_REJECTED`` when union / join operands span
+        multiple datasources (F-7).
     """
     if bindings is None:
         bindings = resolve_authority_for_plan(
@@ -112,9 +126,21 @@ def compile_plan_to_sql(
             model_info_provider=model_info_provider,
         )
 
+    # F-7: collect datasource IDs if not pre-supplied and a provider
+    # is available. This enables cross-datasource detection in the
+    # compile phase without changing the resolver's return type.
+    if datasource_ids is None and model_info_provider is not None:
+        namespace = getattr(context, "namespace", "")
+        datasource_ids = collect_datasource_ids(
+            plan,
+            model_info_provider=model_info_provider,
+            namespace=namespace,
+        )
+
     return compile_to_composed_sql(
         plan,
         bindings=bindings,
         semantic_service=semantic_service,
         dialect=dialect,
+        datasource_ids=datasource_ids,
     )

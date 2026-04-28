@@ -214,6 +214,10 @@ class _CompileState:
     # empty so downstream consumers (PR4 validator routing) short-circuit
     # without consulting the flag again per column.
     plan_alias_map: Dict[int, str] = field(default_factory=dict)
+    # F-7 · Per-model datasource identity mapping. When non-None, the
+    # compiler checks that all leaf models in a union / join share the
+    # same datasource. ``None`` means "skip check" (backward-compatible).
+    datasource_ids: Optional[Dict[str, Optional[str]]] = None
 
     def next_alias(self) -> str:
         alias = f"cte_{self.alias_counter}"
@@ -239,6 +243,7 @@ def compile_to_composed_sql(
     bindings: Dict[str, ModelBinding],
     semantic_service: Any,
     dialect: str,
+    datasource_ids: Optional[Dict[str, Optional[str]]] = None,
 ) -> ComposedSql:
     """Walk ``plan`` and return a ``ComposedSql`` via dialect-aware
     ``CteComposer`` or native UNION / JOIN SQL.
@@ -251,7 +256,7 @@ def compile_to_composed_sql(
     ComposeCompileError
         See ``error_codes`` — ``UNSUPPORTED_PLAN_SHAPE`` (depth / unknown
         dialect / full outer join on SQLite), ``MISSING_BINDING``,
-        ``PER_BASE_COMPILE_FAILED``.
+        ``PER_BASE_COMPILE_FAILED``, ``CROSS_DATASOURCE_REJECTED`` (F-7).
     """
     _assert_dialect(dialect)
     state = _CompileState(
@@ -259,6 +264,7 @@ def compile_to_composed_sql(
         semantic_service=semantic_service,
         dialect=dialect,
         g10_enabled=feature_flags.g10_enabled(),
+        datasource_ids=datasource_ids,
     )
     # G10 PR4 · plan-aware permission validation. Runs only when the
     # G10 flag is on; under flag=off the legacy single-QM
@@ -505,7 +511,12 @@ def _compile_join(plan: JoinPlan, state: _CompileState) -> ComposedSql:
     thanks to ``state.id_cache`` / ``state.hash_cache`` hits. The
     de-duped unit list fed to ``CteComposer`` has one entry in that
     case — no duplicate CTEs.
+
+    F-7: cross-datasource detection is performed before recursion —
+    same logic as ``_compile_union``.
     """
+    _check_cross_datasource(plan, state, "join")
+
     if plan.type == "full" and state.dialect.lower() == "sqlite":
         raise ComposeCompileError(
             code=error_codes.UNSUPPORTED_PLAN_SHAPE,
@@ -550,7 +561,13 @@ def _compile_union(plan: UnionPlan, state: _CompileState) -> ComposedSql:
     machinery is ON-condition-driven, and unions are column-aligned.
     Instead we render both sides (recursively), then concatenate with
     ``\\nUNION [ALL]\\n``. Params flow left → right.
+
+    F-7: cross-datasource detection is performed before recursion —
+    if the leaf models on both sides span multiple datasources, a
+    ``CROSS_DATASOURCE_REJECTED`` error is raised at plan-lower phase.
     """
+    _check_cross_datasource(plan, state, "union")
+
     left = _compile_any(plan.left, state)
     right = _compile_any(plan.right, state)
 
@@ -560,6 +577,55 @@ def _compile_union(plan: UnionPlan, state: _CompileState) -> ComposedSql:
     keyword = "UNION ALL" if plan.all else "UNION"
     sql = f"({left_sql})\n{keyword}\n({right_sql})"
     return ComposedSql(sql=sql, params=list(left_params) + list(right_params))
+
+
+# ---------------------------------------------------------------------------
+# F-7 · Cross-datasource detection (post-v1.5 Stage 1)
+# ---------------------------------------------------------------------------
+
+
+def _check_cross_datasource(
+    plan: QueryPlan, state: _CompileState, plan_kind: str
+) -> None:
+    """Reject union / join plans whose leaf models span multiple datasources.
+
+    Called at the top of ``_compile_union`` and ``_compile_join``, before
+    any SQL is generated. The check uses ``state.datasource_ids`` which
+    was collected from the ``ModelInfoProvider`` before compilation.
+
+    When ``state.datasource_ids`` is ``None`` (no provider, or provider
+    does not implement ``get_datasource_id``), the check is skipped —
+    this is the backward-compatible path for single-datasource hosts.
+
+    When all leaf models map to ``None`` datasource IDs (unknown), the
+    check is also skipped — ``None`` values are treated as "same unknown
+    datasource" to maintain backward compatibility.
+
+    Only when two or more distinct non-None datasource IDs are found
+    among the leaf models is ``CROSS_DATASOURCE_REJECTED`` raised.
+    """
+    if state.datasource_ids is None:
+        return
+
+    bases = plan.base_model_plans()
+    ds_ids = {state.datasource_ids.get(b.model) for b in bases}
+    # Discard None — unknown datasources are permissive.
+    ds_ids.discard(None)
+
+    if len(ds_ids) > 1:
+        sorted_ids = sorted(ds_ids)
+        model_names = sorted({b.model for b in bases})
+        raise ComposeCompileError(
+            code=error_codes.CROSS_DATASOURCE_REJECTED,
+            phase="plan-lower",
+            message=(
+                f"{plan_kind.capitalize()} operands span {len(ds_ids)} "
+                f"datasources {sorted_ids}; models involved: "
+                f"{model_names}. Cross-datasource composition is not "
+                f"supported — all operands must belong to the same "
+                f"datasource."
+            ),
+        )
 
 
 # ---------------------------------------------------------------------------
