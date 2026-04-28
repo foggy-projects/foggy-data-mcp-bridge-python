@@ -10,11 +10,21 @@
 
 - version: v1.5 follow-up
 - priority: P1
-- status: in-progress
+- status: signed-off
 - delivery_mode: single-root-delivery
 - source_type: cross-project parity follow-up
 - owning_repo: `foggy-data-mcp-bridge-python`
 - upstream_java_acceptance: `foggy-data-mcp-bridge/docs/8.3.0.beta/acceptance/P1-SemanticDSL-TimeWindow-Java-acceptance.md`
+
+## Acceptance Status
+
+- acceptance_status: signed-off
+- acceptance_decision: accepted-with-risks
+- signed_off_by: execution-agent
+- signed_off_at: 2026-04-28
+- acceptance_record: docs/v1.5/acceptance/P1-timeWindow-Python-parity-acceptance.md
+- blocking_items: none
+- follow_up_required: yes
 
 ## 背景
 
@@ -78,9 +88,11 @@ Java 侧 `timeWindow` 已完成 DSL 解析、QueryPlan 编译、MySQL/MySQL8 方
   - compare period 输出 `metric__prior` / `metric__diff` / `metric__ratio`
   - `validate_query_fields` 已识别 comparative 派生列，避免预校验误拒
   - 质量复核修复 wow/week join 条件与模型 week 字段缺口，防止周粒度比较退化或字段不可用（commit `479ca3a`）
-- [ ] S4. 覆盖审计与验收
-  - 回补 QueryPlan 单测、SQL 快照测试和必要的集成测试
-  - 进入 coverage audit / acceptance signoff
+- [x] S4. 覆盖审计与验收
+  - 已完成 implementation quality gate：`docs/v1.5/quality/P1-timeWindow-Python-parity-implementation-quality.md`
+  - 已完成 coverage audit：`docs/v1.5/coverage/P1-timeWindow-Python-parity-coverage-audit.md`
+  - 已完成 feature acceptance signoff：`docs/v1.5/acceptance/P1-timeWindow-Python-parity-acceptance.md`
+  - 结论：`accepted-with-risks`，无阻断项；遗留为 MySQL8/Postgres CI 自动化、Java/Python golden diff、`timeWindow + calculatedFields` 后续增强
 
 ## 测试进度
 
@@ -164,11 +176,13 @@ Java 侧 `timeWindow` 已完成 DSL 解析、QueryPlan 编译、MySQL/MySQL8 方
 
 ### Acceptance Readiness
 
-- current_stage: S3b.2/S3c implementation + quality-fix verified; S4 coverage audit pending
-- overall_item: not-ready-for-acceptance
-- reason: implementation, quality fix, and real DB evidence are ready for review; full closure still requires coverage audit and formal acceptance signoff.
+- current_stage: S4 signed-off
+- overall_item: signed-off
+- decision: accepted-with-risks
+- reason: implementation, quality fix, coverage audit, and feature acceptance signoff are complete; remaining items are non-blocking long-term regression / feature-extension follow-ups.
 
 ## 遗留项
 
-- 需进入 coverage audit / acceptance signoff，将 requirement、测试证据和真实 DB 探针结果做正式映射。
-- Java 已签收，Python parity 后续应单独验收，不能借 Java 结论直接关闭。
+- MySQL8 / Postgres 实库探针目前不是 CI 自动化矩阵，后续可补 docker-backed integration profile。
+- Java ↔ Python `timeWindow` golden output 自动化未建设，后续两端继续演进时可补。
+- `timeWindow + calculatedFields` 仍 fail-closed，当前为非目标；如要支持需单独开后续功能项。

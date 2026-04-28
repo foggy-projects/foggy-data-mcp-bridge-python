@@ -95,7 +95,7 @@ v1.4 已经让 fsscript 语法层支持 `v in (...)` / `v not in (...)`，且借
 
 ## 后续独立 parity lane
 
-- `P1-timeWindow-Python-parity-progress.md` — 跟踪 Java 已签收 `timeWindow` 能力在 Python 引擎的后续对齐。当前完成到 S3b.2/S3c DTO / MCP payload passthrough + validator + rolling/cumulative expansion IR + rolling/ytd/mtd 两层 SQL path + value/range lowering + yoy/mom/wow comparative self-join SQL path + SQLite/MySQL8/Postgres 实库矩阵；MySQL8 已补 2025 sales fact seed 并验证 yoy prior/diff/ratio 非空；覆盖审计和正式验收仍未完成；不改变本 README 中计算字段编译器三阶段的签收结论。
+- `P1-timeWindow-Python-parity-progress.md` — 跟踪 Java 已签收 `timeWindow` 能力在 Python 引擎的后续对齐。当前已完成 S4 并功能级签收：`accepted-with-risks`；覆盖 DTO / MCP payload passthrough + validator + rolling/cumulative expansion IR + rolling/ytd/mtd 两层 SQL path + value/range lowering + yoy/mom/wow comparative self-join SQL path + SQLite/MySQL8/Postgres 实库矩阵；MySQL8 已补 2025 sales fact seed 并验证 yoy prior/diff/ratio 非空；验收记录见 `docs/v1.5/acceptance/P1-timeWindow-Python-parity-acceptance.md`。该 follow-up 不改变本 README 中计算字段编译器三阶段的签收结论。
 
 ## 参考文档
 
