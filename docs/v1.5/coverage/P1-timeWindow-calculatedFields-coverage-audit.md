@@ -47,7 +47,7 @@ follow_up_required: no
 | TWC10 ORDER BY / LIMIT are applied at the final wrapper layer | major | yes | yes | - | - | - | SQL assertions and execution tests with final order_by | covered |
 | TWC11 Java camelCase calculatedFields keys are normalized | major | yes | - | - | - | - | Java fixture catalog uses Java payload shape; service normalizes `returnType`, `dependsOn`, `partitionBy`, `windowOrderBy`, `windowFrame` | covered |
 | TWC12 post calculatedField `alias` remains orderable by calc `name` | major | - | yes | - | - | - | `test_time_window_post_calculated_field_alias_is_orderable` | covered |
-| TWC13 MySQL8/Postgres runtime path executes post calc SQL | critical | - | yes | - | - | - | `test_real_db_post_calculated_fields_execute` over MySQL8 + Postgres | covered |
+| TWC13 MySQL8/Postgres/SQL Server runtime path executes post calc SQL | critical | - | yes | - | - | - | `test_real_db_post_calculated_fields_execute` over MySQL8 + Postgres + SQL Server | covered |
 | TWC14 Existing timeWindow and calculatedFields behavior does not regress | critical | yes | yes | - | - | - | 173-case focused regression and full pytest suite | covered |
 | TWC15 UI / experience impact | minor | - | - | - | N/A | N/A | progress marks Experience Progress N/A | covered |
 
@@ -60,7 +60,7 @@ follow_up_required: no
   - result: 173 passed
   - run date: 2026-04-28
 - `python -m pytest tests/integration/test_time_window_real_db_matrix.py -q`
-  - result: 17 passed
+  - result: 28 passed (MySQL8 + PostgreSQL + SQL Server)
   - run date: 2026-04-28
 - `python -m pytest -q`
   - result: 3301 passed / 1 xfailed
@@ -70,7 +70,7 @@ follow_up_required: no
 ## Gaps
 
 - No blocking evidence gaps.
-- Non-blocking residual risk: SQL Server is not in the current Python real DB matrix. Current covered runtime dialects are SQLite, MySQL8, and Postgres, which match the existing timeWindow integration scope.
+- Non-blocking residual risk: SQL Server coverage was added in Stage 4 (11 tests). Current covered runtime dialects are SQLite, MySQL8, Postgres, and SQL Server.
 - Non-blocking residual risk: expression-level aggregate function detection beyond the Java fixture contract is not separately tested because the current Java 8.5.0 contract rejects `agg` metadata and window clauses, not raw function-name heuristics inside scalar expressions.
 
 ## Recommended Next Skills

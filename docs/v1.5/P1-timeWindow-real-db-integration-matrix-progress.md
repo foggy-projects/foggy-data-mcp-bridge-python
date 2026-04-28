@@ -38,12 +38,16 @@
   - ytd/mtd 集成测试统一按 `group_by` 排序，避免向 `SemanticQueryRequest` 传入 `None`。
 - [x] 补齐后置 scalar calculatedFields 实库矩阵
   - MySQL8 / Postgres 分别执行 YoY `growthPercent` 与 rolling `rollingGap`。
+- [x] Stage 4: 新增 SQL Server 2022 到 real DB matrix
+  - 新增 `SQLServerExecutor`（pyodbc），含 LIMIT→TOP 和 CTE hoisting 方言转换。
+  - SQL Server demo: `localhost:11433 / foggy_test / sa`，复用 Java docker-compose 环境。
+  - 11 个 SQL Server 测试（8 matrix + 3 dedicated），全通过。
 
 ## 测试进度
 
 - [x] `python -m pytest tests/integration/test_time_window_real_db_matrix.py -q`
-  - result: 17 passed
-  - coverage: MySQL8 + Postgres rolling range / ytd / mtd / yoy / mom / wow / post scalar calculatedFields / MySQL8 2025 yoy seed
+  - result: 28 passed
+  - coverage: MySQL8 + Postgres + SQL Server rolling range / ytd / mtd / yoy / mom / wow / post scalar calculatedFields / MySQL8 2025 yoy seed / SQL Server YoY prior / YTD monotonicity / post-calc growth%
 - [x] `python -m pytest tests/test_dataset_model/test_time_window.py tests/test_dataset_model/test_time_window_sqlite_execution.py tests/test_mcp/test_java_alignment.py -q`
   - result: covered by latest combined regression in `P1-timeWindow-calculatedFields-design-progress.md`
   - coverage: SQL preview, SQLite execution, MCP Java alignment, post-calc alias order-by regression
@@ -54,7 +58,7 @@
 
 - P1 matrix 已从手动探针推进为自动化 pytest 集成测试。
 - 集成测试发现并修复了 `salesDate$week` 语义字段到物理列 `week_of_year` 的真实 schema 映射问题。
-- MySQL8 / Postgres 两个引擎当前在 CTE、rolling/cumulative/comparative timeWindow，以及后置 scalar calculatedFields 的真实执行路径均通过矩阵校验。
+- MySQL8 / Postgres / SQL Server 三个引擎当前在 CTE、rolling/cumulative/comparative timeWindow，以及后置 scalar calculatedFields 的真实执行路径均通过矩阵校验。
 
 ### Self-check
 
@@ -67,3 +71,4 @@
 
 - P2: 建设 Java ↔ Python `timeWindow` golden output diff，覆盖 SQL shape / params / columns。
 - P3: 已按 Java 8.5.0 契约补齐后置 scalar `timeWindow + calculatedFields` 子集，并纳入本实库矩阵。
+- P4 (Stage 4): ✅ SQL Server 2022 加入 real DB matrix，复用 Java demo 数据源。详见 `S4-sqlserver-timewindow-real-db-matrix-progress.md`。

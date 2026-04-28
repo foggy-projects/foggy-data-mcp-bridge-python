@@ -65,7 +65,8 @@ follow_up_required: no
 ## Risks / Follow-ups
 
 - Expression-level aggregate function calls embedded directly in `expression` are not separately rejected beyond the Java 8.5.0 fixture contract, which rejects the `agg` property and window clauses. This is a parity choice, not a coverage blocker.
-- SQL Server is not part of the current Python real DB matrix; current evidence covers SQLite, MySQL8, and Postgres.
+- SQL Server is now part of the Python real DB matrix via Stage 4; current evidence covers SQLite, MySQL8, Postgres, and SQL Server.
+- Java/Python projection contract still differs for calculatedFields output aliases in `columns`: Python allows it, Java `SchemaAwareFieldValidationStep` currently rejects post-calc aliases such as `growthPercent` / `rollingGap`. This is deferred to Stage 5.
 
 ## Recommended Next Skills
 
