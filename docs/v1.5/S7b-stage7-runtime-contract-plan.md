@@ -49,16 +49,16 @@ Stage 7 的目标不是继续扩 `timeWindow + calculatedFields` 后置表达式
 
 S7b 必须先完成以下确认，才能进入 Java S7c runtime POC：
 
-- [ ] `CompiledRelation` 字段名、默认值、nullable 语义冻结。
-- [ ] `RelationSql` 的 `withItems + bodySql + bodyParams + preferredAlias` 结构冻结。
-- [ ] `RelationCapabilities` 字段与 `relationWrapStrategy` 枚举值冻结。
-- [ ] `ColumnSpec` metadata 字段冻结，并继续排除在 equality/hash 之外。
-- [ ] `SemanticKind` / `ReferencePolicy` 字符串常量冻结。
-- [ ] `referencePolicy` 的默认解释冻结：集合语义，不是单值。
-- [ ] `salesAmount__ratio` 等 ratio 派生列默认不可 `aggregatable`。
-- [ ] SQL Server hoisted CTE 渲染规则冻结：不得生成 `FROM (WITH`。
-- [ ] MySQL 5.7 + inner CTE fail-closed 规则冻结。
-- [ ] Java stable relation snapshot schema 冻结，Python mirror 测试继续消费。
+- [x] `CompiledRelation` 字段名、默认值、nullable 语义冻结。
+- [x] `RelationSql` 的 `withItems + bodySql + bodyParams + preferredAlias` 结构冻结。
+- [x] `RelationCapabilities` 字段与 `relationWrapStrategy` 枚举值冻结。
+- [x] `ColumnSpec` metadata 字段冻结，并继续排除在 equality/hash 之外。
+- [x] `SemanticKind` / `ReferencePolicy` 字符串常量冻结。
+- [x] `referencePolicy` 的默认解释冻结：集合语义，不是单值。
+- [x] `salesAmount__ratio` 等 ratio 派生列默认不可 `aggregatable`。
+- [x] SQL Server hoisted CTE 渲染规则冻结：不得生成 `FROM (WITH`。
+- [x] MySQL 5.7 + inner CTE fail-closed 规则冻结。
+- [x] Java stable relation snapshot schema 冻结，Python mirror 测试继续消费。
 
 ## Module Responsibility
 
@@ -74,7 +74,7 @@ S7b 必须先完成以下确认，才能进入 Java S7c runtime POC：
 
 ### S7b - Contract freeze
 
-- status: planned
+- status: completed
 - owner: root-controller + Java/Python contract owners
 
 Output:
@@ -91,7 +91,7 @@ Acceptance:
 
 ### S7c - Java compileToRelation runtime entry
 
-- status: wait-for-s7b
+- status: ready
 - owner: Java
 
 Requirement:

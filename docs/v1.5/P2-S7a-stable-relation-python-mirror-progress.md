@@ -3,7 +3,7 @@
 ## 基本信息
 
 - version: 1.5.0 (S7a)
-- status: mirror-complete
+- status: mirror-complete / contract-frozen
 - java_contract_ref: `foggy-data-mcp-bridge-wt-dev-compose/docs/8.5.0.beta/P2-S7a-stable-relation-contract-progress.md`
 - java_contract_version: S7a-1
 - java_snapshot: consumed `target/parity/_stable_relation_schema_snapshot.json`

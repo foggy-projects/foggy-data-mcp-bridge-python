@@ -10,7 +10,7 @@
 
 - version: post-v1.5 follow-up
 - priority: P1 when Stage 7 is promoted
-- status: approved-for-java-poc
+- status: contract-frozen-for-stage7-runtime
 - owner: `foggy-data-mcp-bridge-python` docs
 - java_reference_repo: `foggy-data-mcp-bridge-wt-dev-compose`
 - related_plan: `docs/v1.5/P2-post-v1.5-followup-execution-plan.md`
@@ -516,8 +516,8 @@ timeWindow plan
 - [x] Java contract owner 确认现有 `OutputSchema` 是否足够承载 semantic metadata。 (Confirmed)
 - [x] Java contract owner 确认 `CompiledRelation` / `PlanView` 与 `CteUnit` 的实现边界。 (Confirmed)
 - [x] Java contract owner 确认 SQL Server relation wrapping / CTE hoisting 策略。 (Confirmed)
-- [ ] Java contract owner 生成 stable relation schema snapshot。
-- [ ] Python mirror 消费 Java snapshot。
+- [x] Java contract owner 生成 stable relation schema snapshot。
+- [x] Python mirror 消费 Java snapshot。
 
 ### Testing Progress
 
