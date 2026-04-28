@@ -336,13 +336,12 @@ def validate_field_access(
         # No governance — everything passes
         return FieldValidationResult()
 
-    # Normalize whitelist on both sides for the strip-and-match contract:
-    # the visible set keeps both the original entries AND their base-dim
-    # forms so that ``["orderStatus"]`` permits ``orderStatus$caption``
-    # references AND ``["orderStatus$caption"]`` permits bare-dim refs
-    # appearing inside expressions (calc-field dependency extraction surfaces
-    # bare names from SQL-like sources). Aligns with v1.7 backlog B-03 and
-    # Java ``FieldAccessPermissionStep.checkField()``.
+    # Whitelist matches both bare-dim and ``$attr`` forms by normalising
+    # the visible set to include both: a request ``["orderStatus$caption"]``
+    # against whitelist ``["orderStatus"]`` — or the reverse — both pass.
+    # Calc-field dependency extraction surfaces bare names from SQL-like
+    # sources, so the reverse direction is required. Aligned with Java
+    # ``FieldAccessPermissionStep.checkField()``.
     visible_set: Optional[Set[str]] = None
     if has_whitelist:
         visible_set = set(field_access.visible)
@@ -354,14 +353,7 @@ def validate_field_access(
     blocked: List[str] = []
 
     def _check_field(f: str) -> None:
-        """Check a single field against both whitelist and blacklist.
-
-        Whitelist matching strips the ``$id`` / ``$caption`` / ``$<attr>``
-        dimension suffix on the field side and (during whitelist build above)
-        also normalises whitelist entries to base form, so a request like
-        ``columns=["orderStatus$caption"]`` against whitelist ``["orderStatus"]``
-        — or the reverse — both pass.
-        """
+        """Check a single field against both whitelist and blacklist."""
         if visible_set is not None:
             base = _strip_dimension_suffix(f)
             if f not in visible_set and base not in visible_set:

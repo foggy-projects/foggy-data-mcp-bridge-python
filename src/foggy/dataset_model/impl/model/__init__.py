@@ -605,22 +605,22 @@ class DbTableModelImpl(BaseModel):
         return None
 
     def resolve_field_strict(self, field_name: str) -> Optional[Dict[str, Any]]:
-        """Strict version of :meth:`resolve_field` aligned to the Foggy
-        QM public contract (v1.7 / 8.4.0.beta governance · backlog B-03).
+        """Strict variant of :meth:`resolve_field` aligned to the Foggy
+        QM public contract: dimensions are not directly projectable.
 
-        Differences vs. lenient :meth:`resolve_field`:
+        Compared to :meth:`resolve_field`:
 
-        * **Bare dimension** (no ``$``) is **never** projectable. The
-          caller is expected to fail-loud with a hint like
+        * Bare dimension references (no ``$``) return ``None`` — the caller
+          is expected to fail-loud with a hint like
           ``"did you mean '<dim>$caption'?"``. Measures and fact-table
-          properties (which are not dimensions) continue to be accepted.
+          properties continue to be accepted.
         * ``dim$<suffix>`` only matches when ``<suffix>`` is exactly
           ``"id"``, ``"caption"``, or a declared property name. Garbage
           suffixes (e.g. ``orderStatus$xyz``) return ``None`` instead of
-          falling back to the dim's primary column.
+          silently falling back to the dim's primary column.
 
         Returns ``None`` when the field is not resolvable under the
-        strict contract. The caller decides the error code.
+        strict contract; the caller decides the error code.
         """
         # `field$suffix` path
         if "$" in field_name:
