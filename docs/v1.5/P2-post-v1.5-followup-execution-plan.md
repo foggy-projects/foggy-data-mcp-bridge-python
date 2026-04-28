@@ -212,6 +212,8 @@ Acceptance:
 
 - status: wait-for-java-contract
 - priority: demand-driven
+- preflight: `docs/v1.5/S7-future-java-contract-expansion-preflight.md`
+- relation_contract: `docs/v1.5/S7a-plan-stable-view-relation-contract-preflight.md`
 
 Items:
 
@@ -219,6 +221,31 @@ Items:
 - `timeWindow` 后置二次窗口。
 - `calculatedFields` 作为 `timeWindow.targetMetrics` 输入。
 - explicit named CTE / recursive CTE。
+
+Why these might exist:
+
+- 后置二次聚合用于在 timeWindow 结果集上做更高层汇总，例如先按 `store + month` 得到同比增长率，再按 `region` 汇总增长表现。
+- 后置二次窗口用于在 timeWindow 派生列上继续做排名、移动平均、累计或平滑分析，例如对 `salesAmount__ratio` 做 rank 或 rolling average。
+- `calculatedFields` 作为 `targetMetrics` 用于对动态指标直接做同比/滚动，例如 `grossMargin = salesAmount - costAmount` 后再做 YoY。
+- explicit named CTE / recursive CTE 用于显式复用复杂中间结果或表达递归层级遍历。
+
+Why they remain closed:
+
+- 二次聚合的口径容易歧义：聚合 ratio、聚合 diff、重新计算整体 ratio 不是同一件事。
+- 二次窗口会重新引入 S16 已规避的 window nesting / partition / order / frame 层级问题。
+- request-level calculatedFields 缺少稳定聚合口径，作为 `targetMetrics` 可能形成循环依赖或错误业务语义。
+- named / recursive CTE 会引入作用域、名称冲突、权限裁剪和方言兼容的新契约。
+
+Precondition:
+
+- 在开放任何二次聚合 / 二次窗口前，先定义 `QueryPlan -> Stable View/Relation` 契约。
+- `Stable View/Relation` 必须携带 SQL、params、alias、datasource identity、dialect/capabilities 和稳定 `OutputSchema`。
+- `OutputSchema` 不只描述列名，还应描述列语义、来源、是否派生、是否可在外层 groupBy / aggregate / window / orderBy 中引用。
+- `timeWindow` 派生列如 `metric__prior` / `metric__diff` / `metric__ratio` / `metric__rolling_*` / `metric__ytd` / `metric__mtd` 必须在 schema 中有稳定含义。
+- `CteUnit` 继续保持内部 SQL assembly primitive 职责，不作为正式 stable relation contract；relation contract 由 `CompiledRelation` / `PlanView` 或等价抽象承载。
+- SQL Server relation wrapping / CTE hoisting 是 Stage 7 开放前的显式契约项，不能只靠文档说明。
+- CTE 写法必须遵守 S7a 规则：不得生成 `FROM (WITH ... SELECT ...) AS rel`；带 inner CTE 的 relation 必须 hoist 成 top-level `WITH ... rel_N AS (...) SELECT ... FROM rel_N`，不支持 hoist 的方言 fail-closed。
+- 二次聚合 / 二次窗口应建模为 `DerivedQueryPlan over Stable Relation`，而不是放开当前 `timeWindow + calculatedFields` 的 `agg/windowFrame` 通道。
 
 Rule:
 

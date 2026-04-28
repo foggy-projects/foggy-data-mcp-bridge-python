@@ -101,6 +101,8 @@ v1.4 已经让 fsscript 语法层支持 `v in (...)` / `v not in (...)`，且借
 - `P2-post-v1.5-followup-execution-plan.md` — 记录 v1.4/v1.5 closeout 后的非阻断项执行顺序：F-7 datasource identity contract、formula parity snapshot CI 固化、normalized SQL golden diff harness、SQL Server real DB matrix、Phase 4 AST optional，以及未来 Java 契约扩展的启动条件。
 - `S1-F7-datasource-identity-contract-progress.md` — 记录 post-v1.5 Stage 1 执行结果：Python 已通过 `ModelInfoProvider.get_datasource_id` 实现 cross-datasource union/join compile-time rejection，full regression 3316 passed；Java 镜像已在 `foggy-data-mcp-bridge-wt-dev-compose` 提交 `f918343` 完成并验证。
 - `S2-formula-parity-snapshot-ci-progress.md` — 记录 post-v1.5 Stage 2 执行结果：formula parity snapshot schema/catalog/integrity drift detection 已启用，Java snapshot generation 与 Python strict compare 已复验。
+- `S7-future-java-contract-expansion-preflight.md` — 记录 Stage 7 未来 Java 契约扩展边界：`timeWindow` 后置二次聚合/窗口、`calculatedFields` 作为 `targetMetrics`、named / recursive CTE 均等待 Java contract + fixtures，Python 当前保持 fail-closed / non-goal。
+- `S7a-plan-stable-view-relation-contract-preflight.md` — Stage 7 stable relation formal contract draft：定义 `CompiledRelation` / `RelationSql` / `OutputSchema` semantics、CTE hoisting / SQL Server 写法规则，二次聚合/窗口后续应消费该 relation，而不是扩展当前 post-calc scalar 通道。
 - `quality/S1-S2-post-v1.5-followup-implementation-quality.md` — 记录 Stage 1/2 合并实现质量门结论与后续闭环：Python 侧质量门已完成，Java datasource identity mirror 后续已补齐。
 
 ## 参考文档
