@@ -1313,6 +1313,11 @@ class SemanticQueryService(SemanticServiceResolver):
                 f"(cur.{self._qi(year)} * 53 + cur.{self._qi(week)}) = "
                 f"(prior.{self._qi(year)} * 53 + prior.{self._qi(week)} + 1)"
             ]
+        # NOTE: For compact integer date keys (e.g. 20240101), adding 7
+        # does NOT yield the date 7 days later (20240101+7 = 20240108 is
+        # correct only within the same month).  This is a known limitation
+        # aligned with Java's approach; wow+day on compact-key models may
+        # produce incorrect results near month boundaries.
         return [f"cur.{self._qi(tw.field)} = prior.{self._qi(tw.field)} + 7"]
 
     @staticmethod
@@ -1493,9 +1498,22 @@ class SemanticQueryService(SemanticServiceResolver):
         field: str,
         value: Any,
     ) -> Any:
+        """Coerce all-digit timeWindow bound values to int for date-key columns.
+
+        Only activates when *all* of these hold:
+          1. ``value`` is an all-digit string (e.g. ``"20240101"``).
+          2. ``field`` ends with ``$id`` (dimension id accessor).
+          3. The underlying dimension join's primary key column name ends with
+             ``_key`` **and** the dimension text contains a date/time/calendar
+             hint.
+
+        This heuristic is intentionally narrow to avoid mis-coercing non-date
+        integer IDs.  For ISO date strings (``"2024-01-01"``) or non-digit
+        values the coercion is skipped and the string is passed through.
+        """
         if not isinstance(value, str) or not value.isdigit():
             return value
-        if not field.endswith("$id") or "$" not in field:
+        if not field.endswith("$id"):
             return value
 
         dim_name = field.split("$", 1)[0]

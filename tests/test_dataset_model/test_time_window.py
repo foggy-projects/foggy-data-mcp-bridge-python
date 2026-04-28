@@ -605,6 +605,38 @@ class TestTimeWindowServiceGuard:
         assert 'cur."salesDate$id" = prior."salesDate$id" + 7' in sql
         assert 'prior."salesAmount" AS "salesAmount__prior"' in sql
 
+    def test_wow_week_sql_preview_uses_week_index_self_join_condition(self):
+        svc = SemanticQueryService()
+        svc.register_model(create_fact_sales_model())
+
+        response = svc.query_model(
+            "FactSalesModel",
+            SemanticQueryRequest(
+                columns=[
+                    "salesDate$year",
+                    "salesDate$week",
+                    "salesAmount",
+                    "salesAmount__prior",
+                ],
+                group_by=["salesDate$year", "salesDate$week"],
+                time_window={
+                    "field": "salesDate$id",
+                    "grain": "week",
+                    "comparison": "wow",
+                    "targetMetrics": ["salesAmount"],
+                },
+            ),
+            mode="validate",
+        )
+
+        assert response.error is None
+        sql = response.sql or ""
+        assert (
+            '(cur."salesDate$year" * 53 + cur."salesDate$week") = '
+            '(prior."salesDate$year" * 53 + prior."salesDate$week" + 1)'
+        ) in sql
+        assert 'prior."salesAmount" AS "salesAmount__prior"' in sql
+
     def test_invalid_time_window_returns_java_error_code(self):
         svc = SemanticQueryService()
         svc.register_model(create_fact_sales_model())

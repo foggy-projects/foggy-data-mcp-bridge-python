@@ -110,6 +110,7 @@ def _seed_time_window_db(db_path) -> None:
                 year INTEGER NOT NULL,
                 quarter INTEGER NOT NULL,
                 month INTEGER NOT NULL,
+                week INTEGER NOT NULL,
                 month_name TEXT,
                 day_of_week INTEGER,
                 is_weekend INTEGER
@@ -124,18 +125,18 @@ def _seed_time_window_db(db_path) -> None:
         conn.executemany(
             """
             INSERT INTO dim_date (
-                date_key, full_date, year, quarter, month,
+                date_key, full_date, year, quarter, month, week,
                 month_name, day_of_week, is_weekend
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
-                (20230101, "2023-01-01", 2023, 1, 1, "Jan", 7, 1),
-                (20230201, "2023-02-01", 2023, 1, 2, "Feb", 3, 0),
-                (20240101, "2024-01-01", 2024, 1, 1, "Jan", 1, 0),
-                (20240102, "2024-01-02", 2024, 1, 1, "Jan", 2, 0),
-                (20240103, "2024-01-03", 2024, 1, 1, "Jan", 3, 0),
-                (20240201, "2024-02-01", 2024, 1, 2, "Feb", 4, 0),
+                (20230101, "2023-01-01", 2023, 1, 1, 52, "Jan", 7, 1),
+                (20230201, "2023-02-01", 2023, 1, 2, 5, "Feb", 3, 0),
+                (20240101, "2024-01-01", 2024, 1, 1, 1, "Jan", 1, 0),
+                (20240102, "2024-01-02", 2024, 1, 1, 1, "Jan", 2, 0),
+                (20240103, "2024-01-03", 2024, 1, 1, 1, "Jan", 3, 0),
+                (20240201, "2024-02-01", 2024, 1, 2, 5, "Feb", 4, 0),
             ],
         )
         conn.executemany(
