@@ -137,6 +137,20 @@ def test_catalog_has_coverage_targets() -> None:
     assert sum(i.startswith("dt-") for i in ids) >= 3
 
 
+def test_normalizer_collapses_java_python_equivalent_shapes() -> None:
+    examples = [
+        ("(- a)", None, "(-a)", ()),
+        ("(NOT (a = 0))", None, "NOT (a = ?)", (0,)),
+        ("CASE WHEN (overdue) THEN amount ELSE NULL END", [], "CASE WHEN overdue THEN amount ELSE NULL END", ()),
+        ("(deletedAt IS NULL)", None, "deletedAt IS NULL", ()),
+        ("CEIL(a / b)", [], "CEILING(a / b)", ()),
+        ("CAST((julianday(datetime('now')) - julianday(dateMaturity)) AS INTEGER)", None,
+         "CAST((julianday(datetime('NOW')) - julianday(dateMaturity)) AS INTEGER)", ()),
+    ]
+    for raw_sql, raw_params, expected_sql, expected_params in examples:
+        assert to_canonical(raw_sql, raw_params) == (expected_sql, expected_params)
+
+
 # --------------------------------------------------------------------------- #
 # Java snapshot compare (optional — enabled when Java side has produced it)
 # --------------------------------------------------------------------------- #

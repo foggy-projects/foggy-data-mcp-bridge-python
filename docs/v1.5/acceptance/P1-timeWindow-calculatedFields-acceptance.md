@@ -80,7 +80,7 @@ evidence_count: 8
   - `python -m pytest tests/test_dataset_model/test_time_window_java_parity_catalog.py tests/test_dataset_model/test_time_window_sqlite_execution.py -q` -> 22 passed
   - `python -m pytest tests/integration/test_time_window_real_db_matrix.py -q` -> 17 passed
   - combined timeWindow + calculatedFields regression -> 173 passed
-  - `python -m pytest -q` -> 3299 passed / 1 skipped / 1 xfailed
+  - `python -m pytest -q` -> 3301 passed / 1 xfailed
 
 ## Failed Items
 

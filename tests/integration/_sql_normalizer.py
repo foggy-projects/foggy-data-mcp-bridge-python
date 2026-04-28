@@ -110,6 +110,55 @@ def _collapse_redundant_parens(sql: str) -> str:
         sql = new_sql
 
 
+def _outer_parens_wrap_all(sql: str) -> bool:
+    if not (sql.startswith("(") and sql.endswith(")")):
+        return False
+    depth = 0
+    in_string = False
+    i = 0
+    while i < len(sql):
+        ch = sql[i]
+        if ch == "'":
+            in_string = not in_string
+        elif not in_string:
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0 and i != len(sql) - 1:
+                    return False
+        i += 1
+    return depth == 0
+
+
+def _strip_outer_parens(sql: str) -> str:
+    sql = sql.strip()
+    while _outer_parens_wrap_all(sql):
+        sql = sql[1:-1].strip()
+    return sql
+
+
+def _canonicalize_case_when(sql: str) -> str:
+    def _replace(match: re.Match[str]) -> str:
+        condition = _strip_outer_parens(match.group(2))
+        return f"{match.group(1)}{condition}{match.group(3)}"
+
+    return re.sub(r"(CASE WHEN )(.*?)( THEN )", _replace, sql)
+
+
+def _canonicalize_equivalent_shapes(sql: str) -> str:
+    sql = re.sub(r"\(-\s+([A-Za-z_][\w$]*|\?)\)", r"(-\1)", sql)
+    sql = re.sub(r"\bCEIL\s*\(", "CEILING(", sql)
+    sql = re.sub(r"\((NOT\s+\([^()]+\))\)", r"\1", sql)
+    sql = re.sub(
+        r"\(([A-Za-z_][\w$]*(?:\([^()]*\))?) IS (NOT )?NULL\)",
+        r"\1 IS \2NULL",
+        sql,
+    )
+    sql = _canonicalize_case_when(sql)
+    return sql
+
+
 def _extract_inline_literals(sql: str) -> Tuple[str, List[object]]:
     """Convert Java-side inline literals back to ``?`` placeholders.
 
@@ -122,6 +171,9 @@ def _extract_inline_literals(sql: str) -> Tuple[str, List[object]]:
 
     def _str_sub(match: re.Match[str]) -> str:
         raw = match.group(1).replace("''", "'")
+        prefix = sql[: match.start()]
+        if re.search(r"\bdatetime\s*\($", prefix, re.IGNORECASE) and raw.lower() == "now":
+            return "'NOW'"
         params.append(("__STRING__", raw))
         return "\x00p\x00"
 
@@ -162,7 +214,9 @@ def to_canonical(
         params = extracted
     sql = _collapse_whitespace(sql)
     sql = _upper_keywords(sql)
+    sql = _canonicalize_equivalent_shapes(sql)
     sql = _collapse_redundant_parens(sql)
+    sql = _canonicalize_equivalent_shapes(sql)
     # Final whitespace tidy — paren collapse can leave multi-spaces.
     sql = _collapse_whitespace(sql)
     return sql, tuple(params)

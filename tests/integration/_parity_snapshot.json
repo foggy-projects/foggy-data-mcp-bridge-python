@@ -1,0 +1,210 @@
+{
+  "schema_version" : "1",
+  "source" : "FormulaParitySnapshotTest",
+  "snapshots" : [ {
+    "id" : "ari-01",
+    "expression" : "a + b",
+    "dialect" : "mysql",
+    "sql_normalized" : "(a + b)"
+  }, {
+    "id" : "ari-02",
+    "expression" : "(a - b) * 100",
+    "dialect" : "mysql",
+    "sql_normalized" : "((a - b) * 100)"
+  }, {
+    "id" : "ari-03",
+    "expression" : "(amountTotal - amountResidual) / amountTotal * 100",
+    "dialect" : "mysql",
+    "sql_normalized" : "(((amountTotal - amountResidual) / amountTotal) * 100)"
+  }, {
+    "id" : "ari-04",
+    "expression" : "-a",
+    "dialect" : "mysql",
+    "sql_normalized" : "(- a)"
+  }, {
+    "id" : "ari-05",
+    "expression" : "a % 10",
+    "dialect" : "mysql",
+    "sql_normalized" : "(a % 10)"
+  }, {
+    "id" : "cmp-01",
+    "expression" : "a == 10",
+    "dialect" : "mysql",
+    "sql_normalized" : "(a = 10)"
+  }, {
+    "id" : "cmp-02",
+    "expression" : "a != 0",
+    "dialect" : "mysql",
+    "sql_normalized" : "(a <> 0)"
+  }, {
+    "id" : "cmp-03",
+    "expression" : "a >= 100",
+    "dialect" : "mysql",
+    "sql_normalized" : "(a >= 100)"
+  }, {
+    "id" : "cmp-04",
+    "expression" : "a < b",
+    "dialect" : "mysql",
+    "sql_normalized" : "(a < b)"
+  }, {
+    "id" : "bool-01",
+    "expression" : "(a > 0) && (b < 100)",
+    "dialect" : "mysql",
+    "sql_normalized" : "((a > 0) AND (b < 100))"
+  }, {
+    "id" : "bool-02",
+    "expression" : "(a == 0) || (b > 0)",
+    "dialect" : "mysql",
+    "sql_normalized" : "((a = 0) OR (b > 0))"
+  }, {
+    "id" : "bool-03",
+    "expression" : "!(a == 0)",
+    "dialect" : "mysql",
+    "sql_normalized" : "(NOT (a = 0))"
+  }, {
+    "id" : "in-01",
+    "expression" : "state in ('posted', 'paid')",
+    "dialect" : "mysql",
+    "sql_normalized" : "(state IN ('posted', 'paid'))"
+  }, {
+    "id" : "in-02",
+    "expression" : "companyId in (1, 2, 3)",
+    "dialect" : "mysql",
+    "sql_normalized" : "(companyId IN (1, 2, 3))"
+  }, {
+    "id" : "in-03",
+    "expression" : "type not in ('draft')",
+    "dialect" : "mysql",
+    "sql_normalized" : "(type NOT IN ('draft'))"
+  }, {
+    "id" : "if-01",
+    "expression" : "if(a > 0, a, 0)",
+    "dialect" : "mysql",
+    "sql_normalized" : "CASE WHEN (a > 0) THEN a ELSE 0 END"
+  }, {
+    "id" : "if-02",
+    "expression" : "if(state == 'posted', 1, 0)",
+    "dialect" : "mysql",
+    "sql_normalized" : "CASE WHEN (state = 'posted') THEN 1 ELSE 0 END"
+  }, {
+    "id" : "if-03",
+    "expression" : "if(a > 0, if(b > 0, 1, 2), 3)",
+    "dialect" : "mysql",
+    "sql_normalized" : "CASE WHEN (a > 0) THEN CASE WHEN (b > 0) THEN 1 ELSE 2 END ELSE 3 END"
+  }, {
+    "id" : "if-04",
+    "expression" : "if(overdue, amount, null)",
+    "dialect" : "mysql",
+    "sql_normalized" : "CASE WHEN overdue THEN amount ELSE NULL END"
+  }, {
+    "id" : "null-01",
+    "expression" : "is_null(deletedAt)",
+    "dialect" : "mysql",
+    "sql_normalized" : "(deletedAt IS NULL)"
+  }, {
+    "id" : "null-02",
+    "expression" : "is_not_null(confirmedAt)",
+    "dialect" : "mysql",
+    "sql_normalized" : "(confirmedAt IS NOT NULL)"
+  }, {
+    "id" : "null-03",
+    "expression" : "coalesce(a, 0)",
+    "dialect" : "mysql",
+    "sql_normalized" : "COALESCE(a, 0)"
+  }, {
+    "id" : "null-04",
+    "expression" : "coalesce(a, b, c, 0)",
+    "dialect" : "mysql",
+    "sql_normalized" : "COALESCE(a, b, c, 0)"
+  }, {
+    "id" : "num-01",
+    "expression" : "abs(a - b)",
+    "dialect" : "mysql",
+    "sql_normalized" : "ABS((a - b))"
+  }, {
+    "id" : "num-02",
+    "expression" : "round(a / b * 100, 2)",
+    "dialect" : "mysql",
+    "sql_normalized" : "ROUND(((a / b) * 100), 2)"
+  }, {
+    "id" : "num-03",
+    "expression" : "ceil(a / b)",
+    "dialect" : "mysql",
+    "sql_normalized" : "CEIL((a / b))"
+  }, {
+    "id" : "bt-01",
+    "expression" : "between(age, 18, 65)",
+    "dialect" : "mysql",
+    "sql_normalized" : "(age BETWEEN 18 AND 65)"
+  }, {
+    "id" : "dt-01-mysql",
+    "expression" : "date_diff(now(), dateMaturity)",
+    "dialect" : "mysql",
+    "sql_normalized" : "DATEDIFF(NOW(), dateMaturity)"
+  }, {
+    "id" : "dt-01-postgres",
+    "expression" : "date_diff(now(), dateMaturity)",
+    "dialect" : "postgres",
+    "sql_normalized" : "(NOW()::date - dateMaturity::date)"
+  }, {
+    "id" : "dt-01-sqlserver",
+    "expression" : "date_diff(now(), dateMaturity)",
+    "dialect" : "sqlserver",
+    "sql_normalized" : "DATEDIFF(day, dateMaturity, GETDATE())"
+  }, {
+    "id" : "dt-01-sqlite",
+    "expression" : "date_diff(now(), dateMaturity)",
+    "dialect" : "sqlite",
+    "sql_normalized" : "CAST((julianday(datetime('now')) - julianday(dateMaturity)) AS INTEGER)"
+  }, {
+    "id" : "dt-02-mysql",
+    "expression" : "date_add(today, 30, 'day')",
+    "dialect" : "mysql",
+    "sql_normalized" : "DATE_ADD(today, INTERVAL 30 DAY)"
+  }, {
+    "id" : "dt-02-postgres",
+    "expression" : "date_add(today, 30, 'day')",
+    "dialect" : "postgres",
+    "sql_normalized" : "(today + make_interval(days => 30))"
+  }, {
+    "id" : "dt-02-sqlserver",
+    "expression" : "date_add(today, 30, 'day')",
+    "dialect" : "sqlserver",
+    "sql_normalized" : "DATEADD(day, 30, today)"
+  }, {
+    "id" : "dt-03-now-mysql",
+    "expression" : "now()",
+    "dialect" : "mysql",
+    "sql_normalized" : "NOW()"
+  }, {
+    "id" : "dt-03-now-sqlserver",
+    "expression" : "now()",
+    "dialect" : "sqlserver",
+    "sql_normalized" : "GETDATE()"
+  }, {
+    "id" : "agg-01",
+    "expression" : "sum(if(status == 'cancelled', amount, 0))",
+    "dialect" : "mysql",
+    "sql_normalized" : "SUM(CASE WHEN (status = 'cancelled') THEN amount ELSE 0 END)"
+  }, {
+    "id" : "agg-03",
+    "expression" : "count(if(amount > 1000, 1, null))",
+    "dialect" : "mysql",
+    "sql_normalized" : "COUNT(CASE WHEN (amount > 1000) THEN 1 ELSE NULL END)"
+  }, {
+    "id" : "agg-04",
+    "expression" : "avg(if(discountAmount > 0, discountAmount, null))",
+    "dialect" : "mysql",
+    "sql_normalized" : "AVG(CASE WHEN (discountAmount > 0) THEN discountAmount ELSE NULL END)"
+  }, {
+    "id" : "ar-01-outstanding",
+    "expression" : "sum(if(move$moveType == 'out_invoice' && move$state == 'posted' && move$paymentState in ('not_paid', 'partial', 'in_payment'), amountResidual, 0))",
+    "dialect" : "mysql",
+    "sql_normalized" : "SUM(CASE WHEN (((move$moveType = 'out_invoice') AND (move$state = 'posted')) AND (move$paymentState IN ('not_paid', 'partial', 'in_payment'))) THEN amountResidual ELSE 0 END)"
+  }, {
+    "id" : "ar-02-overdue-amount",
+    "expression" : "sum(if(move$moveType == 'out_invoice' && move$state == 'posted' && move$paymentState in ('not_paid', 'partial', 'in_payment') && dateMaturity < now(), amountResidual, 0))",
+    "dialect" : "mysql",
+    "sql_normalized" : "SUM(CASE WHEN ((((move$moveType = 'out_invoice') AND (move$state = 'posted')) AND (move$paymentState IN ('not_paid', 'partial', 'in_payment'))) AND (dateMaturity < NOW())) THEN amountResidual ELSE 0 END)"
+  } ]
+}

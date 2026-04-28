@@ -25,7 +25,7 @@ follow_up_required: no
 | Java implementation | `ba7831e feat(timeWindow): support post calculatedFields in timeWindow context` |
 | Python implementation | `123e093 feat(timeWindow): support post calculated fields` |
 | quality fix | post calculatedField `alias` order-by mapping fixed in this review |
-| full regression | `python -m pytest -q` -> 3299 passed / 1 skipped / 1 xfailed |
+| full regression | `python -m pytest -q` -> 3301 passed / 1 xfailed |
 
 ## Changed Surface
 
