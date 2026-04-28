@@ -71,6 +71,15 @@ M6 wrapper only adds enough context (model name, QM shape) to route
 the error without forcing callers to parse v1.3 engine stacks.
 """
 
+# S7a — Relation cannot be wrapped for the target dialect.
+RELATION_WRAP_UNSUPPORTED: str = "compose-compile-error/relation-wrap-unsupported"
+
+# S7a — Relation contains inner CTE that cannot be hoisted for the target dialect.
+RELATION_CTE_HOIST_UNSUPPORTED: str = "compose-compile-error/relation-cte-hoist-unsupported"
+
+# S7a — Relation and outer plan target different datasources.
+RELATION_DATASOURCE_MISMATCH: str = "compose-compile-error/relation-datasource-mismatch"
+
 
 # ---------------------------------------------------------------------------
 # Public registries
@@ -83,6 +92,9 @@ ALL_CODES: FrozenSet[str] = frozenset({
     CROSS_DATASOURCE_REJECTED,
     MISSING_BINDING,
     PER_BASE_COMPILE_FAILED,
+    RELATION_WRAP_UNSUPPORTED,
+    RELATION_CTE_HOIST_UNSUPPORTED,
+    RELATION_DATASOURCE_MISMATCH,
 })
 
 #: Valid phase labels carried by :class:`ComposeCompileError.phase`.

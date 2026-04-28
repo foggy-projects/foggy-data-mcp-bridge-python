@@ -22,7 +22,7 @@ class TestNamespaceAndCodes:
 
     def test_all_codes_count(self):
         # NAMESPACE is NOT in ALL_CODES by design
-        assert len(error_codes.ALL_CODES) == 4
+        assert len(error_codes.ALL_CODES) == 7
 
     def test_all_codes_literal_strings(self):
         assert error_codes.UNSUPPORTED_PLAN_SHAPE == "compose-compile-error/unsupported-plan-shape"

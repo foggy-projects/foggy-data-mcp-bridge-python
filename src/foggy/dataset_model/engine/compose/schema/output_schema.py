@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, FrozenSet, Iterator, List, Optional, Tuple
 
 from .. import feature_flags
 from ..plan.plan_id import PlanId
@@ -79,6 +79,11 @@ class ColumnSpec:
     # G10 PR1 — types only, no producer sets these yet
     plan_provenance: Optional[PlanId] = None
     is_ambiguous: bool = False
+    # S7a POC — semantic metadata, excluded from __eq__/__hash__
+    semantic_kind: Optional[str] = None
+    value_meaning: Optional[str] = None
+    lineage: Optional[FrozenSet[str]] = None
+    reference_policy: Optional[FrozenSet[str]] = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.name, str) or not self.name:

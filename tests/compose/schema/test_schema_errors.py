@@ -25,9 +25,12 @@ EXPECTED_CODES = {
     "compose-schema-error/field-access/denied",
     "compose-schema-error/column/plan-not-bound",
     "compose-schema-error/column/field-not-found",
-    # G5 Phase 2 (F5) — append two F5 plan-qualified codes; ALL_CODES = 14.
+    # G5 Phase 2 (F5) — append two F5 plan-qualified codes.
     "compose-schema-error/column/plan-type-invalid",
     "compose-schema-error/column/plan-not-visible",
+    # S7a — append two relation codes; ALL_CODES = 16.
+    "compose-schema-error/relation/output-schema-unavailable",
+    "compose-schema-error/relation/column-reference-unsupported",
 }
 
 
@@ -42,7 +45,7 @@ EXPECTED_PHASES = {
 class TestCatalogue:
     def test_all_codes_matches_expected(self):
         assert error_codes.ALL_CODES == frozenset(EXPECTED_CODES)
-        assert len(error_codes.ALL_CODES) == 14
+        assert len(error_codes.ALL_CODES) == 16
 
     def test_constants_expose_full_namespace(self):
         assert (

@@ -108,6 +108,13 @@ COLUMN_PLAN_TYPE_INVALID: str = _qualify("column/plan-type-invalid")
 # (PR4 permission-validate stage).
 COLUMN_PLAN_NOT_VISIBLE: str = _qualify("column/plan-not-visible")
 
+# S7a — Relation output schema is unavailable (e.g. not yet compiled).
+RELATION_OUTPUT_SCHEMA_UNAVAILABLE: str = _qualify("relation/output-schema-unavailable")
+
+# S7a — Column reference within relation is unsupported (e.g. aggregatable
+# on a ratio column).
+RELATION_COLUMN_REFERENCE_UNSUPPORTED: str = _qualify("relation/column-reference-unsupported")
+
 
 # ---------------------------------------------------------------------------
 # Phase tags (kept compatible with the sandbox-error phase set so error
@@ -145,5 +152,7 @@ ALL_CODES: frozenset = frozenset(
         COLUMN_FIELD_NOT_FOUND,
         COLUMN_PLAN_TYPE_INVALID,
         COLUMN_PLAN_NOT_VISIBLE,
+        RELATION_OUTPUT_SCHEMA_UNAVAILABLE,
+        RELATION_COLUMN_REFERENCE_UNSUPPORTED,
     }
 )
