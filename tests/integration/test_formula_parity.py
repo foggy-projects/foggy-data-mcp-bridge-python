@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import List, Tuple
+from typing import List
 
 import pytest
 
@@ -269,10 +269,16 @@ def test_committed_snapshot_not_hand_edited() -> None:
 
 
 def test_parity_matches_java_snapshot() -> None:
-    """Strict Java↔Python compare, when the Java snapshot is available."""
+    """Strict Java↔Python compare, when the Java snapshot is available.
+
+    Stage 3: migrated to :mod:`tests.integration._golden_sql_diff` helper
+    for structured mismatch output.
+    """
+    from tests.integration._golden_sql_diff import GoldenCase, assert_golden_cases
+
     snapshot = _load_snapshot()
     java_by_id: dict = {row["id"]: row for row in snapshot.get("snapshots", [])}
-    mismatches: List[Tuple[str, str]] = []
+    cases: list[GoldenCase] = []
 
     for entry in _CATALOG:
         java_row = java_by_id.get(entry["id"])
@@ -283,29 +289,26 @@ def test_parity_matches_java_snapshot() -> None:
 
         compiler = FormulaCompiler(SqlDialect.of(dialect_name))
         py_result = compiler.compile(expr, lambda name: name)
-        py_sql, py_params = to_canonical(
-            py_result.sql_fragment, list(py_result.bind_params)
-        )
 
         java_raw_sql: str = java_row["sql_normalized"]
         java_raw_params = java_row.get("bind_params", None)
-        java_sql, java_params = to_canonical(
-            java_raw_sql,
-            list(java_raw_params) if java_raw_params is not None else None,
+
+        cases.append(
+            GoldenCase(
+                feature="formula",
+                case_id=entry["id"],
+                dialect=dialect_name,
+                expected_sql=java_raw_sql,
+                actual_sql=py_result.sql_fragment,
+                expected_params=(
+                    list(java_raw_params) if java_raw_params is not None else None
+                ),
+                actual_params=list(py_result.bind_params),
+                source_hint="_parity_snapshot.json",
+            )
         )
 
-        if py_sql != java_sql or canonicalize_params(
-            py_params
-        ) != canonicalize_params(java_params):
-            mismatches.append(
-                (
-                    entry["id"],
-                    f"py={py_sql!r} params={py_params} | "
-                    f"java={java_sql!r} params={java_params}",
-                )
-            )
-
-    assert not mismatches, (
-        "parity drift between Java snapshot and Python compiler:\n"
-        + "\n".join(f"  [{mid}] {detail}" for mid, detail in mismatches)
+    assert len(cases) >= 30, (
+        f"expected >= 30 Java↔Python compare cases, got {len(cases)}"
     )
+    assert_golden_cases(cases)
