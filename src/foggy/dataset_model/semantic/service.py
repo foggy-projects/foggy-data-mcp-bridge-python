@@ -126,8 +126,10 @@ class SemanticQueryService(SemanticServiceResolver):
             cache_ttl_seconds: Cache TTL in seconds
             executor: Optional database executor for query execution
             dialect: Optional database dialect for identifier quoting.
-                     If None, uses ANSI double-quote (compatible with
-                     PostgreSQL, SQLite, and most databases).
+                     If None and a known executor is provided, the service
+                     infers the matching SQL dialect. Otherwise it uses ANSI
+                     double-quote (compatible with PostgreSQL, SQLite, and
+                     most databases).
             use_ast_expression_compiler: v1.5 Phase 3 opt-in.  When True,
                      computed-field / slice / orderBy / having expressions
                      are compiled via the fsscript AST visitor first,
@@ -145,7 +147,7 @@ class SemanticQueryService(SemanticServiceResolver):
         self._cache: Dict[str, Tuple[SemanticQueryResponse, float]] = {}
         self._executor = executor
         self._executor_manager = None  # Optional[ExecutorManager] for multi-datasource routing
-        self._dialect = dialect
+        self._dialect = dialect or self._infer_dialect_from_executor(executor)
         self._use_ast_expression_compiler = use_ast_expression_compiler
         self._formula_registry: SqlFormulaRegistry = get_default_registry()
         self._hierarchy_registry = get_default_hierarchy_registry()
@@ -168,6 +170,26 @@ class SemanticQueryService(SemanticServiceResolver):
         # ANSI SQL standard: double-quote for identifiers
         escaped = identifier.replace('"', '""')
         return f'"{escaped}"'
+
+    @staticmethod
+    def _infer_dialect_from_executor(executor):
+        if executor is None:
+            return None
+
+        executor_name = executor.__class__.__name__
+        if executor_name == "MySQLExecutor":
+            from foggy.dataset.dialects.mysql import MySqlDialect
+
+            return MySqlDialect()
+        if executor_name == "PostgreSQLExecutor":
+            from foggy.dataset.dialects.postgres import PostgresDialect
+
+            return PostgresDialect()
+        if executor_name == "SQLiteExecutor":
+            from foggy.dataset.dialects.sqlite import SqliteDialect
+
+            return SqliteDialect()
+        return None
 
     # v1.4 M4 Step 4.1 helpers ------------------------------------------------
 
@@ -1435,7 +1457,7 @@ class SemanticQueryService(SemanticServiceResolver):
                 expr = f"{aggregation}({resolved['sql_expr']})"
             builder.select(f"{expr} AS {self._qi(metric)}")
 
-        time_range_filter = self._time_window_range_filter(tw)
+        time_range_filter = self._time_window_range_filter(model, tw)
         if time_range_filter:
             self._add_filter(builder, model, time_range_filter, ensure_runtime_joins)
 
@@ -1444,14 +1466,57 @@ class SemanticQueryService(SemanticServiceResolver):
 
         return builder.build()
 
-    def _time_window_range_filter(self, tw: TimeWindowDef) -> Optional[Dict[str, Any]]:
+    def _time_window_range_filter(
+        self,
+        model: DbTableModelImpl,
+        tw: TimeWindowDef,
+    ) -> Optional[Dict[str, Any]]:
         if not tw.value:
             return None
+        values = [
+            self._coerce_time_window_bound(
+                model,
+                tw.field,
+                RelativeDateParser.resolve(value),
+            )
+            for value in tw.value
+        ]
         return {
             "field": tw.field,
             "op": tw.range,
-            "value": [RelativeDateParser.resolve(value) for value in tw.value],
+            "value": values,
         }
+
+    @staticmethod
+    def _coerce_time_window_bound(
+        model: DbTableModelImpl,
+        field: str,
+        value: Any,
+    ) -> Any:
+        if not isinstance(value, str) or not value.isdigit():
+            return value
+        if not field.endswith("$id") or "$" not in field:
+            return value
+
+        dim_name = field.split("$", 1)[0]
+        join_def = model.get_dimension_join(dim_name)
+        if join_def is None:
+            return value
+
+        key_name = (join_def.primary_key or "").lower()
+        dim_hint = " ".join(
+            part for part in (
+                dim_name,
+                join_def.name,
+                join_def.table_name,
+                join_def.description,
+            )
+            if part
+        ).lower()
+        is_date_like = any(token in dim_hint for token in ("date", "time", "calendar"))
+        if is_date_like and key_name.endswith("_key"):
+            return int(value)
+        return value
 
     def _time_window_group_fields(self, request: SemanticQueryRequest) -> List[str]:
         fields: List[str] = []

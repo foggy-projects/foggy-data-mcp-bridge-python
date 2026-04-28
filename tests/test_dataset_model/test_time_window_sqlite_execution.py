@@ -1,0 +1,154 @@
+"""SQLite execution coverage for Python timeWindow SQL lowering."""
+
+from __future__ import annotations
+
+import sqlite3
+
+import pytest
+
+from foggy.dataset.db.executor import SQLiteExecutor
+from foggy.dataset_model.semantic.service import SemanticQueryService
+from foggy.demo.models.ecommerce_models import create_fact_sales_model
+from foggy.mcp_spi import SemanticQueryRequest
+
+
+@pytest.fixture()
+def sqlite_time_window_service(tmp_path):
+    db_path = tmp_path / "time_window.sqlite"
+    _seed_time_window_db(db_path)
+
+    executor = SQLiteExecutor(str(db_path))
+    service = SemanticQueryService(executor=executor, enable_cache=False)
+    service.register_model(create_fact_sales_model())
+
+    yield service
+
+    service._run_async_in_sync(executor.close())
+
+
+def test_rolling_range_executes_on_sqlite(sqlite_time_window_service):
+    response = sqlite_time_window_service.query_model(
+        "FactSalesModel",
+        SemanticQueryRequest(
+            columns=["salesDate$id", "salesAmount", "salesAmount__rolling_7d"],
+            group_by=["salesDate$id"],
+            time_window={
+                "field": "salesDate$id",
+                "grain": "day",
+                "comparison": "rolling_7d",
+                "range": "[)",
+                "value": ["20240101", "20240104"],
+                "targetMetrics": ["salesAmount"],
+            },
+            order_by=[{"field": "salesDate$id", "dir": "asc"}],
+        ),
+        mode="execute",
+    )
+
+    assert response.error is None
+    assert response.params == [20240101, 20240104]
+    assert [
+        (
+            row["salesDate$id"],
+            row["salesAmount"],
+            row["salesAmount__rolling_7d"],
+        )
+        for row in response.items
+    ] == [
+        (20240101, 150.0, 150.0),
+        (20240102, 20.0, 170.0),
+        (20240103, 30.0, 200.0),
+    ]
+
+
+def test_yoy_comparative_executes_on_sqlite(sqlite_time_window_service):
+    response = sqlite_time_window_service.query_model(
+        "FactSalesModel",
+        SemanticQueryRequest(
+            columns=[
+                "salesDate$year",
+                "salesDate$month",
+                "salesAmount",
+                "salesAmount__prior",
+                "salesAmount__diff",
+                "salesAmount__ratio",
+            ],
+            group_by=["salesDate$year", "salesDate$month"],
+            time_window={
+                "field": "salesDate$id",
+                "grain": "month",
+                "comparison": "yoy",
+                "targetMetrics": ["salesAmount"],
+            },
+            order_by=[
+                {"field": "salesDate$year", "dir": "asc"},
+                {"field": "salesDate$month", "dir": "asc"},
+            ],
+        ),
+        mode="execute",
+    )
+
+    assert response.error is None
+    row_2024_jan = next(
+        row for row in response.items
+        if row["salesDate$year"] == 2024 and row["salesDate$month"] == 1
+    )
+    assert row_2024_jan["salesAmount"] == 200.0
+    assert row_2024_jan["salesAmount__prior"] == 100.0
+    assert row_2024_jan["salesAmount__diff"] == 100.0
+    assert row_2024_jan["salesAmount__ratio"] == 1.0
+
+
+def _seed_time_window_db(db_path) -> None:
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE dim_date (
+                date_key INTEGER PRIMARY KEY,
+                full_date TEXT NOT NULL,
+                year INTEGER NOT NULL,
+                quarter INTEGER NOT NULL,
+                month INTEGER NOT NULL,
+                month_name TEXT,
+                day_of_week INTEGER,
+                is_weekend INTEGER
+            );
+
+            CREATE TABLE fact_sales (
+                date_key INTEGER NOT NULL,
+                sales_amount REAL NOT NULL
+            );
+            """
+        )
+        conn.executemany(
+            """
+            INSERT INTO dim_date (
+                date_key, full_date, year, quarter, month,
+                month_name, day_of_week, is_weekend
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (20230101, "2023-01-01", 2023, 1, 1, "Jan", 7, 1),
+                (20230201, "2023-02-01", 2023, 1, 2, "Feb", 3, 0),
+                (20240101, "2024-01-01", 2024, 1, 1, "Jan", 1, 0),
+                (20240102, "2024-01-02", 2024, 1, 1, "Jan", 2, 0),
+                (20240103, "2024-01-03", 2024, 1, 1, "Jan", 3, 0),
+                (20240201, "2024-02-01", 2024, 1, 2, "Feb", 4, 0),
+            ],
+        )
+        conn.executemany(
+            "INSERT INTO fact_sales (date_key, sales_amount) VALUES (?, ?)",
+            [
+                (20230101, 100.0),
+                (20230201, 120.0),
+                (20240101, 150.0),
+                (20240102, 20.0),
+                (20240103, 30.0),
+                (20240201, 90.0),
+            ],
+        )
+        conn.commit()
+    finally:
+        conn.close()

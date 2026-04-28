@@ -4,6 +4,7 @@ from datetime import date
 
 import pytest
 
+from foggy.dataset.db.executor import MySQLExecutor
 from foggy.dataset_model.semantic.service import SemanticQueryService
 from foggy.dataset_model.semantic.time_window import (
     RelativeDateParser,
@@ -385,6 +386,42 @@ class TestTimeWindowServiceGuard:
             "salesAmount",
             "salesAmount__rolling_7d",
         ]
+
+    def test_time_window_infers_mysql_dialect_from_executor(self):
+        svc = SemanticQueryService(
+            executor=MySQLExecutor(
+                host="localhost",
+                port=13308,
+                database="foggy_test",
+                user="foggy",
+                password="foggy_test_123",
+            )
+        )
+        svc.register_model(create_fact_sales_model())
+
+        response = svc.query_model(
+            "FactSalesModel",
+            SemanticQueryRequest(
+                columns=["salesDate$id", "salesAmount", "salesAmount__rolling_7d"],
+                group_by=["salesDate$id"],
+                time_window={
+                    "field": "salesDate$id",
+                    "grain": "day",
+                    "comparison": "rolling_7d",
+                    "range": "[)",
+                    "value": ["20240101", "20240108"],
+                    "targetMetrics": ["salesAmount"],
+                },
+            ),
+            mode="validate",
+        )
+
+        assert response.error is None
+        sql = response.sql or ""
+        assert "SUM(`salesAmount`) OVER (ORDER BY `salesDate$id` ASC" in sql
+        assert 'SUM("salesAmount")' not in sql
+        assert "dd.date_key AS `salesDate$id`" in sql
+        assert response.params == [20240101, 20240108]
 
     def test_time_window_group_fields_do_not_infer_metric_as_dimension(self):
         svc = SemanticQueryService()
