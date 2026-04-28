@@ -181,6 +181,12 @@
           "expression": "salesAmount - salesAmount__rolling_7d"
         }
       ],
+      "requestColumns": [
+        "salesDate$id",
+        "salesAmount",
+        "salesAmount__rolling_7d",
+        "rollingGap"
+      ],
       "expectedColumns": [
         "salesDate$id",
         "salesAmount",
@@ -321,6 +327,15 @@
           "name": "growthPercent",
           "expression": "salesAmount__ratio * 100"
         }
+      ],
+      "requestColumns": [
+        "salesDate$year",
+        "salesDate$month",
+        "salesAmount",
+        "salesAmount__prior",
+        "salesAmount__diff",
+        "salesAmount__ratio",
+        "growthPercent"
       ],
       "expectedColumns": [
         "salesDate$year",

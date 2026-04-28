@@ -34,31 +34,39 @@ def _service() -> SemanticQueryService:
 def _query_shape(case: dict[str, Any]) -> tuple[list[str], list[str]]:
     comparison = case["comparison"]
     expected_columns = list(case.get("expectedColumns", ()))
+    request_columns = case.get("requestColumns")
 
     if comparison.startswith("rolling_"):
-        return _unique(["salesDate$id", "salesAmount", *expected_columns]), ["salesDate$id"]
+        columns = request_columns or ["salesDate$id", "salesAmount", *expected_columns]
+        return _unique(list(columns)), ["salesDate$id"]
 
     if comparison == "mtd":
         group_by = ["salesDate$year", "salesDate$month", "salesDate$id"]
-        return _unique([*group_by, "salesAmount", *expected_columns]), group_by
+        columns = request_columns or [*group_by, "salesAmount", *expected_columns]
+        return _unique(list(columns)), group_by
 
     if comparison == "ytd":
         group_by = ["salesDate$year", "salesDate$id"]
-        return _unique([*group_by, "salesAmount", *expected_columns]), group_by
+        columns = request_columns or [*group_by, "salesAmount", *expected_columns]
+        return _unique(list(columns)), group_by
 
     if comparison == "yoy":
         group_by = ["salesDate$year", "salesDate$month"]
-        return _unique([*expected_columns]), group_by
+        columns = request_columns or expected_columns
+        return _unique(list(columns)), group_by
 
     if comparison == "mom":
         group_by = ["salesDate$month", "salesDate$id"]
-        return _unique([*expected_columns]), group_by
+        columns = request_columns or expected_columns
+        return _unique(list(columns)), group_by
 
     if comparison == "wow":
         group_by = ["salesDate$week", "salesDate$dayOfWeek"]
-        return _unique([*expected_columns]), group_by
+        columns = request_columns or expected_columns
+        return _unique(list(columns)), group_by
 
-    return _unique(["salesDate$id", "salesAmount", *expected_columns]), ["salesDate$id"]
+    columns = request_columns or ["salesDate$id", "salesAmount", *expected_columns]
+    return _unique(list(columns)), ["salesDate$id"]
 
 
 def _unique(values: list[str]) -> list[str]:

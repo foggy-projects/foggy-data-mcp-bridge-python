@@ -75,19 +75,24 @@ def _query_shape(case: dict[str, Any]) -> tuple[list[str], list[str]]:
     """Derive columns and group_by for a catalog case."""
     comparison = case["comparison"]
     expected_columns = list(case.get("expectedColumns", ()))
+    request_columns = case.get("requestColumns")
 
     if comparison.startswith("rolling_"):
-        return _unique(["salesDate$id", "salesAmount", *expected_columns]), ["salesDate$id"]
+        columns = request_columns or ["salesDate$id", "salesAmount", *expected_columns]
+        return _unique(list(columns)), ["salesDate$id"]
 
     if comparison == "yoy":
         group_by = ["salesDate$year", "salesDate$month"]
-        return _unique([*expected_columns]), group_by
+        columns = request_columns or expected_columns
+        return _unique(list(columns)), group_by
 
     if comparison == "mom":
         group_by = ["salesDate$month", "salesDate$id"]
-        return _unique([*expected_columns]), group_by
+        columns = request_columns or expected_columns
+        return _unique(list(columns)), group_by
 
-    return _unique(["salesDate$id", "salesAmount", *expected_columns]), ["salesDate$id"]
+    columns = request_columns or ["salesDate$id", "salesAmount", *expected_columns]
+    return _unique(list(columns)), ["salesDate$id"]
 
 
 def _run_python_query(case: dict[str, Any]) -> tuple[str, list[str]]:
@@ -217,6 +222,7 @@ def test_full_golden_diff_when_snapshot_available() -> None:
     yoy_sql = java_by_name["yoy-month-post-calc-growth-happy"]["sql_normalized"]
     assert yoy_sql, "Java yoy SQL is empty"
     # Comparative join structure markers
+    assert '"growthPercent"' in yoy_sql, "Java yoy SQL missing growthPercent alias"
     assert '"salesAmount__prior"' in yoy_sql, "Java yoy SQL missing __prior alias"
     assert '"salesAmount__diff"' in yoy_sql, "Java yoy SQL missing __diff alias"
     assert '"salesAmount__ratio"' in yoy_sql, "Java yoy SQL missing __ratio alias"
@@ -234,6 +240,7 @@ def test_full_golden_diff_when_snapshot_available() -> None:
     assert "OVER" in rolling_sql, "Java rolling SQL missing OVER clause"
     assert "ROWS BETWEEN" in rolling_sql, "Java rolling SQL missing window frame"
     assert "6 PRECEDING" in rolling_sql, "Java rolling SQL missing 7-day window offset"
+    assert '"rollingGap"' in rolling_sql, "Java rolling SQL missing rollingGap alias"
     assert '"salesAmount__rolling_7d"' in rolling_sql, "Java rolling SQL missing __rolling_7d alias"
 
     # Cross-check: run Python queries and verify both sides produce valid SQL

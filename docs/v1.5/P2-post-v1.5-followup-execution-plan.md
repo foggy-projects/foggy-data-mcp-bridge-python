@@ -163,24 +163,23 @@ Implementation:
 
 ### Stage 5 - calculatedFields output alias projection contract alignment
 
-- status: planned
+- status: **complete** ✅
 - priority: P2
-- trigger: Java side decides to support request-scope calculatedFields output names in `columns`, especially for `timeWindow + post scalar calculatedFields`
+- completed: 2026-04-28
+- evidence: `S5-calculatedFields-alias-projection-contract-progress.md`
 
-Requirement:
+Implementation:
 
-- Define the cross-engine contract for `calculatedFields=[{name: ...}]` output names in `columns`.
-- Keep SQL-style aliases such as `columns=["amount as amount1"]` out of the semantic column-name path unless explicitly supported by the existing inline expression parser.
-- For `timeWindow + post scalar calculatedFields`, decide whether `columns=["growthPercent"]` / `columns=["rollingGap"]` is valid.
-- If valid, Java `SchemaAwareFieldValidationStep` must include legal request-scope calculatedFields output names in the visible field set while still rejecting arbitrary unknown columns.
-- Python should keep its current behavior unless the final Java contract chooses a stricter rule.
-
-Acceptance:
-
-- Java and Python agree on calc alias in `columns` for non-timeWindow and timeWindow post-calc paths.
-- Negative cases still fail closed: unknown columns, targetMetrics referencing calculatedFields, post-calc agg/window definitions.
-- Cross-engine fixture catalog includes both accepted and rejected projection cases.
-- Real DB matrix includes at least one accepted post-calc alias projection path per supported runtime engine.
+- Java `TimeWindowInterceptor`: strips calc field output names from `originalColumns` in the `BaseModelPlan` — post-calc aliases are projected in the outer `DerivedQueryPlan` wrapper only.
+- Java `SemanticQueryServiceV3Impl`: passes `calculatedFields` to `extData` for both `generateSql()` and `queryModel(..., "execute", ...)`, so `TimeWindowInterceptor` can build the outer post-calc projection wrapper.
+- Java `SchemaAwareFieldValidationStep`: already adds request-level `calculatedFields.name` to `schemaFields` (no change needed for non-timeWindow path).
+- New Java test `SchemaAwareCalcFieldAliasTest`: 7 tests covering non-TW calc alias in columns/orderBy, TW growthPercent/rollingGap in preview and execute mode, unknown column rejection, and calc alias without definition rejection.
+- Updated `TimeWindowParitySnapshotTest`: `growthPercent`/`rollingGap` now included in request columns.
+- Python fixture updated: `requestColumns` field added to post-calc cases.
+- Java `TimeWindowValidatorTest`: 19 tests still passing (negative cases preserved).
+- Python golden diff, parity catalog, and real DB matrix all passing.
+- `columns=["amount as amount1"]` is NOT opened by this change — stays on existing InlineExpressionParser path.
+- `targetMetrics` referencing calculatedFields, post-calc agg/window/unknown-ref continue to fail-closed.
 
 ### Stage 6 - Phase 4 AST optional
 
