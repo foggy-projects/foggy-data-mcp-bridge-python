@@ -1,5 +1,7 @@
 """Python mirror tests for Java TimeWindowDef / TimeWindowValidator."""
 
+from datetime import date
+
 import pytest
 
 from foggy.dataset_model.semantic.service import SemanticQueryService
@@ -46,6 +48,16 @@ class TestRelativeDateParser:
         assert not RelativeDateParser.is_valid("")
         assert not RelativeDateParser.is_valid("not-a-date")
         assert not RelativeDateParser.is_valid("2024-99-99")
+
+    def test_resolves_relative_values_against_anchor(self):
+        anchor = date(2024, 3, 31)
+
+        assert RelativeDateParser.resolve("now", today=anchor) == "2024-03-31"
+        assert RelativeDateParser.resolve("-1D", today=anchor) == "2024-03-30"
+        assert RelativeDateParser.resolve("+1M", today=anchor) == "2024-04-30"
+        assert RelativeDateParser.resolve("-1Q", today=anchor) == "2023-12-31"
+        assert RelativeDateParser.resolve("-1Y", today=anchor) == "2023-03-31"
+        assert RelativeDateParser.resolve("20240101", today=anchor) == "20240101"
 
 
 class TestTimeWindowValidator:
@@ -288,7 +300,7 @@ class TestTimeWindowServiceGuard:
         assert "salesDate$id" in time_fields
         assert "salesAmount" in measures
 
-    def test_time_window_with_value_range_fails_closed_until_range_parity(self):
+    def test_time_window_value_range_lowers_to_base_cte_filter(self):
         svc = SemanticQueryService()
         svc.register_model(create_fact_sales_model())
 
@@ -301,7 +313,7 @@ class TestTimeWindowServiceGuard:
                     "field": "salesDate$id",
                     "grain": "day",
                     "comparison": "rolling_7d",
-                    "value": ["-30D", "now"],
+                    "value": ["2024-01-01", "2024-02-01"],
                     "targetMetrics": ["salesAmount"],
                     "rollingAggregator": "avg",
                 },
@@ -309,8 +321,36 @@ class TestTimeWindowServiceGuard:
             mode="validate",
         )
 
-        assert response.error is not None
-        assert "TIMEWINDOW_RANGE_NOT_IMPLEMENTED" in response.error
+        assert response.error is None
+        sql = response.sql or ""
+        assert "WHERE dd.date_key >= ? AND dd.date_key < ?" in sql
+        assert response.params == ["2024-01-01", "2024-02-01"]
+
+    def test_time_window_closed_range_lowers_to_inclusive_end_filter(self):
+        svc = SemanticQueryService()
+        svc.register_model(create_fact_sales_model())
+
+        response = svc.query_model(
+            "FactSalesModel",
+            SemanticQueryRequest(
+                columns=["salesDate$id", "salesAmount", "salesAmount__ytd"],
+                group_by=["salesDate$year", "salesDate$id"],
+                time_window={
+                    "field": "salesDate$id",
+                    "grain": "month",
+                    "comparison": "ytd",
+                    "range": "[]",
+                    "value": ["2024-01-01", "2024-12-31"],
+                    "targetMetrics": ["salesAmount"],
+                },
+            ),
+            mode="validate",
+        )
+
+        assert response.error is None
+        sql = response.sql or ""
+        assert "WHERE dd.date_key >= ? AND dd.date_key <= ?" in sql
+        assert response.params == ["2024-01-01", "2024-12-31"]
 
     def test_rolling_7d_sql_preview_uses_two_stage_window_plan(self):
         svc = SemanticQueryService()

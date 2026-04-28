@@ -54,6 +54,7 @@ from foggy.dataset_model.semantic.fsscript_to_sql_visitor import (
 )
 from foggy.dataset_model.semantic.masking import apply_masking
 from foggy.dataset_model.semantic.time_window import (
+    RelativeDateParser,
     TimeWindowDef,
     TimeWindowExpander,
     TimeWindowValidator,
@@ -982,17 +983,12 @@ class SemanticQueryService(SemanticServiceResolver):
 
         Stage 1 aggregates the base metric at the requested time grain.
         Stage 2 projects the requested columns plus generated window columns.
-        Comparative period and range lowering stay fail-closed until their
-        dedicated plan shapes are implemented.
+        Stage 1 also lowers ``timeWindow.value`` / ``range`` into a base time
+        field filter when present. Comparative period stays fail-closed until
+        its dedicated plan shape is implemented.
         """
         tw, measure_fields = self._validate_time_window(model, request)
 
-        if tw.value:
-            raise NotImplementedError(
-                "TIMEWINDOW_RANGE_NOT_IMPLEMENTED: Python timeWindow SQL "
-                "supports rolling/cumulative windows without range lowering; "
-                "value/range execution parity is not implemented yet."
-            )
         if tw.is_comparative():
             raise NotImplementedError(
                 "TIMEWINDOW_COMPARATIVE_NOT_IMPLEMENTED: Python engine has "
@@ -1030,6 +1026,7 @@ class SemanticQueryService(SemanticServiceResolver):
         base_sql, params = self._build_time_window_base_sql(
             model,
             request,
+            tw,
             base_group_fields,
             metric_fields,
         )
@@ -1127,6 +1124,7 @@ class SemanticQueryService(SemanticServiceResolver):
         self,
         model: DbTableModelImpl,
         request: SemanticQueryRequest,
+        tw: TimeWindowDef,
         group_fields: List[str],
         metric_fields: List[str],
     ) -> Tuple[str, List[Any]]:
@@ -1203,7 +1201,10 @@ class SemanticQueryService(SemanticServiceResolver):
             )
             builder.left_join(join_def.table_name, alias=table_alias, on_condition=on_cond)
 
-        def ensure_runtime_joins(field_name: str) -> None:
+        def ensure_runtime_joins(field_name: Any) -> None:
+            if isinstance(field_name, DimensionJoinDef):
+                ensure_join(field_name)
+                return
             ensure_explicit_joins_for_field(field_name)
             resolved = model.resolve_field(field_name)
             if resolved and resolved["join_def"]:
@@ -1234,10 +1235,23 @@ class SemanticQueryService(SemanticServiceResolver):
                 expr = f"{aggregation}({resolved['sql_expr']})"
             builder.select(f"{expr} AS {self._qi(metric)}")
 
+        time_range_filter = self._time_window_range_filter(tw)
+        if time_range_filter:
+            self._add_filter(builder, model, time_range_filter, ensure_runtime_joins)
+
         for filter_item in request.slice:
             self._add_filter(builder, model, filter_item, ensure_runtime_joins)
 
         return builder.build()
+
+    def _time_window_range_filter(self, tw: TimeWindowDef) -> Optional[Dict[str, Any]]:
+        if not tw.value:
+            return None
+        return {
+            "field": tw.field,
+            "op": tw.range,
+            "value": [RelativeDateParser.resolve(value) for value in tw.value],
+        }
 
     def _time_window_group_fields(self, request: SemanticQueryRequest) -> List[str]:
         fields: List[str] = []

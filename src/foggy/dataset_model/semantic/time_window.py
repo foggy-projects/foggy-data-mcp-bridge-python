@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import calendar
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, timedelta
 import re
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
@@ -31,6 +32,42 @@ class RelativeDateParser:
         if RELATIVE_PATTERN.match(value):
             return True
         return _is_absolute_date(value)
+
+    @staticmethod
+    def resolve(expr: str, today: Optional[date] = None) -> str:
+        """Resolve a supported timeWindow value into a bind parameter.
+
+        Absolute values keep their original shape because models may use either
+        ISO dates or compact date keys. Relative values are anchored to
+        ``today`` and emitted as ISO dates.
+        """
+        value = str(expr).strip()
+        anchor = today or date.today()
+        if value.lower() == "now":
+            return anchor.isoformat()
+
+        match = RELATIVE_PATTERN.match(value)
+        if match:
+            sign_text, amount_text, unit = match.groups()
+            amount = int(amount_text)
+            if sign_text == "-":
+                amount = -amount
+            unit = unit.upper()
+            if unit == "D":
+                return (anchor + timedelta(days=amount)).isoformat()
+            if unit == "W":
+                return (anchor + timedelta(weeks=amount)).isoformat()
+            if unit == "M":
+                return _add_months(anchor, amount).isoformat()
+            if unit == "Q":
+                return _add_months(anchor, amount * 3).isoformat()
+            if unit == "Y":
+                return _add_months(anchor, amount * 12).isoformat()
+
+        if _is_absolute_date(value):
+            return value
+
+        raise ValueError("TIMEWINDOW_VALUE_PARSE_FAILED")
 
 
 @dataclass(frozen=True)
@@ -404,3 +441,11 @@ def _is_absolute_date(value: str) -> bool:
         except ValueError:
             continue
     return False
+
+
+def _add_months(value: date, months: int) -> date:
+    month_index = value.month - 1 + months
+    year = value.year + month_index // 12
+    month = month_index % 12 + 1
+    day = min(value.day, calendar.monthrange(year, month)[1])
+    return date(year, month, day)
