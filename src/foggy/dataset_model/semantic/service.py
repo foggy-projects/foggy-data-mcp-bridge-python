@@ -52,6 +52,11 @@ from foggy.dataset_model.semantic.fsscript_to_sql_visitor import (
     AstCompileError,
 )
 from foggy.dataset_model.semantic.masking import apply_masking
+from foggy.dataset_model.semantic.time_window import (
+    TimeWindowDef,
+    TimeWindowValidator,
+    collect_time_window_field_sets,
+)
 from foggy.dataset_model.semantic.physical_column_mapping import (
     PhysicalColumnMapping,
     build_physical_column_mapping,
@@ -654,6 +659,8 @@ class SemanticQueryService(SemanticServiceResolver):
         warnings: List[str] = []
         columns_info: List[Dict[str, Any]] = []
 
+        self._reject_unimplemented_time_window(model, request)
+
         builder = SqlQueryBuilder()
 
         # 1. FROM clause
@@ -960,6 +967,33 @@ class SemanticQueryService(SemanticServiceResolver):
 
         return QueryBuildResult(
             sql=sql, params=params, warnings=warnings, columns=columns_info,
+        )
+
+    def _reject_unimplemented_time_window(
+        self,
+        model: DbTableModelImpl,
+        request: SemanticQueryRequest,
+    ) -> None:
+        """Validate timeWindow payload then fail closed until execution parity lands."""
+        if not request.time_window:
+            return
+
+        tw = TimeWindowDef.from_map(request.time_window)
+        if tw is None:
+            return
+        available_fields, time_fields, measure_fields = collect_time_window_field_sets(model)
+        error_code = TimeWindowValidator.validate(
+            tw,
+            available_fields=available_fields,
+            time_fields=time_fields,
+            measure_fields=measure_fields,
+        )
+        if error_code is not None:
+            raise ValueError(error_code)
+
+        raise NotImplementedError(
+            "TIMEWINDOW_NOT_IMPLEMENTED: Python engine accepts timeWindow "
+            "at the SPI layer, but QueryPlan/SQL execution parity is not implemented yet."
         )
 
     def _build_measure_select(self, measure: DbModelMeasureImpl) -> Dict[str, Any]:
