@@ -2,18 +2,24 @@
 
 ## 基本信息
 
-- 优先级：P0（已抬升）
-- 状态：📋 **已抬升 → Python `v1.7` + Java `8.4.0.beta`**（2026-04-28）
+- 优先级：P0
+- 状态：✅ **resolved**（2026-04-28 · Python `accepted` + Java `accepted-with-risks`）
 - 改造路径：**Path A · 严格化**（用户决策）
 - 来源：G5 PR-P2 调试期（`cf2ba9b` → `352a8bb` 复盘）
 - 影响：测试基线 / LLM 生成 SQL 行为可预测性 / 与 QM 公开契约一致性
 
-## 抬升后的正式文档
+## 抬升后的正式文档（已验收）
 
-- Python `v1.7`：[`docs/v1.7/P0-v13引擎收紧裸dimension引用-需求.md`](../v1.7/P0-v13引擎收紧裸dimension引用-需求.md) + [`progress.md`](../v1.7/P0-v13引擎收紧裸dimension引用-progress.md)
-- Java `8.4.0.beta`：`foggy-data-mcp-bridge/docs/8.4.0.beta/P0-v13引擎收紧裸dimension引用-{需求,progress}.md`（worktree `dev-compose`）
+- Python `v1.7` · `accepted`：[`docs/v1.7/P0-v13引擎收紧裸dimension引用-需求.md`](../v1.7/P0-v13引擎收紧裸dimension引用-需求.md) + [`progress.md`](../v1.7/P0-v13引擎收紧裸dimension引用-progress.md) + [`acceptance.md`](../v1.7/acceptance/P0-v13-bare-dimension-tightening-acceptance.md) · commit `59176f2` · pytest 3223 passed
+- Java `8.4.0.beta` · `accepted-with-risks`：`foggy-data-mcp-bridge/docs/8.4.0.beta/P0-v13引擎收紧裸dimension引用-{需求,progress,acceptance}.md`（worktree `dev-compose`）· commit `4f2f48c` · sqlite lane 1855 passed
 
-本 backlog 文件保留为历史复盘记录；后续讨论 / 实施 / 验收一律走正式文档。
+## Follow-ups（已转交至各仓 · 不阻断 B-03 关闭）
+
+- Java FU-1（P2）· user-alias 透传修复（Python T4 ★ 完整等价 · Java SQL gen 层）
+- Java FU-2（P3）· `dim AS alias` 错误码统一为 `COLUMN_FIELD_NOT_FOUND`
+- 跨端 M9（P2）· Odoo Pro vendored Python lib + Java JAR 同步
+
+本 backlog 文件保留为历史复盘记录；后续讨论一律走正式文档。
 
 ## 问题摘要
 
