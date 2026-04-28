@@ -414,6 +414,7 @@ class SemanticQueryRequest(BaseModel):
             "returnTotal": false,
             "distinct": false,
             "withSubtotals": false,
+            "timeWindow": {...},
             "captionMatchMode": "EXACT",
             "mismatchHandleStrategy": "ABORT"
         }
@@ -435,6 +436,11 @@ class SemanticQueryRequest(BaseModel):
     return_total: bool = Field(False, alias="returnTotal")
     distinct: bool = False
     with_subtotals: bool = Field(False, alias="withSubtotals")
+    time_window: Optional[Dict[str, Any]] = Field(
+        None,
+        alias="timeWindow",
+        description="SemanticDSL timeWindow intent. Kept as structured payload for Java parity.",
+    )
 
     # --- v1.2 column governance ---
     field_access: Optional[FieldAccessDef] = Field(

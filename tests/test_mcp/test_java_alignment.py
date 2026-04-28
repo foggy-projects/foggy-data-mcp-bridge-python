@@ -15,6 +15,7 @@ from foggy.mcp_spi import (
     SemanticQueryRequest,
     SemanticMetadataResponse,
 )
+from foggy.mcp_spi.accessor import build_query_request
 
 
 class TestSemanticQueryResponseAlignment:
@@ -253,6 +254,11 @@ class TestSemanticQueryRequestAlignment:
             "mismatchHandleStrategy": "ABORT",
             "distinct": False,
             "withSubtotals": False,
+            "timeWindow": {
+                "field": "salesDate",
+                "grain": "MONTH",
+                "range": {"type": "LAST_N", "value": 6},
+            },
         }
         req = SemanticQueryRequest(**payload)
         assert req.columns == ["product$caption", "sum(salesAmount)"]
@@ -265,6 +271,11 @@ class TestSemanticQueryRequestAlignment:
         assert req.return_total is True
         assert req.caption_match_mode == "EXACT"
         assert req.mismatch_handle_strategy == "ABORT"
+        assert req.time_window == {
+            "field": "salesDate",
+            "grain": "MONTH",
+            "range": {"type": "LAST_N", "value": 6},
+        }
 
     def test_serializes_to_java_camel_case(self):
         """Request serializes to Java camelCase."""
@@ -276,6 +287,7 @@ class TestSemanticQueryRequestAlignment:
             return_total=True,
             with_subtotals=True,
             calculated_fields=[{"name": "ratio", "expression": "a/b"}],
+            time_window={"field": "salesDate", "grain": "MONTH"},
         )
         j = req.model_dump(by_alias=True, exclude_none=True)
         assert "groupBy" in j
@@ -283,10 +295,12 @@ class TestSemanticQueryRequestAlignment:
         assert "returnTotal" in j
         assert "withSubtotals" in j
         assert "calculatedFields" in j
+        assert "timeWindow" in j
         # No snake_case keys in output
         assert "group_by" not in j
         assert "order_by" not in j
         assert "return_total" not in j
+        assert "time_window" not in j
 
     def test_populate_by_name_allows_snake_case_attrs(self):
         """Pydantic populate_by_name allows Python snake_case attribute names."""
@@ -336,6 +350,22 @@ class TestSemanticQueryRequestAlignment:
         )
         assert len(req.calculated_fields) == 1
         assert req.calculated_fields[0]["name"] == "movingAvg"
+
+    def test_time_window_payload_passthrough(self):
+        """Accessor preserves Java timeWindow payload without renaming nested keys."""
+        time_window = {
+            "field": "salesDate",
+            "grain": "MONTH",
+            "range": {"type": "LAST_N", "value": 3},
+            "compare": {"type": "PREVIOUS_PERIOD"},
+        }
+        req = build_query_request({
+            "columns": ["salesDate$caption", "sum(salesAmount)"],
+            "timeWindow": time_window,
+        })
+
+        assert req.time_window == time_window
+        assert req.model_dump(by_alias=True, exclude_none=True)["timeWindow"] == time_window
 
 
 class TestSemanticMetadataResponseAlignment:

@@ -111,6 +111,7 @@ def build_query_request(payload: Dict[str, Any]) -> SemanticQueryRequest:
         return_total=payload.get("returnTotal", False),
         distinct=payload.get("distinct", False),
         with_subtotals=payload.get("withSubtotals", False),
+        time_window=payload.get("timeWindow"),
         hints=payload.get("hints"),
         cursor=payload.get("cursor"),
         stream=payload.get("stream"),

@@ -93,6 +93,10 @@ v1.4 已经让 fsscript 语法层支持 `v in (...)` / `v not in (...)`，且借
 
 - Java 侧当前跨版本对应：计算字段相关工作散落在 `foggy-dataset-model` 的历代版本；Python v1.5 不强制绑 Java 某一版本，但 Phase 1 的函数翻译单测直接镜像 Java 的 `DialectFunctionTranslationTest.java`
 
+## 后续独立 parity lane
+
+- `P1-timeWindow-Python-parity-progress.md` — 跟踪 Java 已签收 `timeWindow` 能力在 Python 引擎的后续对齐。当前只完成 S0 DTO / MCP payload passthrough，QueryPlan / SQL execution parity 仍未完成；不改变本 README 中计算字段编译器三阶段的签收结论。
+
 ## 参考文档
 
 - `docs/v1.4/P2-fsscript-in-notin算子对齐Java-需求.md`（上一轮 fsscript 算子对齐）
