@@ -488,6 +488,17 @@ def validate_query_fields(model: Any, request: Any) -> Optional[InvalidQueryFiel
             calc_exprs.append((name, expr))
     calc_map = dict(calc_exprs)
 
+    time_window = getattr(request, "time_window", None)
+    if isinstance(time_window, dict):
+        comparison = time_window.get("comparison")
+        metrics = time_window.get("targetMetrics")
+        if comparison:
+            if not isinstance(metrics, list) or not metrics:
+                metrics = list(getattr(model, "measures", {}) or {})
+            for metric in metrics:
+                if isinstance(metric, str):
+                    dynamic_fields.add(f"{metric}__{comparison}")
+
     for col_expr in request.columns or []:
         parsed = _parse_column_expr(col_expr)
         if parsed.alias:

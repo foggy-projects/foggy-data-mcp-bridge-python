@@ -28,6 +28,7 @@ Java 侧 `timeWindow` 已完成 DSL 解析、QueryPlan 编译、MySQL/MySQL8 方
 - MCP `build_query_request` 从 Java 格式 payload 构造请求时保留 `timeWindow` 原始结构。
 - 后续补齐 Python QueryPlan / SQL execution 对 Java `timeWindow` 的语义展开。
 - 已先补齐 rolling / cumulative 的窗口投影 IR，作为后续 QueryPlan lowering 的输入。
+- 已接入 rolling / cumulative 的两层 SQL preview / execution path：内层按时间粒度聚合，外层做窗口投影。
 
 ## 非目标
 
@@ -52,11 +53,15 @@ Java 侧 `timeWindow` 已完成 DSL 解析、QueryPlan 编译、MySQL/MySQL8 方
   - ytd / mtd 输出 `ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW`，partition 自动补 `$year` / `$month`
   - `TimeWindowProjectedColumn.to_calculated_field()` 生成后续 SQL lowering 可复用的 calculated field 字典
   - 该阶段只补中间表示和单测，不改变 `SemanticQueryService` 的 fail-closed 行为
-- [ ] S3. QueryPlan / SQL execution parity
-  - 将 S2 IR 接入查询计划，避免直接塞入单层 SELECT 后产生错误聚合语义
+- [x] S3a. Rolling / cumulative two-stage SQL path
+  - `_build_query` 对 `timeWindow` 分流到专用两层 SQL 生成器
+  - 内层 CTE 使用 QM 字段名作为稳定 SQL alias，避免 Java expected columns 丢失
+  - rolling / ytd / mtd 外层 `OVER` 使用 S2 IR 的 frame / partition / orderBy
+  - `value` / `range` lowering、comparative period、与 `calculatedFields` 组合仍 fail-closed
+- [ ] S3b. Range lowering parity
+  - 将 `value` / `range` 转为时间字段过滤，覆盖 absolute / relative / now
   - MySQL / Postgres / SQLite 方言的时间 bucket 和 range 展开
-  - rolling / cumulative 实跑输出结构与 Java 对齐
-- [ ] S3b. Comparative period parity
+- [ ] S3c. Comparative period parity
   - yoy / mom / wow 需要 derived plan / self-join 类展开，暂不借 rolling/cumulative IR 误开执行
   - compare period 输出结构与 Java 对齐
 - [ ] S4. 覆盖审计与验收
@@ -69,11 +74,14 @@ Java 侧 `timeWindow` 已完成 DSL 解析、QueryPlan 编译、MySQL/MySQL8 方
   - result: 25 passed
   - coverage: `SemanticQueryRequest` alias parity, response/request Java shape, `build_query_request` passthrough
 - [x] `python -m pytest tests/test_dataset_model/test_time_window.py -q`
-  - result: 25 passed
-  - coverage: Java validator mirror, relative date validation, rolling/cumulative expansion IR, model field collection, service fail-closed guard
-- [ ] QueryPlan / SQL parity tests
+  - result: 30 passed
+  - coverage: Java validator mirror, relative date validation, rolling/cumulative expansion IR, rolling/ytd/mtd two-stage SQL preview, range/comparative fail-closed guard
+- [x] `python -m pytest tests/test_dataset_model/test_time_window.py tests/test_dataset_model/test_window_functions.py tests/test_mcp/test_java_alignment.py -q`
+  - result: 78 passed
+  - coverage: timeWindow S3a + existing calculatedFields window functions + MCP Java alignment
+- [ ] Range / comparative SQL parity tests
   - status: not-started
-  - reason: QueryPlan / SQL execution 尚未实现
+  - reason: value/range lowering and yoy/mom/wow derived plan 尚未实现
 
 ## Experience Progress
 
@@ -90,12 +98,15 @@ Java 侧 `timeWindow` 已完成 DSL 解析、QueryPlan 编译、MySQL/MySQL8 方
 - Python 已镜像 Java validator 基础契约，覆盖 grain / comparison / range / value / targetMetrics / rollingAggregator 校验。
 - Service 层已 fail-closed，合法 `timeWindow` 不再被静默忽略。
 - Python 已补 rolling / cumulative window expansion IR，对齐 Java 窗口 frame、partition、orderBy、alias 和默认聚合策略。
+- Python 已补 rolling / ytd / mtd 两层 SQL 生成路径，避免单层聚合窗口混用。
+- `validate_query_fields` 已识别 `metric__comparison` 动态列，Java 风格 columns 不再被预校验误拒。
 
 ### Touched Code Areas
 
 - `src/foggy/mcp_spi/semantic.py`
 - `src/foggy/mcp_spi/accessor.py`
 - `src/foggy/dataset_model/semantic/time_window.py`
+- `src/foggy/dataset_model/semantic/field_validator.py`
 - `src/foggy/dataset_model/semantic/service.py`
 - `tests/test_mcp/test_java_alignment.py`
 - `tests/test_dataset_model/test_time_window.py`
@@ -110,19 +121,20 @@ Java 侧 `timeWindow` 已完成 DSL 解析、QueryPlan 编译、MySQL/MySQL8 方
 - [x] service no longer silently ignores executable `timeWindow`
 - [x] rolling / cumulative expander IR mirrors Java frame and partition rules
 - [x] S2 does not enable SQL execution before QueryPlan lowering is ready
+- [x] S3a uses a CTE base aggregate before outer window projection
+- [x] range / comparative / calculatedFields combinations still fail closed
 - [x] focused tests passed
 - [x] remaining QueryPlan / SQL work recorded explicitly
 
 ### Acceptance Readiness
 
-- current_stage: S2 ready-for-review
+- current_stage: S3a ready-for-review
 - overall_item: not-ready-for-acceptance
-- reason: full Java parity still requires QueryPlan and SQL execution implementation.
+- reason: full Java parity still requires value/range lowering, comparative period plan, and real DB parity matrix.
 
 ## 遗留项
 
-- Python 引擎尚未把 `timeWindow` 编译为时间 bucket / range / compare 查询计划。
-- Python S2 仅提供 rolling / cumulative 的窗口投影 IR，服务层仍 fail-closed。
+- Python 引擎尚未把 `value` / `range` 编译为时间过滤。
+- Python rolling / cumulative 已具备两层 SQL preview / execution path，但尚未补 MySQL8 等价实跑矩阵。
 - Python yoy / mom / wow comparative period 仍需单独 QueryPlan 展开，不能复用 rolling/cumulative 单层窗口逻辑。
-- Python 尚未补 MySQL8 等价实跑矩阵。
 - Java 已签收，Python parity 后续应单独验收，不能借 Java 结论直接关闭。

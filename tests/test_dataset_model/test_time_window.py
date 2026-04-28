@@ -288,7 +288,7 @@ class TestTimeWindowServiceGuard:
         assert "salesDate$id" in time_fields
         assert "salesAmount" in measures
 
-    def test_valid_time_window_fails_closed_until_execution_parity(self):
+    def test_time_window_with_value_range_fails_closed_until_range_parity(self):
         svc = SemanticQueryService()
         svc.register_model(create_fact_sales_model())
 
@@ -310,7 +310,153 @@ class TestTimeWindowServiceGuard:
         )
 
         assert response.error is not None
-        assert "TIMEWINDOW_NOT_IMPLEMENTED" in response.error
+        assert "TIMEWINDOW_RANGE_NOT_IMPLEMENTED" in response.error
+
+    def test_rolling_7d_sql_preview_uses_two_stage_window_plan(self):
+        svc = SemanticQueryService()
+        svc.register_model(create_fact_sales_model())
+
+        response = svc.query_model(
+            "FactSalesModel",
+            SemanticQueryRequest(
+                columns=["salesDate$id", "salesAmount", "salesAmount__rolling_7d"],
+                group_by=["salesDate$id"],
+                time_window={
+                    "field": "salesDate$id",
+                    "grain": "day",
+                    "comparison": "rolling_7d",
+                    "targetMetrics": ["salesAmount"],
+                },
+            ),
+            mode="validate",
+        )
+
+        assert response.error is None
+        sql = response.sql or ""
+        assert "WITH __time_window_base AS" in sql
+        assert 'SUM(t.sales_amount) AS "salesAmount"' in sql
+        assert 'GROUP BY dd.date_key' in sql
+        assert (
+            'SUM("salesAmount") OVER (ORDER BY "salesDate$id" ASC '
+            'ROWS BETWEEN 6 PRECEDING AND CURRENT ROW) AS "salesAmount__rolling_7d"'
+        ) in sql
+        assert [column["name"] for column in response.columns] == [
+            "salesDate$id",
+            "salesAmount",
+            "salesAmount__rolling_7d",
+        ]
+
+    def test_time_window_group_fields_do_not_infer_metric_as_dimension(self):
+        svc = SemanticQueryService()
+        svc.register_model(create_fact_sales_model())
+
+        response = svc.query_model(
+            "FactSalesModel",
+            SemanticQueryRequest(
+                columns=["salesDate$id", "salesAmount", "salesAmount__rolling_7d"],
+                time_window={
+                    "field": "salesDate$id",
+                    "grain": "day",
+                    "comparison": "rolling_7d",
+                    "targetMetrics": ["salesAmount"],
+                },
+            ),
+            mode="validate",
+        )
+
+        assert response.error is None
+        sql = response.sql or ""
+        assert "GROUP BY dd.date_key" in sql
+        assert "GROUP BY dd.date_key, t.sales_amount" not in sql
+
+    def test_mtd_sql_preview_partitions_by_year_and_month(self):
+        svc = SemanticQueryService()
+        svc.register_model(create_fact_sales_model())
+
+        response = svc.query_model(
+            "FactSalesModel",
+            SemanticQueryRequest(
+                columns=[
+                    "salesDate$year",
+                    "salesDate$month",
+                    "salesDate$id",
+                    "salesAmount",
+                    "salesAmount__mtd",
+                ],
+                group_by=["salesDate$year", "salesDate$month", "salesDate$id"],
+                time_window={
+                    "field": "salesDate$id",
+                    "grain": "day",
+                    "comparison": "mtd",
+                    "targetMetrics": ["salesAmount"],
+                },
+            ),
+            mode="validate",
+        )
+
+        assert response.error is None
+        sql = response.sql or ""
+        assert 'dd.year AS "salesDate$year"' in sql
+        assert 'dd.month AS "salesDate$month"' in sql
+        assert (
+            'SUM("salesAmount") OVER (PARTITION BY "salesDate$year", '
+            '"salesDate$month" ORDER BY "salesDate$id" ASC '
+            'ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS "salesAmount__mtd"'
+        ) in sql
+
+    def test_ytd_sql_preview_partitions_by_year(self):
+        svc = SemanticQueryService()
+        svc.register_model(create_fact_sales_model())
+
+        response = svc.query_model(
+            "FactSalesModel",
+            SemanticQueryRequest(
+                columns=[
+                    "salesDate$year",
+                    "salesDate$id",
+                    "salesAmount",
+                    "salesAmount__ytd",
+                ],
+                group_by=["salesDate$year", "salesDate$id"],
+                time_window={
+                    "field": "salesDate$id",
+                    "grain": "month",
+                    "comparison": "ytd",
+                    "targetMetrics": ["salesAmount"],
+                },
+            ),
+            mode="validate",
+        )
+
+        assert response.error is None
+        sql = response.sql or ""
+        assert (
+            'SUM("salesAmount") OVER (PARTITION BY "salesDate$year" '
+            'ORDER BY "salesDate$id" ASC '
+            'ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS "salesAmount__ytd"'
+        ) in sql
+
+    def test_comparative_time_window_still_fails_closed(self):
+        svc = SemanticQueryService()
+        svc.register_model(create_fact_sales_model())
+
+        response = svc.query_model(
+            "FactSalesModel",
+            SemanticQueryRequest(
+                columns=["salesDate$month", "salesAmount", "salesAmount__yoy"],
+                group_by=["salesDate$month"],
+                time_window={
+                    "field": "salesDate$id",
+                    "grain": "month",
+                    "comparison": "yoy",
+                    "targetMetrics": ["salesAmount"],
+                },
+            ),
+            mode="validate",
+        )
+
+        assert response.error is not None
+        assert "TIMEWINDOW_COMPARATIVE_NOT_IMPLEMENTED" in response.error
 
     def test_invalid_time_window_returns_java_error_code(self):
         svc = SemanticQueryService()

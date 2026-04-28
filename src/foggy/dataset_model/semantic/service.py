@@ -17,6 +17,7 @@ from foggy.dataset_model.impl.model import (
     DbTableModelImpl,
     DbModelDimensionImpl,
     DbModelMeasureImpl,
+    DimensionJoinDef,
 )
 from foggy.dataset_model.engine.query import SqlQueryBuilder
 from foggy.dataset_model.engine.formula import get_default_registry, SqlFormulaRegistry
@@ -54,6 +55,7 @@ from foggy.dataset_model.semantic.fsscript_to_sql_visitor import (
 from foggy.dataset_model.semantic.masking import apply_masking
 from foggy.dataset_model.semantic.time_window import (
     TimeWindowDef,
+    TimeWindowExpander,
     TimeWindowValidator,
     collect_time_window_field_sets,
 )
@@ -659,7 +661,8 @@ class SemanticQueryService(SemanticServiceResolver):
         warnings: List[str] = []
         columns_info: List[Dict[str, Any]] = []
 
-        self._reject_unimplemented_time_window(model, request)
+        if request.time_window:
+            return self._build_time_window_query(model, request, warnings)
 
         builder = SqlQueryBuilder()
 
@@ -969,18 +972,146 @@ class SemanticQueryService(SemanticServiceResolver):
             sql=sql, params=params, warnings=warnings, columns=columns_info,
         )
 
-    def _reject_unimplemented_time_window(
+    def _build_time_window_query(
         self,
         model: DbTableModelImpl,
         request: SemanticQueryRequest,
-    ) -> None:
-        """Validate timeWindow payload then fail closed until execution parity lands."""
-        if not request.time_window:
-            return
+        warnings: List[str],
+    ) -> QueryBuildResult:
+        """Build a two-stage rolling/cumulative timeWindow query.
 
+        Stage 1 aggregates the base metric at the requested time grain.
+        Stage 2 projects the requested columns plus generated window columns.
+        Comparative period and range lowering stay fail-closed until their
+        dedicated plan shapes are implemented.
+        """
+        tw, measure_fields = self._validate_time_window(model, request)
+
+        if tw.value:
+            raise NotImplementedError(
+                "TIMEWINDOW_RANGE_NOT_IMPLEMENTED: Python timeWindow SQL "
+                "supports rolling/cumulative windows without range lowering; "
+                "value/range execution parity is not implemented yet."
+            )
+        if tw.is_comparative():
+            raise NotImplementedError(
+                "TIMEWINDOW_COMPARATIVE_NOT_IMPLEMENTED: Python engine has "
+                "not implemented yoy/mom/wow derived plan parity yet."
+            )
+        if request.calculated_fields:
+            raise NotImplementedError(
+                "TIMEWINDOW_CALCULATED_FIELDS_NOT_IMPLEMENTED: combining "
+                "timeWindow with calculatedFields is not implemented yet."
+            )
+
+        requested_metric_fields = (
+            list(tw.target_metrics) if tw.target_metrics else sorted(measure_fields)
+        )
+        group_fields = [
+            field for field in self._time_window_group_fields(request)
+            if field not in requested_metric_fields
+        ]
+        if tw.is_rolling():
+            expansion = TimeWindowExpander.expand_rolling(tw, group_fields, measure_fields)
+        elif tw.is_cumulative():
+            expansion = TimeWindowExpander.expand_cumulative(tw, group_fields, measure_fields)
+        else:
+            raise NotImplementedError(
+                "TIMEWINDOW_NOT_IMPLEMENTED: Python engine only supports "
+                "rolling/cumulative timeWindow SQL at this stage."
+            )
+
+        metric_fields = [column.metric for column in expansion.additional_columns]
+        base_group_fields = self._unique_fields(
+            list(group_fields)
+            + list(expansion.partition_by_fields)
+            + [expansion.order_by_field]
+        )
+        base_sql, params = self._build_time_window_base_sql(
+            model,
+            request,
+            base_group_fields,
+            metric_fields,
+        )
+
+        projected_aliases = [column.alias for column in expansion.additional_columns]
+        requested_columns = self._time_window_outer_columns(
+            request,
+            base_group_fields,
+            metric_fields,
+            projected_aliases,
+        )
+        base_field_set = set(base_group_fields) | set(metric_fields)
+        select_parts: List[str] = []
+        columns_info: List[Dict[str, Any]] = []
+
+        for column in requested_columns:
+            projected = next(
+                (c for c in expansion.additional_columns if c.alias == column),
+                None,
+            )
+            if projected is not None:
+                over_clause = self._build_time_window_over_clause(projected)
+                select_parts.append(
+                    f"{projected.agg}({self._qi(projected.metric)}) "
+                    f"OVER ({over_clause}) AS {self._qi(projected.alias)}"
+                )
+                columns_info.append({
+                    "name": projected.alias,
+                    "fieldName": projected.alias,
+                    "expression": projected.metric,
+                    "aggregation": projected.agg,
+                    "window": True,
+                })
+                continue
+            if column not in base_field_set:
+                raise ValueError(
+                    f"TIMEWINDOW_COLUMN_NOT_AVAILABLE: column {column!r} is "
+                    "not produced by the base timeWindow plan."
+                )
+            select_parts.append(self._qi(column))
+            columns_info.append({
+                "name": column,
+                "fieldName": column,
+                "expression": column,
+                "aggregation": None,
+            })
+
+        outer_sql = (
+            "WITH __time_window_base AS (\n"
+            f"{self._indent_sql(base_sql)}\n"
+            ")\n"
+            f"SELECT {', '.join(select_parts)}\n"
+            "FROM __time_window_base"
+        )
+
+        order_parts = self._build_time_window_outer_order_by(
+            request,
+            base_field_set | set(projected_aliases),
+        )
+        if order_parts:
+            outer_sql += "\nORDER BY " + ", ".join(order_parts)
+
+        limit = min(request.limit or self._default_limit, self._max_limit)
+        outer_sql += f"\nLIMIT {limit}"
+        if request.start:
+            outer_sql += f" OFFSET {request.start}"
+
+        return QueryBuildResult(
+            sql=outer_sql,
+            params=params,
+            warnings=warnings,
+            columns=columns_info,
+        )
+
+    def _validate_time_window(
+        self,
+        model: DbTableModelImpl,
+        request: SemanticQueryRequest,
+    ) -> Tuple[TimeWindowDef, set[str]]:
         tw = TimeWindowDef.from_map(request.time_window)
         if tw is None:
-            return
+            raise ValueError("timeWindow must be an object")
         available_fields, time_fields, measure_fields = collect_time_window_field_sets(model)
         error_code = TimeWindowValidator.validate(
             tw,
@@ -990,11 +1121,226 @@ class SemanticQueryService(SemanticServiceResolver):
         )
         if error_code is not None:
             raise ValueError(error_code)
+        return tw, measure_fields
 
-        raise NotImplementedError(
-            "TIMEWINDOW_NOT_IMPLEMENTED: Python engine accepts timeWindow "
-            "at the SPI layer, but QueryPlan/SQL execution parity is not implemented yet."
+    def _build_time_window_base_sql(
+        self,
+        model: DbTableModelImpl,
+        request: SemanticQueryRequest,
+        group_fields: List[str],
+        metric_fields: List[str],
+    ) -> Tuple[str, List[Any]]:
+        builder = SqlQueryBuilder()
+        builder.from_table(
+            model.get_table_expr_for_model(model.name),
+            alias=model.get_table_alias_for_model(model.name),
         )
+        joined_dims: Dict[str, DimensionJoinDef] = {}
+        explicit_joins_added: set[tuple[str, str, str]] = set()
+
+        def ensure_explicit_joins_for_field(field_name: str) -> None:
+            field_model_name = model.get_field_model_name(field_name)
+            if field_model_name == model.name:
+                return
+            for explicit_join in model.explicit_joins:
+                if explicit_join.right_model != field_model_name:
+                    continue
+                key = (
+                    explicit_join.join_type,
+                    explicit_join.left_model,
+                    explicit_join.right_model,
+                )
+                if key in explicit_joins_added:
+                    continue
+                on_clauses: List[str] = []
+                for condition in explicit_join.conditions:
+                    left_resolved = model.resolve_field_for_model(
+                        condition.left_field,
+                        condition.left_model,
+                    )
+                    right_resolved = model.resolve_field_for_model(
+                        condition.right_field,
+                        condition.right_model,
+                    )
+                    if left_resolved is None or right_resolved is None:
+                        raise ValueError(
+                            "Failed to resolve explicit join condition "
+                            f"{condition.left_field} = {condition.right_field}"
+                        )
+                    on_clauses.append(
+                        f"{left_resolved['sql_expr']} = {right_resolved['sql_expr']}"
+                    )
+                join_method = {
+                    "LEFT": builder.left_join,
+                    "INNER": builder.inner_join,
+                }.get(explicit_join.join_type.upper())
+                if join_method is None:
+                    join_method = lambda table_name, alias, on_condition: builder.join(
+                        explicit_join.join_type.upper(),
+                        table_name,
+                        alias=alias,
+                        on_condition=on_condition,
+                    )
+                join_method(
+                    explicit_join.get_right_table_expr(),
+                    alias=explicit_join.right_alias,
+                    on_condition=" AND ".join(on_clauses),
+                )
+                explicit_joins_added.add(key)
+
+        def ensure_join(join_def: DimensionJoinDef) -> None:
+            if join_def.name in joined_dims:
+                return
+            ensure_explicit_joins_for_field(join_def.name)
+            joined_dims[join_def.name] = join_def
+            table_alias = join_def.get_alias()
+            root_alias = model.get_table_alias_for_model(
+                model.get_field_model_name(join_def.name)
+            )
+            on_cond = (
+                f"{root_alias}.{join_def.foreign_key} = "
+                f"{table_alias}.{join_def.primary_key}"
+            )
+            builder.left_join(join_def.table_name, alias=table_alias, on_condition=on_cond)
+
+        def ensure_runtime_joins(field_name: str) -> None:
+            ensure_explicit_joins_for_field(field_name)
+            resolved = model.resolve_field(field_name)
+            if resolved and resolved["join_def"]:
+                ensure_join(resolved["join_def"])
+
+        for field in group_fields:
+            resolved = model.resolve_field_strict(field)
+            if not resolved:
+                raise ValueError(
+                    f"TIMEWINDOW_FIELD_NOT_FOUND: base field {field!r} "
+                    "cannot be resolved."
+                )
+            ensure_runtime_joins(field)
+            builder.select(f"{resolved['sql_expr']} AS {self._qi(field)}")
+            builder.group_by(resolved["sql_expr"])
+
+        for metric in metric_fields:
+            resolved = model.resolve_field_strict(metric)
+            if not resolved or not resolved["is_measure"]:
+                raise ValueError(
+                    f"TIMEWINDOW_TARGET_NOT_AGGREGATE: metric {metric!r} "
+                    "cannot be resolved as a measure."
+                )
+            aggregation = resolved["aggregation"] or "SUM"
+            if aggregation == "COUNT_DISTINCT":
+                expr = f"COUNT(DISTINCT {resolved['sql_expr']})"
+            else:
+                expr = f"{aggregation}({resolved['sql_expr']})"
+            builder.select(f"{expr} AS {self._qi(metric)}")
+
+        for filter_item in request.slice:
+            self._add_filter(builder, model, filter_item, ensure_runtime_joins)
+
+        return builder.build()
+
+    def _time_window_group_fields(self, request: SemanticQueryRequest) -> List[str]:
+        fields: List[str] = []
+        for item in request.group_by or []:
+            field_name = self._time_window_field_name(item)
+            if field_name:
+                fields.append(field_name)
+        if fields:
+            return self._unique_fields(fields)
+
+        for column in request.columns or []:
+            if not isinstance(column, str):
+                continue
+            base_expr = parse_column_with_alias(column).base_expr
+            if "__" in base_expr:
+                continue
+            fields.append(base_expr)
+        return self._unique_fields(fields)
+
+    def _time_window_outer_columns(
+        self,
+        request: SemanticQueryRequest,
+        group_fields: List[str],
+        metric_fields: List[str],
+        projected_aliases: List[str],
+    ) -> List[str]:
+        columns = [
+            parse_column_with_alias(column).base_expr
+            for column in (request.columns or [])
+            if isinstance(column, str)
+        ]
+        if not columns:
+            columns = list(group_fields) + list(metric_fields)
+        columns = self._unique_fields(columns)
+        for alias in projected_aliases:
+            if alias not in columns:
+                columns.append(alias)
+        return columns
+
+    def _build_time_window_over_clause(self, column) -> str:
+        parts: List[str] = []
+        if column.partition_by:
+            parts.append(
+                "PARTITION BY "
+                + ", ".join(self._qi(field) for field in column.partition_by)
+            )
+        if column.order_by:
+            parts.append(
+                "ORDER BY "
+                + ", ".join(f"{self._qi(field)} ASC" for field in column.order_by)
+            )
+        if column.window_frame:
+            parts.append(column.window_frame)
+        return " ".join(parts)
+
+    def _build_time_window_outer_order_by(
+        self,
+        request: SemanticQueryRequest,
+        available_columns: set[str],
+    ) -> List[str]:
+        order_parts: List[str] = []
+        for item in request.order_by or []:
+            field_name = self._time_window_field_name(item)
+            if not field_name:
+                continue
+            if field_name not in available_columns:
+                raise ValueError(
+                    f"TIMEWINDOW_ORDER_FIELD_NOT_AVAILABLE: order field "
+                    f"{field_name!r} is not produced by the timeWindow plan."
+                )
+            direction = "asc"
+            if isinstance(item, dict):
+                direction = item.get("direction") or item.get("dir") or direction
+            direction_upper = str(direction).upper()
+            if direction_upper not in {"ASC", "DESC"}:
+                direction_upper = "ASC"
+            order_parts.append(f"{self._qi(field_name)} {direction_upper}")
+        return order_parts
+
+    @staticmethod
+    def _time_window_field_name(item: Any) -> Optional[str]:
+        if isinstance(item, str):
+            return item
+        if isinstance(item, dict):
+            return item.get("field") or item.get("fieldName") or item.get("column")
+        return getattr(item, "field", None)
+
+    @staticmethod
+    def _unique_fields(fields: List[str]) -> List[str]:
+        seen: set[str] = set()
+        result: List[str] = []
+        for field in fields:
+            if not isinstance(field, str) or not field:
+                continue
+            if field in seen:
+                continue
+            seen.add(field)
+            result.append(field)
+        return result
+
+    @staticmethod
+    def _indent_sql(sql: str) -> str:
+        return "\n".join(f"  {line}" for line in sql.splitlines())
 
     def _build_measure_select(self, measure: DbModelMeasureImpl) -> Dict[str, Any]:
         """Build SELECT expression for a measure."""
