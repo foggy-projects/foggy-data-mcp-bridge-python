@@ -984,16 +984,11 @@ class SemanticQueryService(SemanticServiceResolver):
         Stage 1 aggregates the base metric at the requested time grain.
         Stage 2 projects the requested columns plus generated window columns.
         Stage 1 also lowers ``timeWindow.value`` / ``range`` into a base time
-        field filter when present. Comparative period stays fail-closed until
-        its dedicated plan shape is implemented.
+        field filter when present. Comparative period uses a self-join over
+        the same base aggregate CTE.
         """
         tw, measure_fields = self._validate_time_window(model, request)
 
-        if tw.is_comparative():
-            raise NotImplementedError(
-                "TIMEWINDOW_COMPARATIVE_NOT_IMPLEMENTED: Python engine has "
-                "not implemented yoy/mom/wow derived plan parity yet."
-            )
         if request.calculated_fields:
             raise NotImplementedError(
                 "TIMEWINDOW_CALCULATED_FIELDS_NOT_IMPLEMENTED: combining "
@@ -1007,6 +1002,15 @@ class SemanticQueryService(SemanticServiceResolver):
             field for field in self._time_window_group_fields(request)
             if field not in requested_metric_fields
         ]
+        if tw.is_comparative():
+            return self._build_time_window_comparative_query(
+                model,
+                request,
+                warnings,
+                tw,
+                group_fields,
+                requested_metric_fields,
+            )
         if tw.is_rolling():
             expansion = TimeWindowExpander.expand_rolling(tw, group_fields, measure_fields)
         elif tw.is_cumulative():
@@ -1100,6 +1104,202 @@ class SemanticQueryService(SemanticServiceResolver):
             warnings=warnings,
             columns=columns_info,
         )
+
+    def _build_time_window_comparative_query(
+        self,
+        model: DbTableModelImpl,
+        request: SemanticQueryRequest,
+        warnings: List[str],
+        tw: TimeWindowDef,
+        group_fields: List[str],
+        metric_fields: List[str],
+    ) -> QueryBuildResult:
+        compare_key_fields = self._time_window_compare_key_fields(tw)
+        base_group_fields = self._unique_fields(list(group_fields) + compare_key_fields)
+        base_sql, params = self._build_time_window_base_sql(
+            model,
+            request,
+            tw,
+            base_group_fields,
+            metric_fields,
+        )
+
+        projected_aliases = self._time_window_comparative_aliases(metric_fields)
+        requested_columns = self._time_window_outer_columns(
+            request,
+            group_fields,
+            metric_fields,
+            projected_aliases,
+        )
+        base_field_set = set(base_group_fields) | set(metric_fields)
+        select_parts: List[str] = []
+        columns_info: List[Dict[str, Any]] = []
+
+        for column in requested_columns:
+            metric, suffix = self._parse_time_window_comparative_alias(column)
+            if metric and suffix:
+                if metric not in metric_fields:
+                    raise ValueError(
+                        f"TIMEWINDOW_COLUMN_NOT_AVAILABLE: comparative metric "
+                        f"{metric!r} is not produced by the base timeWindow plan."
+                    )
+                select_parts.append(
+                    self._time_window_comparative_select_expr(metric, suffix)
+                )
+                columns_info.append({
+                    "name": column,
+                    "fieldName": column,
+                    "expression": metric,
+                    "comparison": tw.comparison,
+                    "window": True,
+                })
+                continue
+            if column not in base_field_set:
+                raise ValueError(
+                    f"TIMEWINDOW_COLUMN_NOT_AVAILABLE: column {column!r} is "
+                    "not produced by the base timeWindow plan."
+                )
+            select_parts.append(f"cur.{self._qi(column)} AS {self._qi(column)}")
+            columns_info.append({
+                "name": column,
+                "fieldName": column,
+                "expression": column,
+                "aggregation": None,
+            })
+
+        join_condition = self._build_time_window_comparative_join_condition(
+            tw,
+            group_fields,
+        )
+        outer_sql = (
+            "WITH __time_window_base AS (\n"
+            f"{self._indent_sql(base_sql)}\n"
+            ")\n"
+            f"SELECT {', '.join(select_parts)}\n"
+            "FROM __time_window_base cur\n"
+            f"LEFT JOIN __time_window_base prior ON {join_condition}"
+        )
+
+        order_parts = self._build_time_window_outer_order_by(
+            request,
+            base_field_set | set(projected_aliases),
+        )
+        if order_parts:
+            outer_sql += "\nORDER BY " + ", ".join(order_parts)
+
+        limit = min(request.limit or self._default_limit, self._max_limit)
+        outer_sql += f"\nLIMIT {limit}"
+        if request.start:
+            outer_sql += f" OFFSET {request.start}"
+
+        return QueryBuildResult(
+            sql=outer_sql,
+            params=params,
+            warnings=warnings,
+            columns=columns_info,
+        )
+
+    def _time_window_comparative_aliases(self, metric_fields: List[str]) -> List[str]:
+        aliases: List[str] = []
+        for metric in metric_fields:
+            aliases.extend([
+                f"{metric}__prior",
+                f"{metric}__diff",
+                f"{metric}__ratio",
+            ])
+        return aliases
+
+    def _parse_time_window_comparative_alias(
+        self,
+        column: str,
+    ) -> Tuple[Optional[str], Optional[str]]:
+        for suffix in ("prior", "diff", "ratio"):
+            marker = f"__{suffix}"
+            if column.endswith(marker):
+                return column[:-len(marker)], suffix
+        return None, None
+
+    def _time_window_comparative_select_expr(self, metric: str, suffix: str) -> str:
+        cur_metric = f"cur.{self._qi(metric)}"
+        prior_metric = f"prior.{self._qi(metric)}"
+        alias = self._qi(f"{metric}__{suffix}")
+        if suffix == "prior":
+            return f"{prior_metric} AS {alias}"
+        if suffix == "diff":
+            return f"({cur_metric} - {prior_metric}) AS {alias}"
+        return (
+            f"CASE WHEN {prior_metric} IS NULL OR {prior_metric} = 0 "
+            f"THEN NULL ELSE ({cur_metric} - {prior_metric}) * 1.0 / "
+            f"{prior_metric} END AS {alias}"
+        )
+
+    def _time_window_compare_key_fields(self, tw: TimeWindowDef) -> List[str]:
+        base_field = self._time_window_base_field(tw.field)
+        if tw.comparison == "yoy":
+            if tw.grain == "year":
+                return [f"{base_field}$year"]
+            if tw.grain == "quarter":
+                return [f"{base_field}$year", f"{base_field}$quarter"]
+            if tw.grain == "month":
+                return [f"{base_field}$year", f"{base_field}$month"]
+            if tw.grain == "week":
+                return [f"{base_field}$year", f"{base_field}$week"]
+        if tw.comparison == "mom":
+            return [f"{base_field}$year", f"{base_field}$month"]
+        if tw.comparison == "wow":
+            if tw.grain == "week":
+                return [f"{base_field}$year", f"{base_field}$week"]
+            return [tw.field]
+        return [tw.field]
+
+    def _build_time_window_comparative_join_condition(
+        self,
+        tw: TimeWindowDef,
+        group_fields: List[str],
+    ) -> str:
+        base_field = self._time_window_base_field(tw.field)
+        conditions: List[str] = []
+        for field in group_fields:
+            if self._is_time_window_time_field(base_field, field):
+                continue
+            conditions.append(f"cur.{self._qi(field)} = prior.{self._qi(field)}")
+        conditions.extend(self._time_window_period_join_conditions(tw))
+        return " AND ".join(conditions) if conditions else "1 = 1"
+
+    def _time_window_period_join_conditions(self, tw: TimeWindowDef) -> List[str]:
+        base_field = self._time_window_base_field(tw.field)
+        year = f"{base_field}$year"
+        quarter = f"{base_field}$quarter"
+        month = f"{base_field}$month"
+        week = f"{base_field}$week"
+        if tw.comparison == "yoy":
+            conditions = [f"cur.{self._qi(year)} = prior.{self._qi(year)} + 1"]
+            if tw.grain == "quarter":
+                conditions.append(f"cur.{self._qi(quarter)} = prior.{self._qi(quarter)}")
+            elif tw.grain == "month":
+                conditions.append(f"cur.{self._qi(month)} = prior.{self._qi(month)}")
+            elif tw.grain == "week":
+                conditions.append(f"cur.{self._qi(week)} = prior.{self._qi(week)}")
+            return conditions
+        if tw.comparison == "mom":
+            return [
+                f"(cur.{self._qi(year)} * 12 + cur.{self._qi(month)}) = "
+                f"(prior.{self._qi(year)} * 12 + prior.{self._qi(month)} + 1)"
+            ]
+        if tw.comparison == "wow" and tw.grain == "week":
+            return [
+                f"(cur.{self._qi(year)} * 53 + cur.{self._qi(week)}) = "
+                f"(prior.{self._qi(year)} * 53 + prior.{self._qi(week)} + 1)"
+            ]
+        return [f"cur.{self._qi(tw.field)} = prior.{self._qi(tw.field)} + 7"]
+
+    @staticmethod
+    def _time_window_base_field(field: str) -> str:
+        return field.rsplit("$", 1)[0] if "$" in field else field
+
+    @staticmethod
+    def _is_time_window_time_field(base_field: str, field: str) -> bool:
+        return field == base_field or field.startswith(f"{base_field}$")
 
     def _validate_time_window(
         self,

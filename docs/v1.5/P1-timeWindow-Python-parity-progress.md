@@ -30,6 +30,7 @@ Java 侧 `timeWindow` 已完成 DSL 解析、QueryPlan 编译、MySQL/MySQL8 方
 - 已先补齐 rolling / cumulative 的窗口投影 IR，作为后续 QueryPlan lowering 的输入。
 - 已接入 rolling / cumulative 的两层 SQL preview / execution path：内层按时间粒度聚合，外层做窗口投影。
 - 已接入 rolling / cumulative 路径上的 `value` / `range` lowering：`[)` / `[]` 会进入 base CTE 的时间字段过滤，并通过 bind params 传参。
+- 已接入 comparative period 的 base CTE self-join path：yoy / mom / wow 输出 `__prior` / `__diff` / `__ratio` 派生列。
 
 ## 非目标
 
@@ -58,7 +59,7 @@ Java 侧 `timeWindow` 已完成 DSL 解析、QueryPlan 编译、MySQL/MySQL8 方
   - `_build_query` 对 `timeWindow` 分流到专用两层 SQL 生成器
   - 内层 CTE 使用 QM 字段名作为稳定 SQL alias，避免 Java expected columns 丢失
   - rolling / ytd / mtd 外层 `OVER` 使用 S2 IR 的 frame / partition / orderBy
-  - comparative period、与 `calculatedFields` 组合仍 fail-closed
+  - 与 `calculatedFields` 组合仍 fail-closed
 - [x] S3b.1 Value / range lowering parity
   - 将 `value` / `range` 转为时间字段过滤，覆盖 absolute / relative / now
   - `[)` 生成 `>= start AND < end`，`[]` 生成 `>= start AND <= end`
@@ -66,9 +67,10 @@ Java 侧 `timeWindow` 已完成 DSL 解析、QueryPlan 编译、MySQL/MySQL8 方
   - 参数继续走现有 bind params，不内联用户输入
 - [ ] S3b.2 Real DB / dialect parity matrix
   - MySQL / Postgres / SQLite 方言的时间 bucket 和 range 展开仍需实库矩阵验证
-- [ ] S3c. Comparative period parity
-  - yoy / mom / wow 需要 derived plan / self-join 类展开，暂不借 rolling/cumulative IR 误开执行
-  - compare period 输出结构与 Java 对齐
+- [x] S3c. Comparative period SQL path
+  - yoy / mom / wow 使用 base CTE self-join 展开，不复用 rolling/cumulative 窗口 IR
+  - compare period 输出 `metric__prior` / `metric__diff` / `metric__ratio`
+  - `validate_query_fields` 已识别 comparative 派生列，避免预校验误拒
 - [ ] S4. 覆盖审计与验收
   - 回补 QueryPlan 单测、SQL 快照测试和必要的集成测试
   - 进入 coverage audit / acceptance signoff
@@ -79,14 +81,14 @@ Java 侧 `timeWindow` 已完成 DSL 解析、QueryPlan 编译、MySQL/MySQL8 方
   - result: 25 passed
   - coverage: `SemanticQueryRequest` alias parity, response/request Java shape, `build_query_request` passthrough
 - [x] `python -m pytest tests/test_dataset_model/test_time_window.py -q`
-  - result: 32 passed
-  - coverage: Java validator mirror, relative date validation/resolution, rolling/cumulative expansion IR, rolling/ytd/mtd two-stage SQL preview, `[)` / `[]` range lowering, comparative fail-closed guard
+  - result: 34 passed
+  - coverage: Java validator mirror, relative date validation/resolution, rolling/cumulative expansion IR, rolling/ytd/mtd two-stage SQL preview, `[)` / `[]` range lowering, yoy/mom/wow comparative self-join SQL preview
 - [x] `python -m pytest tests/test_dataset_model/test_time_window.py tests/test_dataset_model/test_window_functions.py tests/test_mcp/test_java_alignment.py -q`
-  - result: 80 passed
-  - coverage: timeWindow S3b.1 + existing calculatedFields window functions + MCP Java alignment
-- [ ] Comparative SQL parity tests
+  - result: 82 passed
+  - coverage: timeWindow S3c + existing calculatedFields window functions + MCP Java alignment
+- [ ] Real DB / dialect parity tests
   - status: not-started
-  - reason: yoy/mom/wow derived plan 尚未实现
+  - reason: MySQL8 / Postgres / SQLite 实库矩阵尚未执行
 
 ## Experience Progress
 
@@ -105,7 +107,8 @@ Java 侧 `timeWindow` 已完成 DSL 解析、QueryPlan 编译、MySQL/MySQL8 方
 - Python 已补 rolling / cumulative window expansion IR，对齐 Java 窗口 frame、partition、orderBy、alias 和默认聚合策略。
 - Python 已补 rolling / ytd / mtd 两层 SQL 生成路径，避免单层聚合窗口混用。
 - Python 已补 rolling / cumulative 路径上的 `value` / `range` lowering，支持 `[)` / `[]` 和 absolute / relative / now 值解析。
-- `validate_query_fields` 已识别 `metric__comparison` 动态列，Java 风格 columns 不再被预校验误拒。
+- Python 已补 yoy / mom / wow comparative self-join SQL path，输出 prior / diff / ratio 派生列。
+- `validate_query_fields` 已识别 timeWindow 动态列，Java 风格 columns 不再被预校验误拒。
 
 ### Touched Code Areas
 
@@ -129,18 +132,19 @@ Java 侧 `timeWindow` 已完成 DSL 解析、QueryPlan 编译、MySQL/MySQL8 方
 - [x] S2 does not enable SQL execution before QueryPlan lowering is ready
 - [x] S3a uses a CTE base aggregate before outer window projection
 - [x] S3b.1 lowers `value` / `range` into base CTE time filters with bind params
-- [x] comparative / calculatedFields combinations still fail closed
+- [x] S3c lowers comparative period into base CTE self-join SQL
+- [x] calculatedFields combination still fails closed
 - [x] focused tests passed
 - [x] remaining QueryPlan / SQL work recorded explicitly
 
 ### Acceptance Readiness
 
-- current_stage: S3b.1 ready-for-review
+- current_stage: S3c ready-for-review
 - overall_item: not-ready-for-acceptance
-- reason: full Java parity still requires comparative period plan and real DB / dialect parity matrix.
+- reason: full Java parity still requires real DB / dialect parity matrix and coverage audit.
 
 ## 遗留项
 
 - Python rolling / cumulative 已具备两层 SQL preview / execution path 和 `value` / `range` 时间过滤，但尚未补 MySQL8 等价实跑矩阵。
-- Python yoy / mom / wow comparative period 仍需单独 QueryPlan 展开，不能复用 rolling/cumulative 单层窗口逻辑。
+- Python yoy / mom / wow comparative period 已具备 self-join SQL path，但尚未补真实数据库日历边界矩阵。
 - Java 已签收，Python parity 后续应单独验收，不能借 Java 结论直接关闭。

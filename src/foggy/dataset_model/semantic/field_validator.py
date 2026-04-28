@@ -497,7 +497,14 @@ def validate_query_fields(model: Any, request: Any) -> Optional[InvalidQueryFiel
                 metrics = list(getattr(model, "measures", {}) or {})
             for metric in metrics:
                 if isinstance(metric, str):
-                    dynamic_fields.add(f"{metric}__{comparison}")
+                    if comparison in {"yoy", "mom", "wow"}:
+                        dynamic_fields.update({
+                            f"{metric}__prior",
+                            f"{metric}__diff",
+                            f"{metric}__ratio",
+                        })
+                    else:
+                        dynamic_fields.add(f"{metric}__{comparison}")
 
     for col_expr in request.columns or []:
         parsed = _parse_column_expr(col_expr)

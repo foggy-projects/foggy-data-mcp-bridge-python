@@ -476,15 +476,22 @@ class TestTimeWindowServiceGuard:
             'ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS "salesAmount__ytd"'
         ) in sql
 
-    def test_comparative_time_window_still_fails_closed(self):
+    def test_yoy_sql_preview_uses_self_join_comparative_plan(self):
         svc = SemanticQueryService()
         svc.register_model(create_fact_sales_model())
 
         response = svc.query_model(
             "FactSalesModel",
             SemanticQueryRequest(
-                columns=["salesDate$month", "salesAmount", "salesAmount__yoy"],
-                group_by=["salesDate$month"],
+                columns=[
+                    "salesDate$year",
+                    "salesDate$month",
+                    "salesAmount",
+                    "salesAmount__prior",
+                    "salesAmount__diff",
+                    "salesAmount__ratio",
+                ],
+                group_by=["salesDate$year", "salesDate$month"],
                 time_window={
                     "field": "salesDate$id",
                     "grain": "month",
@@ -495,8 +502,71 @@ class TestTimeWindowServiceGuard:
             mode="validate",
         )
 
-        assert response.error is not None
-        assert "TIMEWINDOW_COMPARATIVE_NOT_IMPLEMENTED" in response.error
+        assert response.error is None
+        sql = response.sql or ""
+        assert "WITH __time_window_base AS" in sql
+        assert "FROM __time_window_base cur" in sql
+        assert "LEFT JOIN __time_window_base prior ON" in sql
+        assert 'cur."salesDate$year" = prior."salesDate$year" + 1' in sql
+        assert 'cur."salesDate$month" = prior."salesDate$month"' in sql
+        assert 'prior."salesAmount" AS "salesAmount__prior"' in sql
+        assert '(cur."salesAmount" - prior."salesAmount") AS "salesAmount__diff"' in sql
+        assert (
+            'CASE WHEN prior."salesAmount" IS NULL OR prior."salesAmount" = 0 '
+            'THEN NULL ELSE (cur."salesAmount" - prior."salesAmount") * 1.0 / '
+            'prior."salesAmount" END AS "salesAmount__ratio"'
+        ) in sql
+
+    def test_mom_sql_preview_uses_month_index_self_join_condition(self):
+        svc = SemanticQueryService()
+        svc.register_model(create_fact_sales_model())
+
+        response = svc.query_model(
+            "FactSalesModel",
+            SemanticQueryRequest(
+                columns=["salesDate$year", "salesDate$month", "salesAmount"],
+                group_by=["salesDate$year", "salesDate$month"],
+                time_window={
+                    "field": "salesDate$id",
+                    "grain": "month",
+                    "comparison": "mom",
+                    "targetMetrics": ["salesAmount"],
+                },
+            ),
+            mode="validate",
+        )
+
+        assert response.error is None
+        sql = response.sql or ""
+        assert (
+            '(cur."salesDate$year" * 12 + cur."salesDate$month") = '
+            '(prior."salesDate$year" * 12 + prior."salesDate$month" + 1)'
+        ) in sql
+        assert 'prior."salesAmount" AS "salesAmount__prior"' in sql
+
+    def test_wow_day_sql_preview_uses_day_offset_self_join_condition(self):
+        svc = SemanticQueryService()
+        svc.register_model(create_fact_sales_model())
+
+        response = svc.query_model(
+            "FactSalesModel",
+            SemanticQueryRequest(
+                columns=["salesDate$id", "salesAmount", "salesAmount__prior"],
+                group_by=["salesDate$id"],
+                time_window={
+                    "field": "salesDate$id",
+                    "grain": "day",
+                    "comparison": "wow",
+                    "targetMetrics": ["salesAmount"],
+                },
+            ),
+            mode="validate",
+        )
+
+        assert response.error is None
+        sql = response.sql or ""
+        assert 'cur."salesDate$id" = prior."salesDate$id" + 7' in sql
+        assert 'prior."salesAmount" AS "salesAmount__prior"' in sql
 
     def test_invalid_time_window_returns_java_error_code(self):
         svc = SemanticQueryService()
