@@ -2,10 +2,18 @@
 
 ## 基本信息
 
-- 优先级：中
-- 状态：📋 待立项（跨 Java / Python 双端引擎治理）
+- 优先级：P0（已抬升）
+- 状态：📋 **已抬升 → Python `v1.7` + Java `8.4.0.beta`**（2026-04-28）
+- 改造路径：**Path A · 严格化**（用户决策）
 - 来源：G5 PR-P2 调试期（`cf2ba9b` → `352a8bb` 复盘）
 - 影响：测试基线 / LLM 生成 SQL 行为可预测性 / 与 QM 公开契约一致性
+
+## 抬升后的正式文档
+
+- Python `v1.7`：[`docs/v1.7/P0-v13引擎收紧裸dimension引用-需求.md`](../v1.7/P0-v13引擎收紧裸dimension引用-需求.md) + [`progress.md`](../v1.7/P0-v13引擎收紧裸dimension引用-progress.md)
+- Java `8.4.0.beta`：`foggy-data-mcp-bridge/docs/8.4.0.beta/P0-v13引擎收紧裸dimension引用-{需求,progress}.md`（worktree `dev-compose`）
+
+本 backlog 文件保留为历史复盘记录；后续讨论 / 实施 / 验收一律走正式文档。
 
 ## 问题摘要
 
