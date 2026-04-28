@@ -123,7 +123,7 @@ Acceptance:
 
 ### Stage 3 - Java/Python normalized SQL golden diff harness
 
-- status: complete-partial (formula full diff; timeWindow structural only — Java snapshot producer gap)
+- status: complete (structural + key-marker parity; token-by-token diff needs normalizer extension for multi-CTE)
 - priority: P2
 - trigger: Stage 2 的 snapshot 生成 / 消费链路稳定后
 
@@ -136,10 +136,11 @@ Requirement:
 Acceptance:
 
 - Formula lane: `test_parity_matches_java_snapshot` migrated to `_golden_sql_diff.assert_golden_cases`.
-- TimeWindow lane: 2 post-scalar calculatedFields happy cases (`yoy-month-post-calc-growth-happy`, `rolling_7d-post-calc-gap-happy`) structural parity passing.
-- Full golden diff path ready: `test_full_golden_diff_when_snapshot_available` activates when Java snapshot exists.
-- Gap: Java timeWindow fixtures lack full normalized SQL golden output; `TimeWindowParitySnapshotTest` needed.
-- Focused regression: `69 passed, 1 skipped`.
+- TimeWindow lane: 2 post-scalar calculatedFields happy cases structural parity + key-marker diff passing.
+- Java snapshot producer: `TimeWindowParitySnapshotTest.java` writes `_time_window_parity_snapshot.json` via real `SemanticQueryServiceV3.generateSql`; Java commit `a2ae69d`.
+- `test_full_golden_diff_when_snapshot_available` no longer skipped — validates Java snapshot schema, semantic markers, and cross-checks Python SQL.
+- Known limitation: full token-by-token normalized SQL diff deferred — Java/Python produce architecturally different multi-CTE SQL.
+- Focused regression: `70 passed, 0 skipped`.
 - Progress doc: `docs/v1.5/S3-normalized-sql-golden-diff-progress.md`.
 
 ### Stage 4 - SQL Server timeWindow real DB matrix

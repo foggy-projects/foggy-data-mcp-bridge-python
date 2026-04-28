@@ -1,0 +1,16 @@
+{
+  "schema_version" : "1",
+  "source" : "TimeWindowParitySnapshotTest",
+  "feature" : "timeWindow",
+  "snapshots" : [ {
+    "name" : "yoy-month-post-calc-growth-happy",
+    "dialect" : "default",
+    "sql_normalized" : "SELECT \"salesDate$year\", \"salesDate$month\", \"salesAmount\", \"salesAmount__prior\", (\"salesAmount\" - \"salesAmount__prior\") AS \"salesAmount__diff\", CASE WHEN ((\"salesAmount__prior\" IS NULL) OR (\"salesAmount__prior\" = 0)) THEN NULL ELSE ((\"salesAmount\" - \"salesAmount__prior\") / \"salesAmount__prior\") END AS \"salesAmount__ratio\"\nFROM (WITH cte_1 AS (SELECT \"salesDate$year\", \"salesDate$month\", \"salesAmount\" AS \"salesAmount\"\nFROM (select\td1.year \"salesDate$year\",\td1.month \"salesDate$month\",\tSUM(t1.sales_amount) \"salesAmount\"\tfrom fact_sales t1\t left join dim_date d1  on t1.date_key=d1.date_key\tgroup by d1.year,\td1.month) AS cte_0),\ncte_2 AS (SELECT (\"salesDate$year\" + 1) AS \"salesDate$year\", \"salesDate$month\", \"salesAmount\" AS \"salesAmount__prior\"\nFROM (select\td1.year \"salesDate$year\",\td1.month \"salesDate$month\",\tSUM(t1.sales_amount) \"salesAmount\"\tfrom fact_sales t1\t left join dim_date d1  on t1.date_key=d1.date_key\tgroup by d1.year,\td1.month) AS cte_0)\nSELECT cte_1.\"salesDate$year\", cte_1.\"salesDate$month\", cte_1.\"salesAmount\", cte_2.\"salesAmount__prior\"\nFROM cte_1\nLEFT JOIN cte_2 ON cte_1.\"salesDate$year\" = cte_2.\"salesDate$year\" AND cte_1.\"salesDate$month\" = cte_2.\"salesDate$month\") AS cte_3",
+    "bind_params" : [ ]
+  }, {
+    "name" : "rolling_7d-post-calc-gap-happy",
+    "dialect" : "default",
+    "sql_normalized" : "WITH cte_1 AS (SELECT \"salesDate$id\", \"salesAmount\", SUM(\"salesAmount\") OVER (ORDER BY \"salesDate$id\" ASC ROWS BETWEEN 6 PRECEDING AND CURRENT ROW) AS \"salesAmount__rolling_7d\"\nFROM (select\tt1.date_key \"salesDate$id\",\tSUM(t1.sales_amount) \"salesAmount\"\tfrom fact_sales t1\t\tgroup by t1.date_key) AS cte_0)\nSELECT cte_1.\"salesDate$id\", cte_1.\"salesAmount\", cte_1.\"salesAmount__rolling_7d\"\nFROM cte_1",
+    "bind_params" : [ ]
+  } ]
+}
