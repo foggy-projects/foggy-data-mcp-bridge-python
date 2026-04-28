@@ -13,26 +13,34 @@ the F4 string form at parse time; the ``plan`` reference is validated
 module docstring "Architectural divergence from Java".
 
 This means F5 SQL output in Python is identical to the equivalent F4
-string ("name" or "SUM(amount) AS total"); the plan-routed permission
-validator (PR5.4) routes columns via ``OutputSchema.plan_provenance``
-populated by ``derive_schema``, NOT via ``PlanColumnRef`` carried in
-the plan tree.
+string ("orderStatus$caption" or "SUM(salesAmount) AS total"); the
+plan-routed permission validator (PR5.4) routes columns via
+``OutputSchema.plan_provenance`` populated by ``derive_schema``, NOT
+via ``PlanColumnRef`` carried in the plan tree.
 
 Note on column shapes used here
 -------------------------------
-The v1.3 engine's ``build_query_with_governance`` only accepts the
-``field AS alias`` syntax for **inline aggregates** (parsed by
-``parse_inline_aggregate``, e.g. ``SUM(salesAmount) AS total``). Bare
-dimensions like ``orderStatus AS status`` are silently dropped — that
-is a long-standing v1.3 limitation independent of F5. The integration
-suite therefore uses:
+By Foggy QM contract, **dimensions are not directly projectable** —
+they must be referenced via an attribute (``$id`` / ``$caption`` /
+``$<custom>``). The QM metadata exposed to LLMs never lists bare
+dimensions as projectable fields, so tests must follow the same
+contract:
 
-* F5 ``{plan, field}`` (no alias) for plain dimensions, OR
-* F5 ``{plan, field, agg, as}`` for aggregate compounds.
+* Dimensions: ``orderStatus$caption`` (or ``$id``) — never bare
+  ``orderStatus``.
+* Measures: bare for use as inline aggregate operand
+  (``SUM(salesAmount) AS total``).
+
+The v1.3 engine has a legacy lenient path that accepts bare dimension
+column references (``columns=["orderStatus"]`` → ``t.order_status AS
+"<caption>"``) but this is engine-internal and not part of the public
+LLM-facing contract; tests deliberately do not bind to this path so
+they remain stable if v1.3 tightens. See follow-up tracking ticket on
+the v1.3 engine governance treatment of bare-dimension references.
 
 Coverage (G10 acceptance FU-1: spec §9 ≥3 plan-aware compile +
 ≥2 plan-routed permission):
-- 3 plan-aware compile cases (self-reference / agg+as / F5↔F4 SQL parity)
+- 3 plan-aware compile cases (self-reference / agg+as / F5/F4 SQL parity)
 - 2 plan-routed permission cases (allow whitelist / deny whitelist)
 """
 
@@ -111,19 +119,20 @@ def _ctx(per_model_field_access: Dict[str, List[str]] = None) -> ComposeQueryCon
 
 class TestF5PlanAwareCompile:
     def test_f5_self_reference_compiles_to_same_sql_as_f4(self, svc):
-        """Spec §5.2 self-reference: {plan: sales, field} flattens to bare
-        F4 ``"orderStatus"``; SQL output identical to direct F4 dict."""
+        """Spec §5.2 self-reference: ``{plan: sales, field}`` flattens
+        to bare F4 ``"orderStatus$caption"``; SQL output identical to
+        the direct F4 dict form."""
         # Build two parallel base plans (Python plan equality is structural;
         # SQL output should be identical)
-        sales = from_(model="FactSalesModel", columns=["orderStatus"])
+        sales = from_(model="FactSalesModel", columns=["orderStatus$caption"])
         # F5 self-reference: plan === current model
         f5_plan = from_(
             model="FactSalesModel",
-            columns=[{"plan": sales, "field": "orderStatus"}],
+            columns=[{"plan": sales, "field": "orderStatus$caption"}],
         )
         f4_plan = from_(
             model="FactSalesModel",
-            columns=[{"field": "orderStatus"}],
+            columns=[{"field": "orderStatus$caption"}],
         )
 
         f5_composed = compile_plan_to_sql(
@@ -137,20 +146,24 @@ class TestF5PlanAwareCompile:
         assert f5_composed.sql == f4_composed.sql, (
             f"F5/F4 SQL must match;\nF5 sql={f5_composed.sql}\nF4 sql={f4_composed.sql}"
         )
-        # Engine emits underlying physical column for the dimension
+        # Engine emits underlying physical column for the dimension's caption
         assert "order_status" in f5_composed.sql
 
     def test_f5_agg_as_compound_compiles_to_aggregate_sql(self, svc):
-        """{plan, field, agg, as} compound flattens to "SUM(field) AS alias"
-        and emits the inline-aggregate SQL the v1.3 engine recognises."""
-        sales = from_(model="FactSalesModel", columns=["orderStatus", "salesAmount"])
+        """``{plan, field, agg, as}`` compound flattens to
+        ``"SUM(field) AS alias"`` and emits the inline-aggregate SQL the
+        v1.3 engine recognises."""
+        sales = from_(
+            model="FactSalesModel",
+            columns=["orderStatus$caption", "salesAmount"],
+        )
         plan = from_(
             model="FactSalesModel",
             columns=[
-                {"plan": sales, "field": "orderStatus"},
+                {"plan": sales, "field": "orderStatus$caption"},
                 {"plan": sales, "field": "salesAmount", "agg": "sum", "as": "total"},
             ],
-            group_by=["orderStatus"],
+            group_by=["orderStatus$caption"],
         )
 
         composed = compile_plan_to_sql(
@@ -171,18 +184,28 @@ class TestF5PlanAwareCompile:
         f5 = from_(
             model="FactOrderModel",
             columns=[
-                {"plan": from_(model="FactOrderModel", columns=["orderStatus"]), "field": "orderStatus"},
-                {"plan": from_(model="FactOrderModel", columns=["totalAmount"]), "field": "totalAmount", "agg": "sum", "as": "amt"},
+                {
+                    "plan": from_(
+                        model="FactOrderModel", columns=["orderStatus$caption"]
+                    ),
+                    "field": "orderStatus$caption",
+                },
+                {
+                    "plan": from_(model="FactOrderModel", columns=["totalAmount"]),
+                    "field": "totalAmount",
+                    "agg": "sum",
+                    "as": "amt",
+                },
             ],
-            group_by=["orderStatus"],
+            group_by=["orderStatus$caption"],
         )
         f4 = from_(
             model="FactOrderModel",
             columns=[
-                {"field": "orderStatus"},
+                {"field": "orderStatus$caption"},
                 {"field": "totalAmount", "agg": "sum", "as": "amt"},
             ],
-            group_by=["orderStatus"],
+            group_by=["orderStatus$caption"],
         )
 
         f5_composed = compile_plan_to_sql(
@@ -202,21 +225,36 @@ class TestF5PlanAwareCompile:
 
 class TestF5PlanRoutedPermission:
     def test_f5_field_in_whitelist_compiles(self, svc):
-        """field_access includes the F5 column → PR5.4 validator passes
-        (column resolves uniquely to its plan via ``plan_provenance`` and
-        the whitelist allows it)."""
-        sales = from_(model="FactSalesModel", columns=["orderStatus", "salesAmount"])
+        """field_access includes the F5 column → enforcement passes
+        (column resolves uniquely to its plan via ``plan_provenance`` in
+        the plan-aware path, or to the legacy ``_resolve_effective_visible``
+        whitelist in the single-base path).
+
+        v1.3 ``_resolve_effective_visible`` does NOT strip ``$<attr>``
+        suffixes — the whitelist must explicitly list the attribute form
+        for it to match. PR5.4 ``_strip_dimension_suffix`` does strip,
+        but PR5.4 only fires when ``plan_provenance`` is set on the
+        column spec (currently only on join/union sides — see
+        ``_append_annotated_side``). For single-base plans the legacy
+        path enforces, hence the literal ``$caption`` form here.
+        """
+        sales = from_(
+            model="FactSalesModel",
+            columns=["orderStatus$caption", "salesAmount"],
+        )
         plan = from_(
             model="FactSalesModel",
             columns=[
-                {"plan": sales, "field": "orderStatus"},
+                {"plan": sales, "field": "orderStatus$caption"},
                 {"plan": sales, "field": "salesAmount", "agg": "sum", "as": "amt"},
             ],
-            group_by=["orderStatus"],
+            group_by=["orderStatus$caption"],
         )
 
-        # Whitelist allows orderStatus + salesAmount on FactSalesModel.
-        ctx = _ctx({"FactSalesModel": ["orderStatus", "salesAmount"]})
+        # Whitelist allows the literal $caption attribute + the salesAmount
+        # measure on FactSalesModel. v1.3 does exact-string match for
+        # field_access in single-base path.
+        ctx = _ctx({"FactSalesModel": ["orderStatus$caption", "salesAmount"]})
         composed = compile_plan_to_sql(
             plan, ctx, semantic_service=svc, dialect="mysql8"
         )
@@ -248,7 +286,10 @@ class TestF5PlanRoutedPermission:
         Either denial is plan-routed (the same field_access whitelist drives
         both); the test accepts both shapes.
         """
-        sales = from_(model="FactSalesModel", columns=["orderStatus", "salesAmount"])
+        sales = from_(
+            model="FactSalesModel",
+            columns=["orderStatus$caption", "salesAmount"],
+        )
         plan = from_(
             model="FactSalesModel",
             columns=[
@@ -256,8 +297,9 @@ class TestF5PlanRoutedPermission:
             ],
         )
 
-        # Whitelist excludes salesAmount — only orderStatus permitted.
-        ctx = _ctx({"FactSalesModel": ["orderStatus"]})
+        # Whitelist explicitly lists only the $caption attribute (not
+        # salesAmount), so the salesAmount measure is denied.
+        ctx = _ctx({"FactSalesModel": ["orderStatus$caption"]})
 
         with pytest.raises((ComposeSchemaError, ComposeCompileError)) as ei:
             compile_plan_to_sql(plan, ctx, semantic_service=svc, dialect="mysql8")
