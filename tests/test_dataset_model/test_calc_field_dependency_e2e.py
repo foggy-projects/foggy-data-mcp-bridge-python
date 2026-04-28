@@ -61,7 +61,7 @@ class TestTransitiveCalcRefs:
         paren wrap → triple-nested parens on references.
         """
         req = SemanticQueryRequest(
-            columns=["name", "netAmount", "withTax"],
+            columns=["name$caption", "netAmount", "withTax"],
             # Intentionally out-of-order: withTax listed before netAmount
             calculatedFields=[
                 {"name": "withTax", "expression": "netAmount * 1.13"},
@@ -82,7 +82,7 @@ class TestTransitiveCalcRefs:
     def test_deep_chain(self, svc):
         """a → b → c: each references its predecessor."""
         req = SemanticQueryRequest(
-            columns=["name", "a", "b", "c"],
+            columns=["name$caption", "a", "b", "c"],
             calculatedFields=[
                 {"name": "c", "expression": "b + a"},
                 {"name": "b", "expression": "a * 2"},
@@ -220,7 +220,7 @@ class TestCircularReferenceDetection:
 class TestSliceRefsCalc:
     def test_simple_slice_on_calc(self, svc):
         req = SemanticQueryRequest(
-            columns=["name", "netAmount"],
+            columns=["name$caption", "netAmount"],
             calculatedFields=[
                 {"name": "netAmount", "expression": "salesAmount - costAmount"},
             ],
@@ -262,7 +262,7 @@ class TestSliceRefsCalc:
 class TestOrderByGroupByRefsCalc:
     def test_orderby_on_calc_in_select(self, svc):
         req = SemanticQueryRequest(
-            columns=["name", "netAmount"],
+            columns=["name$caption", "netAmount"],
             calculatedFields=[
                 {"name": "netAmount", "expression": "salesAmount - costAmount"},
             ],
@@ -282,7 +282,7 @@ class TestOrderByGroupByRefsCalc:
         the calc's alias.
         """
         req = SemanticQueryRequest(
-            columns=["name"],
+            columns=["name$caption"],
             calculatedFields=[
                 {"name": "hiddenScore", "expression": "salesAmount - costAmount"},
             ],
@@ -316,7 +316,7 @@ class TestOrderByGroupByRefsCalc:
 class TestBackwardCompat:
     def test_single_calc_no_deps(self, svc):
         req = SemanticQueryRequest(
-            columns=["name", "profit"],
+            columns=["name$caption", "profit"],
             calculatedFields=[
                 {"name": "profit", "expression": "salesAmount - costAmount"},
             ],
@@ -340,7 +340,7 @@ class TestBackwardCompat:
         assert 'SUM((t.sales_amount - t.cost_amount)) AS "totalNet"' in r.sql
 
     def test_empty_calc_list(self, svc):
-        req = SemanticQueryRequest(columns=["name", "salesAmount"])
+        req = SemanticQueryRequest(columns=["name$caption", "salesAmount"])
         r = svc.query_model("TestModel", req, mode="validate")
         assert r.error is None
 

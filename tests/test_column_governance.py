@@ -608,12 +608,12 @@ class TestServiceLevelCalculatedFieldGovernance:
 
     def test_calculated_fields_rejects_blocked_source_field(self, sales_service):
         req = SemanticQueryRequest(
-            columns=["orderStatus"],
+            columns=["orderStatus$caption"],
             calculated_fields=[{
                 "name": "netAmount",
                 "expression": "salesAmount + discountAmount",
             }],
-            field_access=FieldAccessDef(visible=["orderStatus", "salesAmount"]),
+            field_access=FieldAccessDef(visible=["orderStatus$caption", "salesAmount"]),
         )
 
         result = sales_service.query_model("FactSalesModel", req, mode="validate")
@@ -650,7 +650,19 @@ class TestServiceLevelCalculatedFieldGovernance:
         assert "discountAmount" in result.error
 
     def test_inline_arithmetic_all_visible_passes(self, sales_service):
-        """`a + b as c`: when both a and b are visible, query passes."""
+        """v1.7 backlog B-03 strict path: inline arithmetic in ``columns``
+        is no longer accepted — the v1.3 column loop only recognises
+        ``dim$id`` / ``dim$caption`` / ``measureName`` / ``AGG(...) AS alias``
+        forms. Users wanting inline arithmetic must declare it via
+        ``calculated_fields``.
+
+        The pre-strict behaviour silently dropped the expression, leaving
+        SQL with no SELECT for it and the governance check (which is the
+        focus of this class) inspecting only the expression's
+        dependencies. This test now confirms the strict rejection — the
+        complementary test_inline_arithmetic_expression_rejects_blocked_dependency
+        case continues to verify governance over the dependency fields.
+        """
         req = SemanticQueryRequest(
             columns=["salesAmount + discountAmount as totalAmount"],
             field_access=FieldAccessDef(visible=["salesAmount", "discountAmount"]),
@@ -658,7 +670,9 @@ class TestServiceLevelCalculatedFieldGovernance:
 
         result = sales_service.query_model("FactSalesModel", req, mode="validate")
 
-        assert result.error is None
+        assert result.error is not None
+        assert "COLUMN_FIELD_NOT_FOUND" in result.error
+        assert "salesAmount + discountAmount as totalAmount" in result.error
 
     def test_inline_aggregate_all_visible_passes(self, sales_service):
         """`sum(a + b) as total`: when both a and b are visible, query passes."""
@@ -687,7 +701,11 @@ class TestServiceLevelCalculatedFieldGovernance:
         assert "discountAmount" in result.error
 
     def test_orderby_alias_backtrack_to_expression_passes(self, sales_service):
-        """orderBy alias → expression deps: all visible passes."""
+        """v1.7 backlog B-03 strict path: as with the previous test,
+        inline arithmetic in ``columns`` is now rejected. The orderBy
+        alias-backtrack path remains a governance concern when the
+        expression IS supplied via ``calculated_fields``; this test
+        confirms the strict rejection of the old inline-in-columns form."""
         req = SemanticQueryRequest(
             columns=["salesAmount + discountAmount as total"],
             order_by=[{"field": "total", "dir": "desc"}],
@@ -696,7 +714,8 @@ class TestServiceLevelCalculatedFieldGovernance:
 
         result = sales_service.query_model("FactSalesModel", req, mode="validate")
 
-        assert result.error is None
+        assert result.error is not None
+        assert "COLUMN_FIELD_NOT_FOUND" in result.error
 
     # --- accessor payload full-chain integration test ---
 
@@ -704,10 +723,10 @@ class TestServiceLevelCalculatedFieldGovernance:
         """Full chain: JSON payload → build_query_request → query_model → rejection."""
         from foggy.mcp_spi.accessor import build_query_request
         payload = {
-            "columns": ["orderStatus", "salesAmount + discountAmount as total"],
+            "columns": ["orderStatus$caption", "salesAmount + discountAmount as total"],
             "slice": [],
             "orderBy": [{"field": "total", "dir": "desc"}],
-            "fieldAccess": {"visible": ["orderStatus", "salesAmount"]},
+            "fieldAccess": {"visible": ["orderStatus$caption", "salesAmount"]},
         }
         req = build_query_request(payload)
         result = sales_service.query_model("FactSalesModel", req, mode="validate")

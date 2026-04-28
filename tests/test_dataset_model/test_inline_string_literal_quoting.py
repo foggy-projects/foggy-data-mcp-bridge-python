@@ -59,7 +59,7 @@ class TestInlineDoubleQuotedStringLiteralNormalizedToSingleQuote:
         sql = _validate(
             svc,
             [
-                "orderStatus",
+                "orderStatus$caption",
                 'sum(if(orderStatus == "COMPLETED", 1, 0)) as completedCount',
             ],
         )
@@ -77,7 +77,7 @@ class TestInlineDoubleQuotedStringLiteralNormalizedToSingleQuote:
         sql = _validate(
             svc,
             [
-                "orderStatus",
+                "orderStatus$caption",
                 'count(if(orderStatus == "COMPLETED", 1, null)) as completedRows',
             ],
         )
@@ -92,7 +92,7 @@ class TestInlineDoubleQuotedStringLiteralNormalizedToSingleQuote:
         sql = _validate(
             svc,
             [
-                "orderStatus",
+                "orderStatus$caption",
                 'sum(if(orderStatus == "COMPLETED" && salesAmount > 0 && paymentMethod == "ALIPAY", salesAmount, 0)) as total',
             ],
         )
@@ -117,7 +117,7 @@ class TestInlineStringLiteralBoundaryScenarios:
         sql = _validate(
             svc,
             [
-                "orderStatus",
+                "orderStatus$caption",
                 "sum(if(orderStatus == 'COMPLETED', 1, 0)) as c",
             ],
         )
@@ -128,7 +128,7 @@ class TestInlineStringLiteralBoundaryScenarios:
         sql = _validate(
             svc,
             [
-                "orderStatus",
+                "orderStatus$caption",
                 "sum(if(orderStatus == 'COMPLETED' && paymentMethod == \"ALIPAY\", 1, 0)) as c",
             ],
         )
@@ -141,7 +141,7 @@ class TestInlineStringLiteralBoundaryScenarios:
         sql = _validate(
             svc,
             [
-                "orderStatus",
+                "orderStatus$caption",
                 'sum(if(orderStatus == "COMPLETED", if(paymentMethod == "ALIPAY", 1, 0), 0)) as alipayCompleted',
             ],
         )
@@ -155,7 +155,7 @@ class TestInlineStringLiteralBoundaryScenarios:
         sql = _validate(
             svc,
             [
-                "orderStatus",
+                "orderStatus$caption",
                 'sum(if(orderStatus == "COMPLETED" || orderStatus == "PAID", 1, 0)) as closed',
             ],
         )
@@ -171,7 +171,7 @@ class TestInlineStringLiteralBoundaryScenarios:
         sql = _validate(
             svc,
             [
-                "orderStatus",
+                "orderStatus$caption",
                 "sum(if(orderStatus == \"it's\", 1, 0)) as c",
             ],
         )
@@ -187,7 +187,7 @@ class TestInlineStringLiteralBoundaryScenarios:
         sql = _validate(
             svc,
             [
-                "orderStatus",
+                "orderStatus$caption",
                 'sum(if(orderStatus == "po_lead", 1, 0)) as c',
             ],
         )
@@ -199,7 +199,7 @@ class TestInlineStringLiteralBoundaryScenarios:
         sql = _validate(
             svc,
             [
-                "orderStatus",
+                "orderStatus$caption",
                 'sum(if(orderStatus == "a\\\\b", 1, 0)) as c',
             ],
         )
@@ -214,7 +214,7 @@ class TestInlineStringLiteralBoundaryScenarios:
         sql = _validate(
             svc,
             [
-                "orderStatus",
+                "orderStatus$caption",
                 'sum(if(orderStatus == "", 1, 0)) as c',
             ],
         )
@@ -229,7 +229,7 @@ class TestInlineStringLiteralBoundaryScenarios:
         sql = _validate(
             svc,
             [
-                "orderStatus",
+                "orderStatus$caption",
                 'sum(if(orderStatus == "COMPLETED", salesAmount, 0)) as c',
             ],
         )
@@ -243,7 +243,7 @@ class TestInlineStringLiteralBoundaryScenarios:
         sql = _validate(
             svc,
             [
-                "orderStatus",
+                "orderStatus$caption",
                 'sum(if(orderStatus == "已完成", 1, 0)) as c',
             ],
         )
@@ -255,7 +255,7 @@ class TestInlineStringLiteralBoundaryScenarios:
         sql = _validate(
             svc,
             [
-                "orderStatus",
+                "orderStatus$caption",
                 'sum(if(orderStatus == "  COMPLETED  ", 1, 0)) as c',
             ],
         )
@@ -269,7 +269,7 @@ class TestInlineStringLiteralBoundaryScenarios:
         sql = _validate(
             svc,
             [
-                "orderStatus",
+                "orderStatus$caption",
                 "sum(if(orderStatus == \"'; DROP TABLE users--\", 1, 0)) as c",
             ],
         )
@@ -285,7 +285,7 @@ class TestInlineStringLiteralBoundaryScenarios:
         sql = _validate(
             svc,
             [
-                "orderStatus",
+                "orderStatus$caption",
                 'sum(if(orderStatus == "2026", 1, 0)) as c',
             ],
         )
@@ -297,7 +297,7 @@ class TestInlineStringLiteralBoundaryScenarios:
         sql = _validate(
             svc,
             [
-                "orderStatus",
+                "orderStatus$caption",
                 'sum(if(orderStatus == "COMPLETED" && orderStatus == "COMPLETED", 1, 0)) as c',
             ],
         )
@@ -311,7 +311,7 @@ class TestInlineStringLiteralBoundaryScenarios:
         sql = _validate(
             svc,
             [
-                "orderStatus",
+                "orderStatus$caption",
                 "sum(if(orderStatus == 'say \"hi\"', 1, 0)) as c",
             ],
         )
@@ -331,7 +331,7 @@ class TestInlineStringLiteralBoundaryScenarios:
         sql = _validate(
             svc,
             [
-                "orderStatus",
+                "orderStatus$caption",
                 'sum(if(orderStatus == "50%_off", 1, 0)) as c',
             ],
         )

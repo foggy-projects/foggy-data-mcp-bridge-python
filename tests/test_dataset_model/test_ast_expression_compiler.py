@@ -211,7 +211,7 @@ class TestMethodCalls:
 
     def test_method_end_to_end_query(self, svc_ast, model):
         req = SemanticQueryRequest(
-            columns=["name", "isA"],
+            columns=["name$caption", "isA"],
             calculatedFields=[
                 {"name": "isA", "expression": "name.startsWith('A')"},
             ],

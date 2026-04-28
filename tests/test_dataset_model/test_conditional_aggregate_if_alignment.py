@@ -39,7 +39,7 @@ POSTGRES_CONFIG = {
 
 SQLITE_FIXTURE = Path(__file__).resolve().parents[2] / "fixtures" / "conditional_aggregate_if_alignment.sqlite3"
 
-GROUP_FIELD = "orderStatus"
+GROUP_FIELD = "orderStatus$caption"
 GROUP_ALIAS = "订单状态"
 
 
@@ -231,7 +231,7 @@ class TestConditionalAggregateIfGovernance:
         service = _build_service(MySqlDialect(), executor=None)
         request = SemanticQueryRequest(
             columns=[GROUP_FIELD, "sum(if(orderStatus == 'COMPLETED', salesAmount, 0)) as completedSales"],
-            field_access=FieldAccessDef(visible=["orderStatus"]),
+            field_access=FieldAccessDef(visible=["orderStatus$caption"]),
         )
         response = service.query_model("FactSalesModel", request, mode="validate")
         assert response.error is not None
@@ -241,7 +241,7 @@ class TestConditionalAggregateIfGovernance:
         service = _build_service(MySqlDialect(), executor=None)
         request = SemanticQueryRequest(
             columns=[GROUP_FIELD, "sum(if(orderStatus == 'COMPLETED', salesAmount, 0)) as completedSales"],
-            field_access=FieldAccessDef(visible=["orderStatus", "salesAmount"]),
+            field_access=FieldAccessDef(visible=["orderStatus$caption", "salesAmount"]),
         )
         response = service.query_model("FactSalesModel", request, mode="validate")
         assert response.error is None

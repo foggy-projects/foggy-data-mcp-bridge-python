@@ -106,7 +106,7 @@ def base_sales():
     """BaseModelPlan(FactSalesModel, columns=[orderStatus, salesAmount])."""
     return from_(
         model="FactSalesModel",
-        columns=["orderStatus", "salesAmount"],
+        columns=["orderStatus$caption", "salesAmount"],
     )
 
 
@@ -115,7 +115,7 @@ def base_orders():
     """BaseModelPlan(FactOrderModel, columns=[orderStatus, totalAmount])."""
     return from_(
         model="FactOrderModel",
-        columns=["orderStatus", "totalAmount"],
+        columns=["orderStatus$caption", "totalAmount"],
     )
 
 
@@ -124,7 +124,7 @@ def base_payments():
     """BaseModelPlan(FactPaymentModel, columns=[payMethod, payAmount])."""
     return from_(
         model="FactPaymentModel",
-        columns=["payMethod", "payAmount"],
+        columns=["payMethod$caption", "payAmount"],
     )
 
 

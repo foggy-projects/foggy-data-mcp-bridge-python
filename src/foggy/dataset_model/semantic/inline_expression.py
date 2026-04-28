@@ -179,3 +179,69 @@ def parse_inline_aggregate(expr: str) -> Optional[InlineAggregateExpression]:
         alias=alias or _default_alias(function_name, inner_expression),
     )
 
+
+@dataclass(frozen=True)
+class ColumnSpecParts:
+    """Result of :func:`parse_column_with_alias`.
+
+    Attributes
+    ----------
+    base_expr:
+        The expression portion (with outer whitespace stripped). Equals
+        the original (stripped) input when no alias was found.
+    user_alias:
+        The user-supplied alias when present (post ``AS``); ``None``
+        otherwise.
+    """
+
+    base_expr: str
+    user_alias: Optional[str]
+
+
+def parse_column_with_alias(column_spec: str) -> ColumnSpecParts:
+    """Split a non-aggregate ``columns[*]`` entry into its expression
+    and optional ``AS alias`` parts.
+
+    Parses *only* the trailing ``AS <ident>`` suffix at the **top level**
+    (parens-aware via :func:`_find_top_level_as`). The returned
+    ``base_expr`` is the input with the trailing alias stripped. If the
+    spec has no top-level ``AS`` or the post-``AS`` token is not a legal
+    bare identifier, ``user_alias`` is ``None`` and ``base_expr`` is the
+    stripped input.
+
+    This helper is the dual of :func:`parse_inline_aggregate`: the
+    aggregate path embeds its own alias logic for the
+    ``AGG(...) [AS alias]`` shape, while this function handles the
+    non-aggregate case (e.g. ``"product$caption AS productName"``).
+
+    Parameters
+    ----------
+    column_spec:
+        A non-empty ``columns[*]`` string. Whitespace-only inputs raise.
+
+    Raises
+    ------
+    ValueError
+        When ``column_spec`` is not a non-empty string after stripping.
+    """
+    if not isinstance(column_spec, str):
+        raise TypeError(
+            f"column_spec must be str, got {type(column_spec).__name__}"
+        )
+    stripped = column_spec.strip()
+    if not stripped:
+        raise ValueError("column_spec must be a non-empty (non-whitespace) str")
+
+    alias_idx = _find_top_level_as(stripped)
+    if alias_idx < 0:
+        return ColumnSpecParts(base_expr=stripped, user_alias=None)
+
+    base = stripped[:alias_idx].strip()
+    candidate = stripped[alias_idx + 4:].strip()
+    if not base or not candidate or not _ALIAS_RE.fullmatch(candidate):
+        # Malformed — caller decides whether to treat the whole input
+        # as a (likely failing) bare expression. Keep the input intact
+        # so error messages can quote it back unchanged.
+        return ColumnSpecParts(base_expr=stripped, user_alias=None)
+
+    return ColumnSpecParts(base_expr=base, user_alias=candidate)

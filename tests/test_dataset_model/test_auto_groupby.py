@@ -32,7 +32,7 @@ class TestAutoGroupBy:
 
     def test_auto_groupby_single_dimension(self, service):
         """columns=[orderStatus, salesAmount] should GROUP BY t.order_status."""
-        request = SemanticQueryRequest(columns=["orderStatus", "salesAmount"])
+        request = SemanticQueryRequest(columns=["orderStatus$caption", "salesAmount"])
         sql = _build_sql(service, request)
         assert "GROUP BY" in sql
         assert "t.order_status" in sql.split("GROUP BY")[1]
@@ -40,7 +40,7 @@ class TestAutoGroupBy:
     def test_auto_groupby_multi_dimension(self, service):
         """columns=[orderStatus, paymentMethod, salesAmount] should GROUP BY both dims."""
         request = SemanticQueryRequest(
-            columns=["orderStatus", "paymentMethod", "salesAmount"]
+            columns=["orderStatus$caption", "paymentMethod$caption", "salesAmount"]
         )
         sql = _build_sql(service, request)
         group_part = sql.split("GROUP BY")[1]
@@ -58,15 +58,15 @@ class TestAutoGroupBy:
 
     def test_auto_groupby_no_aggregation(self, service):
         """columns=[orderId, orderStatus] (no measures) should NOT generate GROUP BY."""
-        request = SemanticQueryRequest(columns=["orderId", "orderStatus"])
+        request = SemanticQueryRequest(columns=["orderId$caption", "orderStatus$caption"])
         sql = _build_sql(service, request)
         assert "GROUP BY" not in sql
 
     def test_explicit_groupby_overrides(self, service):
         """Explicit group_by prevents auto GROUP BY; only the explicit columns appear."""
         request = SemanticQueryRequest(
-            columns=["orderStatus", "paymentMethod", "salesAmount"],
-            group_by=["orderStatus"],
+            columns=["orderStatus$caption", "paymentMethod$caption", "salesAmount"],
+            group_by=["orderStatus$caption"],
         )
         sql = _build_sql(service, request)
         group_part = sql.split("GROUP BY")[1]
@@ -77,7 +77,7 @@ class TestAutoGroupBy:
     def test_auto_groupby_mixed_measures(self, service):
         """Multiple measures with a single dimension should still auto GROUP BY."""
         request = SemanticQueryRequest(
-            columns=["orderStatus", "salesAmount", "quantity", "profitAmount"]
+            columns=["orderStatus$caption", "salesAmount", "quantity", "profitAmount"]
         )
         sql = _build_sql(service, request)
         assert "GROUP BY" in sql
@@ -88,7 +88,7 @@ class TestAutoGroupBy:
         """Aggregation detection works regardless of case (SUM vs sum)."""
         # The model defines AggregationType.SUM which resolves to uppercase.
         # This test verifies the generated SQL has a valid aggregation wrapper.
-        request = SemanticQueryRequest(columns=["orderStatus", "salesAmount"])
+        request = SemanticQueryRequest(columns=["orderStatus$caption", "salesAmount"])
         sql = _build_sql(service, request)
         # SUM should appear in the SELECT clause
         select_part = sql.split("FROM")[0].upper()
@@ -123,7 +123,7 @@ class TestAutoGroupBy:
 
     def test_auto_groupby_count_distinct(self, service):
         """COUNT_DISTINCT measure should trigger auto GROUP BY."""
-        request = SemanticQueryRequest(columns=["orderStatus", "uniqueCustomers"])
+        request = SemanticQueryRequest(columns=["orderStatus$caption", "uniqueCustomers"])
         sql = _build_sql(service, request)
         assert "GROUP BY" in sql
         select_part = sql.split("FROM")[0].upper()
@@ -140,7 +140,7 @@ class TestAutoGroupBy:
     def test_auto_groupby_preserves_select_order(self, service):
         """The SELECT clause should have columns in the requested order."""
         request = SemanticQueryRequest(
-            columns=["salesAmount", "orderStatus"]
+            columns=["salesAmount", "orderStatus$caption"]
         )
         sql = _build_sql(service, request)
         select_part = sql.split("FROM")[0]
@@ -151,7 +151,7 @@ class TestAutoGroupBy:
     def test_auto_groupby_with_fact_and_join_dims(self, service):
         """Mix of fact-table dimension and join dimension with a measure."""
         request = SemanticQueryRequest(
-            columns=["orderStatus", "product$brand", "salesAmount"]
+            columns=["orderStatus$caption", "product$brand", "salesAmount"]
         )
         sql = _build_sql(service, request)
         assert "GROUP BY" in sql

@@ -67,7 +67,7 @@ class TestSingleBase4Dialects:
     def plan(self):
         return from_(
             model="FactSalesModel",
-            columns=["orderStatus", "salesAmount"],
+            columns=["orderStatus$caption", "salesAmount"],
         )
 
     def test_mysql57_subquery_form(self, svc, ctx, plan):
@@ -172,8 +172,8 @@ class TestDerivedChain4Dialects:
 
     @pytest.fixture
     def derived_chain_plan(self, base_sales):
-        d1 = base_sales.query(columns=["orderStatus"])
-        d2 = d1.query(columns=["orderStatus"])
+        d1 = base_sales.query(columns=["orderStatus$caption"])
+        d2 = d1.query(columns=["orderStatus$caption"])
         return d2
 
     def test_derived_chain_mysql57(self, svc, ctx, derived_chain_plan):
@@ -216,7 +216,7 @@ class TestDialectParamOrdering:
     @pytest.fixture
     def slice_plan(self, base_sales):
         return base_sales.query(
-            columns=["orderStatus"],
+            columns=["orderStatus$caption"],
             slice=[{"field": "orderStatus", "op": "=", "value": "done"}],
         )
 

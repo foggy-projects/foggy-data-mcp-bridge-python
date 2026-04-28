@@ -172,7 +172,7 @@ class TestInlineExpressionStep:
     def test_ignores_plain_column(self, sales_model):
         ctx = ModelResultContext(
             model_name="FactSalesModel",
-            request={"columns": ["orderId"]},
+            request={"columns": ["orderId$caption"]},
             query_model=sales_model,
         )
         step = InlineExpressionStep()
@@ -206,7 +206,7 @@ class TestInlineExpressionStep:
     def test_mixed_columns(self, sales_model):
         ctx = ModelResultContext(
             model_name="FactSalesModel",
-            request={"columns": ["orderId", "sum(quantity) as qty"]},
+            request={"columns": ["orderId$caption", "sum(quantity) as qty"]},
             query_model=sales_model,
         )
         step = InlineExpressionStep()
@@ -267,7 +267,7 @@ class TestAutoGroupByStep:
         """No measures => no auto groupBy."""
         ctx = ModelResultContext(
             model_name="FactSalesModel",
-            request={"columns": ["orderId", "orderStatus"]},
+            request={"columns": ["orderId$caption", "orderStatus$caption"]},
             query_model=sales_model,
         )
         step = AutoGroupByStep()
@@ -279,24 +279,24 @@ class TestAutoGroupByStep:
         """Inline expressions count as measures for auto groupBy."""
         ctx = ModelResultContext(
             model_name="FactSalesModel",
-            request={"columns": ["orderId", "sum(salesAmount) as total"]},
+            request={"columns": ["orderId$caption", "sum(salesAmount) as total"]},
             query_model=sales_model,
         )
         # Run inline step first to populate ext_data
         InlineExpressionStep().before_query(ctx)
         AutoGroupByStep().before_query(ctx)
-        assert ctx.ext_data.get("auto_group_by") == ["orderId"]
+        assert ctx.ext_data.get("auto_group_by") == ["orderId$caption"]
 
     def test_nested_inline_expression_triggers_group_by(self, sales_model):
         """Nested inline aggregates should still count as measures for auto groupBy."""
         ctx = ModelResultContext(
             model_name="FactSalesModel",
-            request={"columns": ["orderId", "sum(if(orderStatus == 'COMPLETED', salesAmount, 0)) as completedSales"]},
+            request={"columns": ["orderId$caption", "sum(if(orderStatus == 'COMPLETED', salesAmount, 0)) as completedSales"]},
             query_model=sales_model,
         )
         InlineExpressionStep().before_query(ctx)
         AutoGroupByStep().before_query(ctx)
-        assert ctx.ext_data.get("auto_group_by") == ["orderId"]
+        assert ctx.ext_data.get("auto_group_by") == ["orderId$caption"]
 
 
 # ===================================================================

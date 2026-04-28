@@ -125,7 +125,7 @@ class TestJoinWithDerived:
     def test_derived_left_side(
         self, svc, ctx, base_sales, base_orders
     ):
-        left = base_sales.query(columns=["orderStatus"])
+        left = base_sales.query(columns=["orderStatus$caption"])
         on = [JoinOn(left="orderStatus", op="=", right="orderStatus")]
         j = left.join(base_orders, type="inner", on=on)
         composed = compile_plan_to_sql(
@@ -138,7 +138,7 @@ class TestJoinWithDerived:
     def test_derived_right_side(
         self, svc, ctx, base_sales, base_orders
     ):
-        right = base_orders.query(columns=["orderStatus"])
+        right = base_orders.query(columns=["orderStatus$caption"])
         on = [JoinOn(left="orderStatus", op="=", right="orderStatus")]
         j = base_sales.join(right, type="inner", on=on)
         composed = compile_plan_to_sql(
@@ -152,7 +152,7 @@ class TestJoinWithDerived:
         """Can you query over a join? Yes — derived wrapping is allowed."""
         on = [JoinOn(left="orderStatus", op="=", right="orderStatus")]
         j = base_sales.join(base_orders, type="left", on=on)
-        d = j.query(columns=["orderStatus"])
+        d = j.query(columns=["orderStatus$caption"])
         composed = compile_plan_to_sql(
             d, ctx, semantic_service=svc, dialect="mysql8"
         )

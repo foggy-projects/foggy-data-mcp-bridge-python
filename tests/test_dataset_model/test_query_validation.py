@@ -24,7 +24,7 @@ class TestQueryValidation:
 
     def test_validate_returns_sql(self, service):
         """mode='validate' should return sql without executing."""
-        request = SemanticQueryRequest(columns=["orderStatus", "salesAmount"])
+        request = SemanticQueryRequest(columns=["orderStatus$caption", "salesAmount"])
         response = service.query_model("FactSalesModel", request, mode="validate")
         assert response.error is None
         assert response.sql is not None
@@ -43,7 +43,7 @@ class TestQueryValidation:
     def test_validate_unknown_column(self, service):
         """Unknown columns now fail fast with an INVALID_QUERY_FIELD repair hint
         instead of silently falling through to the database."""
-        request = SemanticQueryRequest(columns=["orderStatus", "totallyBogusColumn"])
+        request = SemanticQueryRequest(columns=["orderStatus$caption", "totallyBogusColumn"])
         response = service.query_model("FactSalesModel", request, mode="validate")
         assert response.error is not None
         assert "totallyBogusColumn" in response.error
@@ -66,7 +66,7 @@ class TestQueryValidation:
     def test_validate_with_filter(self, service):
         """Filter conditions should appear in the generated SQL."""
         request = SemanticQueryRequest(
-            columns=["orderStatus", "salesAmount"],
+            columns=["orderStatus$caption", "salesAmount"],
             slice=[{"column": "orderStatus", "operator": "=", "value": "COMPLETED"}],
         )
         response = service.query_model("FactSalesModel", request, mode="validate")
@@ -77,7 +77,7 @@ class TestQueryValidation:
     def test_validate_with_limit(self, service):
         """LIMIT should appear in the generated SQL."""
         request = SemanticQueryRequest(
-            columns=["orderStatus", "salesAmount"],
+            columns=["orderStatus$caption", "salesAmount"],
             limit=50,
         )
         response = service.query_model("FactSalesModel", request, mode="validate")
@@ -87,14 +87,14 @@ class TestQueryValidation:
 
     def test_validate_returns_columns_metadata(self, service):
         """Validation response should include column metadata."""
-        request = SemanticQueryRequest(columns=["orderStatus", "salesAmount"])
+        request = SemanticQueryRequest(columns=["orderStatus$caption", "salesAmount"])
         response = service.query_model("FactSalesModel", request, mode="validate")
         assert response.error is None
         assert len(response.columns) == 2
 
     def test_validate_returns_metrics(self, service):
         """Validation response should include timing metrics."""
-        request = SemanticQueryRequest(columns=["orderStatus", "salesAmount"])
+        request = SemanticQueryRequest(columns=["orderStatus$caption", "salesAmount"])
         response = service.query_model("FactSalesModel", request, mode="validate")
         assert response.error is None
         # After Java alignment, timing is in debug.durationMs and metrics property
@@ -103,7 +103,7 @@ class TestQueryValidation:
     def test_validate_with_order_by(self, service):
         """ORDER BY should appear in the generated SQL."""
         request = SemanticQueryRequest(
-            columns=["orderStatus", "salesAmount"],
+            columns=["orderStatus$caption", "salesAmount"],
             order_by=[{"column": "salesAmount", "direction": "DESC"}],
         )
         response = service.query_model("FactSalesModel", request, mode="validate")
@@ -114,7 +114,7 @@ class TestQueryValidation:
 
     def test_validate_default_limit_applied(self, service):
         """When no limit is specified, the default limit should be applied."""
-        request = SemanticQueryRequest(columns=["orderStatus", "salesAmount"])
+        request = SemanticQueryRequest(columns=["orderStatus$caption", "salesAmount"])
         response = service.query_model("FactSalesModel", request, mode="validate")
         assert response.error is None
         assert response.sql is not None

@@ -147,7 +147,9 @@ class TestResolveExecutorQueryIntegration:
         model.source_table = "test_table"
         svc.register_model(model)
 
-        # Validate mode doesn't hit executor, but build verifies model lookup works
+        # Validate mode doesn't hit executor, but build verifies model lookup works.
+        # Use the auto-visible-fields branch (empty columns) per v1.7 strict
+        # column resolution rules — bare ``*`` is no longer accepted.
         from foggy.mcp_spi import SemanticQueryRequest
-        response = svc.query_model("ModelB", SemanticQueryRequest(columns=["*"]), mode="validate")
+        response = svc.query_model("ModelB", SemanticQueryRequest(columns=[]), mode="validate")
         assert response.error is None

@@ -118,7 +118,7 @@ class TestDeniedColumns:
         ctx = custom_ctx({"FactSalesModel": binding})
 
         # Plan references only orderStatus (safe) — should compile
-        plan = from_(model="FactSalesModel", columns=["orderStatus"])
+        plan = from_(model="FactSalesModel", columns=["orderStatus$caption"])
         composed = compile_plan_to_sql(
             plan, ctx, semantic_service=svc, dialect="mysql8"
         )
@@ -193,7 +193,7 @@ class TestSystemSlice:
 class TestMissingBindingSecondDefence:
     def test_bindings_dict_missing_qm(self, svc, ctx):
         """Explicit ``bindings={}`` → MISSING_BINDING at plan-lower."""
-        plan = from_(model="FactSalesModel", columns=["orderStatus"])
+        plan = from_(model="FactSalesModel", columns=["orderStatus$caption"])
         with pytest.raises(ComposeCompileError) as exc_info:
             compile_plan_to_sql(
                 plan,
@@ -321,7 +321,7 @@ class TestCombinedBindingFields:
         ctx = custom_ctx({"FactSalesModel": binding})
         plan = from_(
             model="FactSalesModel",
-            columns=["orderStatus", "salesAmount"],
+            columns=["orderStatus$caption", "salesAmount"],
         )
         composed = compile_plan_to_sql(
             plan, ctx, semantic_service=svc, dialect="mysql8"
@@ -484,7 +484,7 @@ class TestBindingReachesRequest:
             namespace=ctx.namespace,
             authority_resolver=FixedResolver(),
         )
-        plan = from_(model="FactSalesModel", columns=["orderStatus"])
+        plan = from_(model="FactSalesModel", columns=["orderStatus$caption"])
         composed = compile_plan_to_sql(
             plan, custom_ctx, semantic_service=svc, dialect="mysql8"
         )

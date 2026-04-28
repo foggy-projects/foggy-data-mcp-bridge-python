@@ -32,7 +32,7 @@ contract:
   (``SUM(salesAmount) AS total``).
 
 The v1.3 engine has a legacy lenient path that accepts bare dimension
-column references (``columns=["orderStatus"]`` → ``t.order_status AS
+column references (``columns=["orderStatus$caption"]`` → ``t.order_status AS
 "<caption>"``) but this is engine-internal and not part of the public
 LLM-facing contract; tests deliberately do not bind to this path so
 they remain stable if v1.3 tightens. See follow-up tracking ticket on

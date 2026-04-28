@@ -68,13 +68,13 @@ class TestUnionParams:
         """Spec parity.md: union emits left sql + params, then right sql + params."""
         a = from_(
             model="FactSalesModel",
-            columns=["orderStatus"],
+            columns=["orderStatus$caption"],
             # slice produces a param the base plan will inline
             slice=[{"field": "orderStatus", "op": "=", "value": "A"}],
         )
         b = from_(
             model="FactOrderModel",
-            columns=["orderStatus"],
+            columns=["orderStatus$caption"],
             slice=[{"field": "orderStatus", "op": "=", "value": "B"}],
         )
         u = a.union(b, all=True)
@@ -90,7 +90,7 @@ class TestUnionParams:
 class TestUnionWithDerived:
     def test_derived_side_in_union(self, svc, ctx, base_sales, base_orders):
         """One side is a DerivedQueryPlan — both compile and concatenate."""
-        left = base_sales.query(columns=["orderStatus"])
+        left = base_sales.query(columns=["orderStatus$caption"])
         u = left.union(base_orders)
         composed = compile_plan_to_sql(
             u, ctx, semantic_service=svc, dialect="mysql8"
@@ -99,8 +99,8 @@ class TestUnionWithDerived:
         assert "FROM (" in composed.sql  # derived wrapping
 
     def test_both_sides_derived(self, svc, ctx, base_sales, base_orders):
-        left = base_sales.query(columns=["orderStatus"])
-        right = base_orders.query(columns=["orderStatus"])
+        left = base_sales.query(columns=["orderStatus$caption"])
+        right = base_orders.query(columns=["orderStatus$caption"])
         u = left.union(right)
         composed = compile_plan_to_sql(
             u, ctx, semantic_service=svc, dialect="mysql8"
@@ -129,7 +129,7 @@ class TestUnionMultipleWay:
         """4-way union nests deeper but still works."""
         fourth = from_(
             model="FactSalesModel",
-            columns=["orderStatus", "salesAmount"],
+            columns=["orderStatus$caption", "salesAmount"],
         )
         u = base_sales.union(base_orders).union(base_payments).union(fourth)
         composed = compile_plan_to_sql(

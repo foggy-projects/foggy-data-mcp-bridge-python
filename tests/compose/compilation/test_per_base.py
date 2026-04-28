@@ -63,8 +63,8 @@ class TestBaseModelPlanShapeFields:
     def test_group_by_field_is_honored(self, svc, ctx):
         plan = from_(
             model="FactSalesModel",
-            columns=["orderStatus", "salesAmount"],
-            group_by=["orderStatus"],
+            columns=["orderStatus$caption", "salesAmount"],
+            group_by=["orderStatus$caption"],
         )
         composed = compile_plan_to_sql(
             plan, ctx, semantic_service=svc, dialect="mysql8"
@@ -75,8 +75,8 @@ class TestBaseModelPlanShapeFields:
     def test_order_by_field_is_honored(self, svc, ctx):
         plan = from_(
             model="FactSalesModel",
-            columns=["orderStatus", "salesAmount"],
-            order_by=["orderStatus"],
+            columns=["orderStatus$caption", "salesAmount"],
+            order_by=["orderStatus$caption"],
         )
         composed = compile_plan_to_sql(
             plan, ctx, semantic_service=svc, dialect="mysql8"
@@ -86,7 +86,7 @@ class TestBaseModelPlanShapeFields:
     def test_limit_is_honored(self, svc, ctx):
         plan = from_(
             model="FactSalesModel",
-            columns=["orderStatus", "salesAmount"],
+            columns=["orderStatus$caption", "salesAmount"],
             limit=100,
         )
         composed = compile_plan_to_sql(
@@ -97,7 +97,7 @@ class TestBaseModelPlanShapeFields:
     def test_start_offset_combined_with_limit(self, svc, ctx):
         plan = from_(
             model="FactSalesModel",
-            columns=["orderStatus", "salesAmount"],
+            columns=["orderStatus$caption", "salesAmount"],
             limit=50,
             start=10,
         )
@@ -133,7 +133,7 @@ class TestBaseModelPlanDistinct:
         policy — M6 only verifies the plan shape travels without panic."""
         plan = from_(
             model="FactSalesModel",
-            columns=["orderStatus"],
+            columns=["orderStatus$caption"],
             distinct=True,
         )
         composed = compile_plan_to_sql(
@@ -207,7 +207,7 @@ class TestPerBaseCompileFailedCauseChain:
 
         monkeypatch.setattr(svc, "_build_query", boom)
 
-        plan = from_(model="FactSalesModel", columns=["orderStatus"])
+        plan = from_(model="FactSalesModel", columns=["orderStatus$caption"])
 
         with pytest.raises(ComposeCompileError) as exc_info:
             compile_plan_to_sql(
@@ -227,7 +227,7 @@ class TestPerBaseCompileFailedCauseChain:
 
         monkeypatch.setattr(svc, "_build_query", boom)
 
-        plan = from_(model="FactSalesModel", columns=["orderStatus"])
+        plan = from_(model="FactSalesModel", columns=["orderStatus$caption"])
 
         with pytest.raises(ComposeCompileError) as exc_info:
             compile_plan_to_sql(

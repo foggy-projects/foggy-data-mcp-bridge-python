@@ -62,6 +62,7 @@ from foggy.dataset_model.semantic.formula_dialect import SqlDialect
 from foggy.dataset_model.semantic.formula_errors import FormulaError
 from foggy.dataset_model.semantic.inline_expression import (
     find_matching_paren,
+    parse_column_with_alias,
     parse_inline_aggregate,
     skip_string_literal,
     split_top_level_commas,
@@ -762,8 +763,37 @@ class SemanticQueryService(SemanticServiceResolver):
                     columns_info.append(info)
                     has_aggregation = True
         else:
+            # ★ v1.7 backlog B-03 · strict column resolution.
+            # The lenient v1.3 path used to fall back to bare-dimension
+            # primary-column projection, silently drop ``dim AS alias``
+            # forms, and ignore the user-supplied alias on
+            # ``dim$attr AS alias``. Those behaviours violated the QM
+            # public contract: dimensions are not directly projectable;
+            # references must use ``$id`` / ``$caption`` / ``$<attr>``.
+            # The strict path below fail-loud rejects bare dimensions
+            # (with a ``did you mean '<dim>$caption'?`` hint) and honours
+            # user-supplied AS aliases on dimension-attribute references.
+            #
+            # Calc-field names declared in ``request.calculated_fields``
+            # are recognised here and pass through silently — the actual
+            # SELECT for them happens in section 2.5 (calc-field
+            # processing) further down. Without this skip, a request
+            # like ``columns=["myCalc"], calculated_fields=[{name:"myCalc",...}]``
+            # would erroneously fail-loud at the column loop because
+            # ``myCalc`` is not a dim/measure/property.
+            calc_field_names = {
+                (cf if isinstance(cf, str) else (cf.get("name") if isinstance(cf, dict) else getattr(cf, "name", None)))
+                for cf in (request.calculated_fields or [])
+            }
+            calc_field_names.discard(None)
             for col_name in request.columns:
-                # Try inline expression: "sum(salesAmount) as totalSales"
+                # 0. Calc-field passthrough — section 2.5 handles emission.
+                base_for_calc_check = parse_column_with_alias(col_name).base_expr
+                if base_for_calc_check in calc_field_names:
+                    continue
+
+                # 1. Inline aggregate path stays first — its own AS-parser
+                #    handles the alias. Backwards-compatible.
                 inline = self._parse_inline_expression(col_name, model, ensure_join)
                 if inline:
                     builder.select(inline["select_expr"])
@@ -771,11 +801,24 @@ class SemanticQueryService(SemanticServiceResolver):
                     has_aggregation = True
                     continue
 
-                resolved = model.resolve_field(col_name)
+                # 2. Split off any user-supplied trailing ``AS alias``
+                #    (top-level, parens-aware). Aggregates are already
+                #    handled above so what remains is the non-aggregate
+                #    contract: bare/attribute field references, with an
+                #    optional alias to override the TM-declared caption.
+                parts = parse_column_with_alias(col_name)
+                base_expr = parts.base_expr
+                user_alias = parts.user_alias
+
+                # 3. Strict resolve — accepts ``measure`` / ``property`` /
+                #    ``dim$id`` / ``dim$caption`` / ``dim$<custom_attr>``.
+                #    Returns ``None`` for bare dimension references and
+                #    everything else; the caller (this branch) decides
+                #    the failure shape.
+                resolved = model.resolve_field_strict(base_expr)
                 if resolved:
-                    ensure_runtime_joins(col_name)
-                    # Auto-JOIN if needed
-                    label = resolved["alias_label"]
+                    ensure_runtime_joins(base_expr)
+                    label = user_alias or resolved["alias_label"]
                     sql_expr = resolved["sql_expr"]
 
                     if resolved["is_measure"] and resolved["aggregation"]:
@@ -791,23 +834,32 @@ class SemanticQueryService(SemanticServiceResolver):
                         builder.select(f"{sql_expr} AS {self._qi(label)}")
                         columns_info.append({"name": label, "fieldName": col_name, "expression": sql_expr, "aggregation": None})
                         selected_dims.append(sql_expr)
-                else:
-                    # Fallback: try as raw fact table column
-                    dim = model.get_dimension(col_name)
-                    measure = model.get_measure(col_name)
-                    if dim:
-                        col_expr = f"t.{dim.column}"
-                        label = dim.alias or dim.name
-                        builder.select(f"{col_expr} AS {self._qi(label)}")
-                        columns_info.append({"name": label, "fieldName": col_name, "expression": col_expr, "aggregation": None})
-                        selected_dims.append(col_expr)
-                    elif measure:
-                        info = self._build_measure_select(measure)
-                        builder.select(info["select_expr"])
-                        columns_info.append(info)
-                        has_aggregation = True
-                    else:
-                        warnings.append(f"Column not found: {col_name}")
+                    continue
+
+                # 4. Bare dimension reference — fail-loud with hint.
+                #    The hint preserves any user alias so the suggested
+                #    fix is copy-paste ready.
+                dim = model.get_dimension(base_expr)
+                if dim is not None:
+                    suggested = f"{base_expr}$caption"
+                    if user_alias:
+                        suggested = f"{suggested} AS {user_alias}"
+                    raise ValueError(
+                        f"COLUMN_FIELD_NOT_FOUND: column {col_name!r} references "
+                        f"dimension {base_expr!r} directly. Dimensions are not "
+                        f"projectable; reference an attribute (e.g. "
+                        f"{base_expr + '$caption'!r} or {base_expr + '$id'!r}). "
+                        f"Hint: did you mean {suggested!r}?"
+                    )
+
+                # 5. Everything else — fail-loud generic.
+                raise ValueError(
+                    f"COLUMN_FIELD_NOT_FOUND: column {col_name!r} is not a "
+                    f"recognized field on model {model.name!r}. Valid forms are "
+                    f"``dim$id`` / ``dim$caption`` / ``dim$<custom_attr>`` / "
+                    f"``measureName`` / ``propertyName`` / "
+                    f"``AGG(measure) AS alias``."
+                )
 
         # 2.5 Process calculatedFields (aggregated calculations + window functions)
         #

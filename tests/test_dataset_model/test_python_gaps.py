@@ -122,7 +122,7 @@ class TestNotLikeInQuery:
         svc.register_model(model)
 
         r = svc.query_model("TestModel", SemanticQueryRequest(
-            columns=["name"],
+            columns=["name$caption"],
             slice=[{"field": "name", "op": "not like", "value": "test"}],
             limit=10,
         ), mode="validate")
@@ -175,7 +175,7 @@ class TestNullAndEmptyInQuery:
         svc.register_model(model)
 
         r = svc.query_model("TestModel", SemanticQueryRequest(
-            columns=["name"],
+            columns=["name$caption"],
             slice=[{"field": "status", "op": "isNullAndEmpty"}],
             limit=10,
         ), mode="validate")
@@ -190,7 +190,7 @@ class TestNullAndEmptyInQuery:
         svc.register_model(model)
 
         r = svc.query_model("TestModel", SemanticQueryRequest(
-            columns=["name"],
+            columns=["name$caption"],
             slice=[{"field": "status", "op": "isNotNullAndEmpty"}],
             limit=10,
         ), mode="validate")
@@ -358,7 +358,7 @@ class TestFieldReference:
         svc.register_model(model)
 
         r = svc.query_model("TestModel", SemanticQueryRequest(
-            columns=["name"],
+            columns=["name$caption"],
             slice=[{"field": "name", "op": "=", "value": {"$field": "status"}}],
         ), mode="validate")
 

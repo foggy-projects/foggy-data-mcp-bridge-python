@@ -76,8 +76,8 @@ class TestFullStructuralDedup:
     ):
         """Two *different* BaseModelPlan instances with the same shape
         → Full dedup merges them into one CTE."""
-        a = from_(model="FactSalesModel", columns=["orderStatus", "salesAmount"])
-        b = from_(model="FactSalesModel", columns=["orderStatus", "salesAmount"])
+        a = from_(model="FactSalesModel", columns=["orderStatus$caption", "salesAmount"])
+        b = from_(model="FactSalesModel", columns=["orderStatus$caption", "salesAmount"])
         # Different instances, same structure
         assert a is not b
 
@@ -93,16 +93,16 @@ class TestFullStructuralDedup:
         self, svc, ctx
     ):
         """Order-sensitive: ``[a, b]`` vs ``[b, a]`` → NOT merged."""
-        a = from_(model="FactSalesModel", columns=["orderStatus", "salesAmount"])
-        b = from_(model="FactSalesModel", columns=["salesAmount", "orderStatus"])
+        a = from_(model="FactSalesModel", columns=["orderStatus$caption", "salesAmount"])
+        b = from_(model="FactSalesModel", columns=["salesAmount", "orderStatus$caption"])
         from foggy.dataset_model.engine.compose.compilation.plan_hash import (
             plan_hash,
         )
         assert plan_hash(a) != plan_hash(b)
 
     def test_different_limit_not_deduped(self, svc, ctx):
-        a = from_(model="FactSalesModel", columns=["orderStatus"], limit=10)
-        b = from_(model="FactSalesModel", columns=["orderStatus"], limit=20)
+        a = from_(model="FactSalesModel", columns=["orderStatus$caption"], limit=10)
+        b = from_(model="FactSalesModel", columns=["orderStatus$caption"], limit=20)
         from foggy.dataset_model.engine.compose.compilation.plan_hash import (
             plan_hash,
         )
@@ -110,7 +110,7 @@ class TestFullStructuralDedup:
 
     def test_nested_derived_inner_base_shared_cte(self, svc, ctx):
         """Two independently-constructed but structurally identical
-        derived plans (outer `.query(columns=["orderStatus"])` on top of
+        derived plans (outer `.query(columns=["orderStatus$caption"])` on top of
         identical inner bases) must resolve to the SAME ``CteUnit`` via
         ``plan_hash`` — observable end-to-end as the two halves of the
         resulting UNION being byte-identical.
@@ -129,11 +129,11 @@ class TestFullStructuralDedup:
         optimisation — tracked as a post-M6 follow-up — and not what
         this test asserts.)
         """
-        base_a = from_(model="FactSalesModel", columns=["orderStatus", "salesAmount"])
-        base_b = from_(model="FactSalesModel", columns=["orderStatus", "salesAmount"])
+        base_a = from_(model="FactSalesModel", columns=["orderStatus$caption", "salesAmount"])
+        base_b = from_(model="FactSalesModel", columns=["orderStatus$caption", "salesAmount"])
         assert base_a is not base_b  # different instances, same shape
-        outer_a = base_a.query(columns=["orderStatus"])
-        outer_b = base_b.query(columns=["orderStatus"])
+        outer_a = base_a.query(columns=["orderStatus$caption"])
+        outer_b = base_b.query(columns=["orderStatus$caption"])
         assert outer_a is not outer_b  # same guarantee one level up
         u = outer_a.union(outer_b)
         composed = compile_plan_to_sql(
@@ -158,9 +158,9 @@ class TestFullStructuralDedup:
 def _build_deep_chain(depth: int):
     """Helper: build a ``DerivedQueryPlan`` chain of requested depth,
     starting from a ``BaseModelPlan`` (depth=1)."""
-    plan = from_(model="FactSalesModel", columns=["orderStatus"])
+    plan = from_(model="FactSalesModel", columns=["orderStatus$caption"])
     for _ in range(depth - 1):
-        plan = plan.query(columns=["orderStatus"])
+        plan = plan.query(columns=["orderStatus$caption"])
     return plan
 
 
@@ -226,7 +226,7 @@ class TestPlanHashListFieldGuard:
 
         plan = from_(
             model="FactSalesModel",
-            columns=["orderStatus"],
+            columns=["orderStatus$caption"],
             slice=[{"field": "orderStatus", "op": "=", "value": "x"}],
         )
         # Would crash with TypeError in raw hash(plan)

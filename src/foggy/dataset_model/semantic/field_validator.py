@@ -336,15 +336,37 @@ def validate_field_access(
         # No governance — everything passes
         return FieldValidationResult()
 
-    visible_set = set(field_access.visible) if has_whitelist else None
+    # Normalize whitelist on both sides for the strip-and-match contract:
+    # the visible set keeps both the original entries AND their base-dim
+    # forms so that ``["orderStatus"]`` permits ``orderStatus$caption``
+    # references AND ``["orderStatus$caption"]`` permits bare-dim refs
+    # appearing inside expressions (calc-field dependency extraction surfaces
+    # bare names from SQL-like sources). Aligns with v1.7 backlog B-03 and
+    # Java ``FieldAccessPermissionStep.checkField()``.
+    visible_set: Optional[Set[str]] = None
+    if has_whitelist:
+        visible_set = set(field_access.visible)
+        for entry in tuple(visible_set):
+            base = _strip_dimension_suffix(entry)
+            if base != entry:
+                visible_set.add(base)
     denied_set = denied_qm_fields or set()
     blocked: List[str] = []
 
     def _check_field(f: str) -> None:
-        """Check a single field against both whitelist and blacklist."""
-        if visible_set is not None and f not in visible_set:
-            blocked.append(f)
-            return
+        """Check a single field against both whitelist and blacklist.
+
+        Whitelist matching strips the ``$id`` / ``$caption`` / ``$<attr>``
+        dimension suffix on the field side and (during whitelist build above)
+        also normalises whitelist entries to base form, so a request like
+        ``columns=["orderStatus$caption"]`` against whitelist ``["orderStatus"]``
+        — or the reverse — both pass.
+        """
+        if visible_set is not None:
+            base = _strip_dimension_suffix(f)
+            if f not in visible_set and base not in visible_set:
+                blocked.append(f)
+                return
         if has_blacklist and _is_field_denied(f, denied_set):
             blocked.append(f)
 

@@ -604,6 +604,127 @@ class DbTableModelImpl(BaseModel):
 
         return None
 
+    def resolve_field_strict(self, field_name: str) -> Optional[Dict[str, Any]]:
+        """Strict version of :meth:`resolve_field` aligned to the Foggy
+        QM public contract (v1.7 / 8.4.0.beta governance · backlog B-03).
+
+        Differences vs. lenient :meth:`resolve_field`:
+
+        * **Bare dimension** (no ``$``) is **never** projectable. The
+          caller is expected to fail-loud with a hint like
+          ``"did you mean '<dim>$caption'?"``. Measures and fact-table
+          properties (which are not dimensions) continue to be accepted.
+        * ``dim$<suffix>`` only matches when ``<suffix>`` is exactly
+          ``"id"``, ``"caption"``, or a declared property name. Garbage
+          suffixes (e.g. ``orderStatus$xyz``) return ``None`` instead of
+          falling back to the dim's primary column.
+
+        Returns ``None`` when the field is not resolvable under the
+        strict contract. The caller decides the error code.
+        """
+        # `field$suffix` path
+        if "$" in field_name:
+            parts = field_name.split("$", 1)
+            dim_name, suffix = parts[0], parts[1]
+            # Reject empty suffix or compound (`dim$$x`, `dim$`, etc.)
+            if not suffix or "$" in suffix:
+                return None
+            # Try join-attached dimension first
+            join_def = self.get_dimension_join(dim_name)
+            if join_def:
+                if suffix == "id":
+                    table_alias_id = join_def.get_alias()
+                    return {
+                        "sql_expr": f"{table_alias_id}.{join_def.primary_key}",
+                        "alias_label": f"{join_def.caption or dim_name}(ID)",
+                        "table_alias": table_alias_id,
+                        "is_measure": False,
+                        "aggregation": None,
+                        "join_def": join_def,
+                        "source_model": self.get_field_model_name(field_name),
+                    }
+                if suffix == "caption":
+                    table_alias_cap = join_def.get_alias()
+                    sql_expr = _resolve_caption_sql(join_def, table_alias_cap)
+                    return {
+                        "sql_expr": sql_expr,
+                        "alias_label": f"{join_def.caption or dim_name}",
+                        "table_alias": table_alias_cap,
+                        "is_measure": False,
+                        "aggregation": None,
+                        "join_def": join_def,
+                        "source_model": self.get_field_model_name(field_name),
+                    }
+                # Custom property — must be declared
+                prop = join_def.get_property(suffix)
+                if prop:
+                    table_alias_prop = join_def.get_alias()
+                    return {
+                        "sql_expr": f"{table_alias_prop}.{prop.column}",
+                        "alias_label": prop.caption or prop.get_name(),
+                        "table_alias": table_alias_prop,
+                        "is_measure": False,
+                        "aggregation": None,
+                        "join_def": join_def,
+                        "source_model": self.get_field_model_name(field_name),
+                    }
+                # Unknown suffix on a join-attached dimension → reject
+                return None
+
+            # Self-attribute dim (no join_def): only `id` / `caption`
+            # are valid suffixes; both map to the dim's own column.
+            dim = self.get_dimension(dim_name)
+            if dim and suffix in ("id", "caption"):
+                table_alias_self = self.get_table_alias_for_model(
+                    self.get_field_model_name(field_name)
+                )
+                return {
+                    "sql_expr": f"{table_alias_self}.{dim.column}",
+                    "alias_label": dim.alias or dim.name,
+                    "table_alias": table_alias_self,
+                    "is_measure": False,
+                    "aggregation": None,
+                    "join_def": None,
+                    "source_model": self.get_field_model_name(field_name),
+                }
+            return None
+
+        # No `$` — measure / property ONLY (bare dimension rejected)
+        measure = self.get_measure(field_name)
+        if measure:
+            agg = measure.aggregation.value.upper() if measure.aggregation else None
+            table_alias_m = self.get_table_alias_for_model(
+                self.get_field_model_name(field_name)
+            )
+            return {
+                "sql_expr": f"{table_alias_m}.{measure.column or measure.name}",
+                "alias_label": measure.alias or measure.name,
+                "table_alias": table_alias_m,
+                "is_measure": True,
+                "aggregation": agg,
+                "join_def": None,
+                "source_model": self.get_field_model_name(field_name),
+            }
+
+        col_def = self.columns.get(field_name)
+        if col_def:
+            table_alias_c = self.get_table_alias_for_model(
+                self.get_field_model_name(field_name)
+            )
+            return {
+                "sql_expr": f"{table_alias_c}.{col_def.name}",
+                "alias_label": col_def.alias or col_def.comment or col_def.name,
+                "table_alias": table_alias_c,
+                "is_measure": False,
+                "aggregation": None,
+                "join_def": None,
+                "source_model": self.get_field_model_name(field_name),
+            }
+
+        # Bare dimension and unknown — both reject (caller distinguishes
+        # via :meth:`get_dimension` to emit the hint message).
+        return None
+
     def validate(self) -> List[str]:
         """Validate the model and return errors.
 

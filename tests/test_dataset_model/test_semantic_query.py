@@ -212,7 +212,7 @@ class TestAutoJoinQuery:
 
     def test_simple_field_query(self, service: SemanticQueryService):
         """columns=[orderStatus, salesAmount] -> FROM fact_sales, no JOIN."""
-        request = SemanticQueryRequest(columns=["orderStatus", "salesAmount"])
+        request = SemanticQueryRequest(columns=["orderStatus$caption", "salesAmount"])
         sql = _build_sql(service, "FactSalesModel", request)
         assert "fact_sales" in sql
         assert "t.order_status" in sql
@@ -221,7 +221,7 @@ class TestAutoJoinQuery:
 
     def test_simple_field_query_no_join(self, service: SemanticQueryService):
         """Fact-only columns should produce no JOIN clause at all."""
-        request = SemanticQueryRequest(columns=["orderStatus", "salesAmount"])
+        request = SemanticQueryRequest(columns=["orderStatus$caption", "salesAmount"])
         sql = _build_sql(service, "FactSalesModel", request)
         # No LEFT JOIN, INNER JOIN, or any JOIN
         assert "LEFT JOIN" not in sql
@@ -278,7 +278,7 @@ class TestAutoJoinQuery:
     def test_filter_on_dimension_generates_join(self, service: SemanticQueryService):
         """Even if dimension is only in filter (not in columns), JOIN is added."""
         request = SemanticQueryRequest(
-            columns=["orderStatus", "salesAmount"],
+            columns=["orderStatus$caption", "salesAmount"],
             slice=[{"column": "product$categoryName", "operator": "=", "value": "电子产品"}],
         )
         sql = _build_sql(service, "FactSalesModel", request)
@@ -467,7 +467,7 @@ class TestAggregationQuery:
     def test_aggregation_auto_group_by_fact_dim(self, service: SemanticQueryService):
         """Fact-table dimension + measure -> auto GROUP BY on the dimension column."""
         request = SemanticQueryRequest(
-            columns=["orderStatus", "salesAmount"]
+            columns=["orderStatus$caption", "salesAmount"]
         )
         sql = _build_sql(service, "FactSalesModel", request)
         assert "GROUP BY" in sql
@@ -476,7 +476,7 @@ class TestAggregationQuery:
     def test_aggregation_auto_group_by_multiple(self, service: SemanticQueryService):
         """Two dimension columns + measure -> GROUP BY both."""
         request = SemanticQueryRequest(
-            columns=["orderStatus", "paymentMethod", "salesAmount"]
+            columns=["orderStatus$caption", "paymentMethod$caption", "salesAmount"]
         )
         sql = _build_sql(service, "FactSalesModel", request)
         assert "GROUP BY" in sql
@@ -486,7 +486,7 @@ class TestAggregationQuery:
     def test_no_group_by_when_no_measure(self, service: SemanticQueryService):
         """Only dimension columns (no measure) -> no GROUP BY."""
         request = SemanticQueryRequest(
-            columns=["orderStatus", "paymentMethod"]
+            columns=["orderStatus$caption", "paymentMethod$caption"]
         )
         sql = _build_sql(service, "FactSalesModel", request)
         assert "GROUP BY" not in sql
@@ -511,6 +511,8 @@ class TestMultiFactJoinQuery:
 
     def test_order_payment_join_sql_uses_physical_columns(self, ecommerce_join_service: SemanticQueryService):
         request = SemanticQueryRequest(
+            # FSScript-loaded join QM exposes orderId / paymentId as fact-table
+            # properties (not dims), so bare references are valid here.
             columns=["orderId", "paymentId", "payAmount"],
             limit=20,
         )
@@ -794,7 +796,7 @@ class TestMetadataV3:
         """
         model = service._models["FactSalesModel"]
         # orderStatus already exists in model.dimensions
-        model.columns["orderStatus"] = DbColumnDef(
+        model.columns["orderStatus$caption"] = DbColumnDef(
             name="order_status",
             column_type=ColumnType.STRING,
         )
@@ -805,7 +807,7 @@ class TestMetadataV3:
         assert "orderStatus" in fields
 
         # Clean up
-        del model.columns["orderStatus"]
+        del model.columns["orderStatus$caption"]
 
     def test_metadata_columns_not_duplicated_with_dimensions(self, service: SemanticQueryService):
         """Verify no sourceColumn collision between model.columns and dimension JOINs.

@@ -28,7 +28,7 @@ from foggy.dataset_model.engine.compose.plan import from_
 
 class TestDerivedSingleLevel:
     def test_derived_over_base_basic(self, svc, ctx, base_sales):
-        derived = base_sales.query(columns=["orderStatus"])
+        derived = base_sales.query(columns=["orderStatus$caption"])
         composed = compile_plan_to_sql(
             derived, ctx, semantic_service=svc, dialect="mysql8"
         )
@@ -38,7 +38,7 @@ class TestDerivedSingleLevel:
         assert "order_status" in composed.sql
 
     def test_derived_limit_and_start(self, svc, ctx, base_sales):
-        derived = base_sales.query(columns=["orderStatus"], limit=50, start=10)
+        derived = base_sales.query(columns=["orderStatus$caption"], limit=50, start=10)
         composed = compile_plan_to_sql(
             derived, ctx, semantic_service=svc, dialect="mysql8"
         )
@@ -47,8 +47,8 @@ class TestDerivedSingleLevel:
 
     def test_derived_group_by(self, svc, ctx, base_sales):
         derived = base_sales.query(
-            columns=["orderStatus"],
-            group_by=["orderStatus"],
+            columns=["orderStatus$caption"],
+            group_by=["orderStatus$caption"],
         )
         composed = compile_plan_to_sql(
             derived, ctx, semantic_service=svc, dialect="mysql8"
@@ -58,8 +58,8 @@ class TestDerivedSingleLevel:
 
     def test_derived_order_by(self, svc, ctx, base_sales):
         derived = base_sales.query(
-            columns=["orderStatus"],
-            order_by=["orderStatus"],
+            columns=["orderStatus$caption"],
+            order_by=["orderStatus$caption"],
         )
         composed = compile_plan_to_sql(
             derived, ctx, semantic_service=svc, dialect="mysql8"
@@ -68,7 +68,7 @@ class TestDerivedSingleLevel:
 
     def test_derived_with_slice_inlines_params(self, svc, ctx, base_sales):
         derived = base_sales.query(
-            columns=["orderStatus"],
+            columns=["orderStatus$caption"],
             slice=[{"field": "orderStatus", "op": "=", "value": "completed"}],
         )
         composed = compile_plan_to_sql(
@@ -79,7 +79,7 @@ class TestDerivedSingleLevel:
         assert "completed" in composed.params
 
     def test_derived_distinct(self, svc, ctx, base_sales):
-        derived = base_sales.query(columns=["orderStatus"], distinct=True)
+        derived = base_sales.query(columns=["orderStatus$caption"], distinct=True)
         composed = compile_plan_to_sql(
             derived, ctx, semantic_service=svc, dialect="mysql8"
         )
@@ -93,8 +93,8 @@ class TestDerivedSingleLevel:
 
 class TestDerivedChains:
     def test_two_level_chain(self, svc, ctx, base_sales):
-        d1 = base_sales.query(columns=["orderStatus"])
-        d2 = d1.query(columns=["orderStatus"])
+        d1 = base_sales.query(columns=["orderStatus$caption"])
+        d2 = d1.query(columns=["orderStatus$caption"])
         composed = compile_plan_to_sql(
             d2, ctx, semantic_service=svc, dialect="mysql8"
         )
@@ -102,19 +102,19 @@ class TestDerivedChains:
         assert composed.sql.count("FROM (") >= 2
 
     def test_three_level_chain(self, svc, ctx, base_sales):
-        d1 = base_sales.query(columns=["orderStatus"])
-        d2 = d1.query(columns=["orderStatus"])
-        d3 = d2.query(columns=["orderStatus"])
+        d1 = base_sales.query(columns=["orderStatus$caption"])
+        d2 = d1.query(columns=["orderStatus$caption"])
+        d3 = d2.query(columns=["orderStatus$caption"])
         composed = compile_plan_to_sql(
             d3, ctx, semantic_service=svc, dialect="mysql8"
         )
         assert composed.sql.count("FROM (") >= 3
 
     def test_four_level_chain(self, svc, ctx, base_sales):
-        d1 = base_sales.query(columns=["orderStatus"])
-        d2 = d1.query(columns=["orderStatus"])
-        d3 = d2.query(columns=["orderStatus"])
-        d4 = d3.query(columns=["orderStatus"])
+        d1 = base_sales.query(columns=["orderStatus$caption"])
+        d2 = d1.query(columns=["orderStatus$caption"])
+        d3 = d2.query(columns=["orderStatus$caption"])
+        d4 = d3.query(columns=["orderStatus$caption"])
         composed = compile_plan_to_sql(
             d4, ctx, semantic_service=svc, dialect="mysql8"
         )
@@ -130,11 +130,11 @@ class TestDerivedChains:
         # become bound params within the inner CTE. We build a chain where
         # both layers contribute params.
         d1 = base_sales.query(
-            columns=["orderStatus"],
+            columns=["orderStatus$caption"],
             slice=[{"field": "orderStatus", "op": "=", "value": "A"}],
         )
         d2 = d1.query(
-            columns=["orderStatus"],
+            columns=["orderStatus$caption"],
             slice=[{"field": "orderStatus", "op": "=", "value": "B"}],
         )
         composed = compile_plan_to_sql(
@@ -154,7 +154,7 @@ class TestDerivedChains:
 class TestDerivedEdgeCases:
     def test_derived_empty_slice(self, svc, ctx, base_sales):
         """No slice → no WHERE clause at outer layer."""
-        derived = base_sales.query(columns=["orderStatus"])
+        derived = base_sales.query(columns=["orderStatus$caption"])
         composed = compile_plan_to_sql(
             derived, ctx, semantic_service=svc, dialect="mysql8"
         )
@@ -169,7 +169,7 @@ class TestDerivedEdgeCases:
 
     def test_derived_with_multiple_slice_entries_emits_all(self, svc, ctx, base_sales):
         derived = base_sales.query(
-            columns=["orderStatus"],
+            columns=["orderStatus$caption"],
             slice=[
                 {"field": "orderStatus", "op": "=", "value": "A"},
                 {"field": "orderStatus", "op": "!=", "value": "B"},
@@ -185,7 +185,7 @@ class TestDerivedEdgeCases:
     def test_derived_shortcut_slice_shape(self, svc, ctx, base_sales):
         """Single-key dict shortcut: ``{"fieldName": value}`` ≡ ``{"field": F, "op": "=", "value": V}``."""
         derived = base_sales.query(
-            columns=["orderStatus"],
+            columns=["orderStatus$caption"],
             slice=[{"orderStatus": "shipped"}],  # shortcut form
         )
         composed = compile_plan_to_sql(

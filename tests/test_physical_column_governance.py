@@ -87,7 +87,7 @@ class TestDeniedColumnDTO:
 
     def test_query_request_with_denied_columns(self):
         req = SemanticQueryRequest(
-            columns=["orderId"],
+            columns=["orderId$caption"],
             denied_columns=[
                 DeniedColumn(table="fact_sales", column="sales_amount"),
             ],
@@ -98,7 +98,7 @@ class TestDeniedColumnDTO:
 
     def test_json_round_trip(self):
         req = SemanticQueryRequest(
-            columns=["orderId"],
+            columns=["orderId$caption"],
             denied_columns=[
                 DeniedColumn(table="fact_sales", column="sales_amount"),
             ],
@@ -311,7 +311,7 @@ class TestValidateFieldAccessBlacklist:
 
     def test_denied_column_blocks_query(self):
         result = validate_field_access(
-            columns=["orderId", "salesAmount"],
+            columns=["orderId$caption", "salesAmount"],
             slice_items=[],
             order_by=[],
             denied_qm_fields={"salesAmount"},
@@ -321,7 +321,7 @@ class TestValidateFieldAccessBlacklist:
 
     def test_denied_column_blocks_slice(self):
         result = validate_field_access(
-            columns=["orderId"],
+            columns=["orderId$caption"],
             slice_items=[{"field": "salesAmount", "op": "gt", "value": 100}],
             order_by=[],
             denied_qm_fields={"salesAmount"},
@@ -331,7 +331,7 @@ class TestValidateFieldAccessBlacklist:
 
     def test_denied_column_blocks_orderby(self):
         result = validate_field_access(
-            columns=["orderId"],
+            columns=["orderId$caption"],
             slice_items=[],
             order_by=[{"field": "salesAmount", "dir": "desc"}],
             denied_qm_fields={"salesAmount"},
@@ -341,7 +341,7 @@ class TestValidateFieldAccessBlacklist:
 
     def test_denied_column_blocks_calculated_field(self):
         result = validate_field_access(
-            columns=["orderId"],
+            columns=["orderId$caption"],
             slice_items=[],
             order_by=[],
             calculated_fields=[{"expression": "salesAmount + discountAmount", "name": "net"}],
@@ -352,7 +352,7 @@ class TestValidateFieldAccessBlacklist:
 
     def test_no_denied_passes(self):
         result = validate_field_access(
-            columns=["orderId", "salesAmount"],
+            columns=["orderId$caption", "salesAmount"],
             slice_items=[],
             order_by=[],
             denied_qm_fields=set(),
@@ -361,7 +361,7 @@ class TestValidateFieldAccessBlacklist:
 
     def test_denied_none_passes(self):
         result = validate_field_access(
-            columns=["orderId", "salesAmount"],
+            columns=["orderId$caption", "salesAmount"],
             slice_items=[],
             order_by=[],
             denied_qm_fields=None,
@@ -386,10 +386,10 @@ class TestCombinedWhitelistBlacklist:
     def test_whitelist_allows_blacklist_blocks(self):
         """Field in whitelist but also in blacklist → blocked (conservative)."""
         result = validate_field_access(
-            columns=["orderId", "salesAmount"],
+            columns=["orderId$caption", "salesAmount"],
             slice_items=[],
             order_by=[],
-            field_access=FieldAccessDef(visible=["orderId", "salesAmount"]),
+            field_access=FieldAccessDef(visible=["orderId$caption", "salesAmount"]),
             denied_qm_fields={"salesAmount"},
         )
         assert not result.valid
@@ -398,10 +398,10 @@ class TestCombinedWhitelistBlacklist:
     def test_whitelist_blocks_blacklist_irrelevant(self):
         """Field not in whitelist → blocked even if not in blacklist."""
         result = validate_field_access(
-            columns=["orderId", "costAmount"],
+            columns=["orderId$caption", "costAmount"],
             slice_items=[],
             order_by=[],
-            field_access=FieldAccessDef(visible=["orderId"]),
+            field_access=FieldAccessDef(visible=["orderId$caption"]),
             denied_qm_fields=set(),
         )
         assert not result.valid
@@ -410,10 +410,10 @@ class TestCombinedWhitelistBlacklist:
     def test_both_allow(self):
         """Field in whitelist and not in blacklist → allowed."""
         result = validate_field_access(
-            columns=["orderId", "salesAmount"],
+            columns=["orderId$caption", "salesAmount"],
             slice_items=[],
             order_by=[],
-            field_access=FieldAccessDef(visible=["orderId", "salesAmount"]),
+            field_access=FieldAccessDef(visible=["orderId$caption", "salesAmount"]),
             denied_qm_fields={"costAmount"},  # different field denied
         )
         assert result.valid
@@ -421,10 +421,10 @@ class TestCombinedWhitelistBlacklist:
     def test_both_active_multiple_blocked(self):
         """Multiple reasons for blocking: some by whitelist, some by blacklist."""
         result = validate_field_access(
-            columns=["orderId", "salesAmount", "costAmount", "taxAmount"],
+            columns=["orderId$caption", "salesAmount", "costAmount", "taxAmount"],
             slice_items=[],
             order_by=[],
-            field_access=FieldAccessDef(visible=["orderId", "salesAmount", "costAmount"]),
+            field_access=FieldAccessDef(visible=["orderId$caption", "salesAmount", "costAmount"]),
             denied_qm_fields={"costAmount"},
         )
         assert not result.valid
@@ -442,7 +442,7 @@ class TestSystemSliceBypassDeniedColumns:
     def test_system_slice_bypasses_denied_columns(self, sales_service):
         """system_slice using a denied column should still pass."""
         req = SemanticQueryRequest(
-            columns=["orderId"],
+            columns=["orderId$caption"],
             slice=[],
             denied_columns=[
                 DeniedColumn(table="fact_sales", column="customer_key"),
@@ -458,7 +458,7 @@ class TestSystemSliceBypassDeniedColumns:
     def test_user_slice_with_denied_column_fails(self, sales_service):
         """User slice referencing a denied field should fail."""
         req = SemanticQueryRequest(
-            columns=["orderId"],
+            columns=["orderId$caption"],
             slice=[{"field": "salesAmount", "op": "gt", "value": 100}],
             denied_columns=[
                 DeniedColumn(table="fact_sales", column="sales_amount"),
@@ -471,7 +471,7 @@ class TestSystemSliceBypassDeniedColumns:
     def test_system_slice_merged_after_validation(self, sales_service):
         """system_slice conditions should appear in the final SQL."""
         req = SemanticQueryRequest(
-            columns=["orderId"],
+            columns=["orderId$caption"],
             slice=[],
             system_slice=[
                 {"field": "customer$id", "op": "eq", "value": 42},
@@ -493,7 +493,7 @@ class TestServiceDeniedColumns:
 
     def test_denied_measure_blocks_query(self, sales_service):
         req = SemanticQueryRequest(
-            columns=["orderId", "salesAmount"],
+            columns=["orderId$caption", "salesAmount"],
             denied_columns=[
                 DeniedColumn(table="fact_sales", column="sales_amount"),
             ],
@@ -504,7 +504,7 @@ class TestServiceDeniedColumns:
 
     def test_denied_dimension_property_blocks_query(self, sales_service):
         req = SemanticQueryRequest(
-            columns=["orderId", "product$categoryName"],
+            columns=["orderId$caption", "product$categoryName"],
             denied_columns=[
                 DeniedColumn(table="dim_product", column="category_name"),
             ],
@@ -515,7 +515,7 @@ class TestServiceDeniedColumns:
 
     def test_denied_unrelated_column_passes(self, sales_service):
         req = SemanticQueryRequest(
-            columns=["orderId", "salesAmount"],
+            columns=["orderId$caption", "salesAmount"],
             denied_columns=[
                 DeniedColumn(table="dim_customer", column="email"),  # not used in query
             ],
@@ -525,7 +525,7 @@ class TestServiceDeniedColumns:
 
     def test_denied_column_blocks_orderby(self, sales_service):
         req = SemanticQueryRequest(
-            columns=["orderId"],
+            columns=["orderId$caption"],
             order_by=[{"field": "salesAmount", "dir": "desc"}],
             denied_columns=[
                 DeniedColumn(table="fact_sales", column="sales_amount"),
@@ -538,7 +538,7 @@ class TestServiceDeniedColumns:
     def test_denied_column_blocks_calculated_dependency(self, sales_service):
         """Deny a column that a calculated field depends on."""
         req = SemanticQueryRequest(
-            columns=["orderId"],
+            columns=["orderId$caption"],
             calculated_fields=[{
                 "name": "netAmount",
                 "expression": "salesAmount + discountAmount",
@@ -554,8 +554,8 @@ class TestServiceDeniedColumns:
     def test_combined_whitelist_blacklist_service(self, sales_service):
         """Both field_access + denied_columns active on query_model."""
         req = SemanticQueryRequest(
-            columns=["orderId", "salesAmount"],
-            field_access=FieldAccessDef(visible=["orderId", "salesAmount", "costAmount"]),
+            columns=["orderId$caption", "salesAmount"],
+            field_access=FieldAccessDef(visible=["orderId$caption", "salesAmount", "costAmount"]),
             denied_columns=[
                 DeniedColumn(table="fact_sales", column="sales_amount"),
             ],
@@ -566,7 +566,7 @@ class TestServiceDeniedColumns:
 
     def test_no_governance_backward_compat(self, sales_service):
         """No field_access and no denied_columns → old behavior."""
-        req = SemanticQueryRequest(columns=["orderId", "salesAmount"])
+        req = SemanticQueryRequest(columns=["orderId$caption", "salesAmount"])
         result = sales_service.query_model("FactSalesModel", req, mode="validate")
         assert result.error is None
 
@@ -580,7 +580,7 @@ class TestAccessorDeniedColumns:
 
     def test_denied_columns_parsed(self):
         payload = {
-            "columns": ["orderId"],
+            "columns": ["orderId$caption"],
             "deniedColumns": [
                 {"table": "fact_sales", "column": "sales_amount"},
                 {"schema": "public", "table": "dim_product", "column": "unit_price"},
@@ -594,14 +594,14 @@ class TestAccessorDeniedColumns:
         assert req.denied_columns[1].schema_name == "public"
 
     def test_no_denied_columns(self):
-        payload = {"columns": ["orderId"]}
+        payload = {"columns": ["orderId$caption"]}
         req = build_query_request(payload)
         assert req.denied_columns is None
 
     def test_full_chain_payload_to_rejection(self, sales_service):
         """Full chain: JSON payload → build_query_request → query_model → rejection."""
         payload = {
-            "columns": ["orderId", "salesAmount"],
+            "columns": ["orderId$caption", "salesAmount"],
             "deniedColumns": [
                 {"table": "fact_sales", "column": "sales_amount"},
             ],
@@ -614,7 +614,7 @@ class TestAccessorDeniedColumns:
     def test_full_chain_with_system_slice(self, sales_service):
         """Payload with deniedColumns + systemSlice: system_slice bypasses."""
         payload = {
-            "columns": ["orderId"],
+            "columns": ["orderId$caption"],
             "deniedColumns": [
                 {"table": "fact_sales", "column": "customer_key"},
             ],
@@ -723,7 +723,7 @@ class TestMetadataDeniedColumnsTrimming:
 
         # Query should reject salesAmount
         req = SemanticQueryRequest(
-            columns=["orderId", "salesAmount"],
+            columns=["orderId$caption", "salesAmount"],
             denied_columns=denied,
         )
         result = sales_service.query_model("FactSalesModel", req, mode="validate")
@@ -781,10 +781,14 @@ class TestGroupByDeniedColumns:
 
     def test_denied_groupby_field_blocks(self):
         result = validate_field_access(
-            columns=["orderId"],
+            # Use the $caption attribute form per QM contract (v1.7 backlog
+            # B-03 strict). The validator strips $caption when matching
+            # the denied set, so {"orderId"} still blocks "orderId$caption".
+            columns=["orderId$caption"],
             slice_items=[],
             order_by=[],
             denied_qm_fields={"orderId"},
         )
         assert not result.valid
-        assert "orderId" in result.blocked_fields
+        # blocked_fields reports the user-facing column name verbatim.
+        assert "orderId$caption" in result.blocked_fields

@@ -161,7 +161,7 @@ class TestIdentifierQuoting:
         """Inline aggregation expression alias should be quoted."""
         svc = _make_service(sales_model, dialect=None)
         request = SemanticQueryRequest(
-            columns=["orderStatus", "sum(salesAmount) as totalSales"],
+            columns=["orderStatus$caption", "sum(salesAmount) as totalSales"],
         )
         sql = _build_sql(svc, "FactSalesModel", request)
         assert '"totalSales"' in sql
@@ -170,7 +170,7 @@ class TestIdentifierQuoting:
         """CamelCase alias must be preserved exactly (PostgreSQL is case-sensitive with quotes)."""
         svc = _make_service(sales_model, dialect=PostgresDialect())
         request = SemanticQueryRequest(
-            columns=["orderStatus", "sum(salesAmount) as totalSalesAmount"],
+            columns=["orderStatus$caption", "sum(salesAmount) as totalSalesAmount"],
             order_by=[{"field": "totalSalesAmount", "dir": "desc"}],
         )
         sql = _build_sql(svc, "FactSalesModel", request)
@@ -181,7 +181,7 @@ class TestIdentifierQuoting:
         """Inline aggregate alias in ORDER BY must use dialect quoting, not raw identifier."""
         svc = _make_service(sales_model, dialect=PostgresDialect())
         request = SemanticQueryRequest(
-            columns=["orderStatus", "sum(salesAmount) as totalSalesAmount"],
+            columns=["orderStatus$caption", "sum(salesAmount) as totalSalesAmount"],
             order_by=[{"field": "totalSalesAmount", "dir": "desc"}],
         )
         sql = _build_sql(svc, "FactSalesModel", request)
