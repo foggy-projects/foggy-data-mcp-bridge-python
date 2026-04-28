@@ -1,0 +1,201 @@
+{
+  "suite": "timeWindow",
+  "source": {
+    "repo": "foggy-data-mcp-bridge-wt-dev-compose",
+    "version": "8.3.0.beta",
+    "path": "foggy-dataset-model/src/test/resources/parity/timeWindow",
+    "acceptance": "docs/8.3.0.beta/acceptance/P1-SemanticDSL-TimeWindow-Java-acceptance.md"
+  },
+  "cases": [
+    {
+      "name": "mom-month-happy",
+      "description": "MoM happy path",
+      "comparison": "mom",
+      "grain": "month",
+      "label": "happy",
+      "timeWindow": {
+        "field": "salesDate$id",
+        "grain": "month",
+        "comparison": "mom",
+        "range": "[)",
+        "value": ["2024-01-01", "2025-01-01"],
+        "targetMetrics": ["salesAmount"]
+      },
+      "expectedColumns": ["salesDate$month", "salesDate$id", "salesAmount", "salesAmount__prior", "salesAmount__diff", "salesAmount__ratio"]
+    },
+    {
+      "name": "mom-week-negative-grain-incompat",
+      "description": "NEGATIVE: mom x week grain is incompatible",
+      "comparison": "mom",
+      "grain": "week",
+      "label": "negative-grain-incompat",
+      "timeWindow": {
+        "field": "salesDate$id",
+        "grain": "week",
+        "comparison": "mom",
+        "range": "[)",
+        "value": ["2024-01-01", "2025-01-01"],
+        "targetMetrics": ["salesAmount"]
+      },
+      "expectedError": "TIMEWINDOW_GRAIN_INCOMPATIBLE"
+    },
+    {
+      "name": "mtd-day-happy",
+      "description": "MTD + day grain happy path",
+      "comparison": "mtd",
+      "grain": "day",
+      "label": "happy",
+      "timeWindow": {
+        "field": "salesDate$id",
+        "grain": "day",
+        "comparison": "mtd",
+        "range": "[)",
+        "value": ["2024-01-01", "now"],
+        "targetMetrics": ["salesAmount"]
+      },
+      "expectedColumns": ["salesAmount__mtd"]
+    },
+    {
+      "name": "rolling_30d-day-happy",
+      "description": "Rolling 30-day happy path",
+      "comparison": "rolling_30d",
+      "grain": "day",
+      "label": "happy",
+      "timeWindow": {
+        "field": "salesDate$id",
+        "grain": "day",
+        "comparison": "rolling_30d",
+        "range": "[)",
+        "value": ["-60D", "now"],
+        "targetMetrics": ["salesAmount"]
+      },
+      "expectedColumns": ["salesAmount__rolling_30d"],
+      "assertions": {
+        "windowFrame": "ROWS BETWEEN 29 PRECEDING AND CURRENT ROW",
+        "rollingMode": "observed"
+      }
+    },
+    {
+      "name": "rolling_7d-day-happy",
+      "description": "Rolling 7-day happy path",
+      "comparison": "rolling_7d",
+      "grain": "day",
+      "label": "happy",
+      "timeWindow": {
+        "field": "salesDate$id",
+        "grain": "day",
+        "comparison": "rolling_7d",
+        "range": "[)",
+        "value": ["-30D", "now"],
+        "targetMetrics": ["salesAmount"],
+        "rollingAggregator": "avg"
+      },
+      "expectedColumns": ["salesAmount__rolling_7d"],
+      "assertions": {
+        "windowFrame": "ROWS BETWEEN 6 PRECEDING AND CURRENT ROW",
+        "rollingMode": "observed"
+      }
+    },
+    {
+      "name": "rolling_7d-month-negative-grain-incompat",
+      "description": "NEGATIVE: rolling_7d x month grain is incompatible",
+      "comparison": "rolling_7d",
+      "grain": "month",
+      "label": "negative-grain-incompat",
+      "timeWindow": {
+        "field": "salesDate$id",
+        "grain": "month",
+        "comparison": "rolling_7d",
+        "range": "[)",
+        "value": ["2024-01-01", "2025-01-01"],
+        "targetMetrics": ["salesAmount"]
+      },
+      "expectedError": "TIMEWINDOW_GRAIN_INCOMPATIBLE"
+    },
+    {
+      "name": "wow-week-happy",
+      "description": "WoW + week grain happy path",
+      "comparison": "wow",
+      "grain": "week",
+      "label": "happy",
+      "timeWindow": {
+        "field": "salesDate$id",
+        "grain": "week",
+        "comparison": "wow",
+        "range": "[)",
+        "value": ["-2W", "now"],
+        "targetMetrics": ["salesAmount"]
+      },
+      "expectedColumns": ["salesDate$week", "salesDate$dayOfWeek", "salesAmount", "salesAmount__prior", "salesAmount__diff", "salesAmount__ratio"]
+    },
+    {
+      "name": "yoy-day-negative-grain-incompat",
+      "description": "NEGATIVE: yoy x day grain is incompatible",
+      "comparison": "yoy",
+      "grain": "day",
+      "label": "negative-grain-incompat",
+      "timeWindow": {
+        "field": "salesDate$id",
+        "grain": "day",
+        "comparison": "yoy",
+        "range": "[)",
+        "value": ["2024-01-01", "2025-01-01"],
+        "targetMetrics": ["salesAmount"]
+      },
+      "expectedError": "TIMEWINDOW_GRAIN_INCOMPATIBLE"
+    },
+    {
+      "name": "yoy-month-happy",
+      "description": "YoY + month grain happy path with single metric",
+      "comparison": "yoy",
+      "grain": "month",
+      "label": "happy-single-metric",
+      "timeWindow": {
+        "field": "salesDate$id",
+        "grain": "month",
+        "comparison": "yoy",
+        "range": "[)",
+        "value": ["2024-01-01", "2025-01-01"],
+        "targetMetrics": ["salesAmount"]
+      },
+      "expectedColumns": ["salesDate$year", "salesDate$month", "salesAmount", "salesAmount__prior", "salesAmount__diff", "salesAmount__ratio"],
+      "assertions": {
+        "joinOn": ["salesDate$month"],
+        "ratioNullWhenPriorZero": true,
+        "ratioNullWhenPriorNull": true
+      }
+    },
+    {
+      "name": "yoy-month-negative-range-invalid",
+      "description": "NEGATIVE: invalid range (] is not allowed",
+      "comparison": "yoy",
+      "grain": "month",
+      "label": "negative-range-invalid",
+      "timeWindow": {
+        "field": "salesDate$id",
+        "grain": "month",
+        "comparison": "yoy",
+        "range": "(]",
+        "value": ["2024-01-01", "2025-01-01"],
+        "targetMetrics": ["salesAmount"]
+      },
+      "expectedError": "TIMEWINDOW_RANGE_INVALID"
+    },
+    {
+      "name": "ytd-month-happy",
+      "description": "YTD + month grain happy path",
+      "comparison": "ytd",
+      "grain": "month",
+      "label": "happy",
+      "timeWindow": {
+        "field": "salesDate$id",
+        "grain": "month",
+        "comparison": "ytd",
+        "range": "[)",
+        "value": ["2024-01-01", "now"],
+        "targetMetrics": ["salesAmount"]
+      },
+      "expectedColumns": ["salesAmount__ytd"]
+    }
+  ]
+}

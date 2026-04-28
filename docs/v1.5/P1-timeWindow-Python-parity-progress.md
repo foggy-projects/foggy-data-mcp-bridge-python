@@ -186,4 +186,5 @@ Java 侧 `timeWindow` 已完成 DSL 解析、QueryPlan 编译、MySQL/MySQL8 方
 - MySQL8 / Postgres 实库探针目前不是 CI 自动化矩阵，后续可补 docker-backed integration profile。
 - G1 follow-up 已启动并补齐 pytest 集成矩阵：`docs/v1.5/P1-timeWindow-real-db-integration-matrix-progress.md` / `tests/integration/test_time_window_real_db_matrix.py`。当前本地 MySQL8 + Postgres demo 库实跑 13 passed；CI docker-backed profile 仍可后续独立接入。
 - Java ↔ Python `timeWindow` golden output 自动化未建设，后续两端继续演进时可补。
+- G2 follow-up 已启动：`docs/v1.5/P1-timeWindow-java-python-golden-diff-progress.md` / `tests/test_dataset_model/test_time_window_java_parity_catalog.py`。Java fixture 来源为 `foggy-data-mcp-bridge-wt-dev-compose` 的 8.3.0.beta 已签收 timeWindow parity catalog。
 - `timeWindow + calculatedFields` 仍 fail-closed，当前为非目标；如要支持需单独开后续功能项。
