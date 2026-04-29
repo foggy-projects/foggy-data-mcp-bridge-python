@@ -116,11 +116,27 @@ class TestBaseModelPlanShapeFields:
                 "expression": "salesAmount * 1.2",
             }],
         )
+        captured_requests = []
+        original_build_query = svc._build_query
 
-        composed = compile_plan_to_sql(
-            plan, ctx, semantic_service=svc, dialect="mysql8"
-        )
+        def capturing_build_query(table_model, request):
+            captured_requests.append(request)
+            return original_build_query(table_model, request)
 
+        svc._build_query = capturing_build_query  # type: ignore[method-assign]
+
+        try:
+            composed = compile_plan_to_sql(
+                plan, ctx, semantic_service=svc, dialect="mysql8"
+            )
+        finally:
+            svc._build_query = original_build_query  # type: ignore[method-assign]
+
+        assert captured_requests
+        assert captured_requests[0].calculated_fields == [{
+            "name": "grossAmount",
+            "expression": "salesAmount * 1.2",
+        }]
         assert "grossAmount" in composed.sql
         assert "sales_amount" in composed.sql
 

@@ -120,6 +120,23 @@ class TestPlanHashBaseModel:
         b = from_(model="FactSalesModel", columns=["orderStatus"], limit=20)
         assert plan_hash(a) != plan_hash(b)
 
+    def test_calculated_fields_participate_in_hash(self):
+        a = from_(
+            model="FactSalesModel",
+            columns=["orderStatus"],
+            calculated_fields=[
+                {"name": "grossAmount", "expression": "salesAmount * 1.2"},
+            ],
+        )
+        b = from_(
+            model="FactSalesModel",
+            columns=["orderStatus"],
+            calculated_fields=[
+                {"name": "grossAmount", "expression": "salesAmount * 1.3"},
+            ],
+        )
+        assert plan_hash(a) != plan_hash(b)
+
     def test_base_with_slice_list_of_dict_hashable(self):
         """★ r2 guard: slice entries are dicts (Any), which are NOT hashable
         in vanilla ``hash(plan)``. plan_hash() handles it via canonical."""

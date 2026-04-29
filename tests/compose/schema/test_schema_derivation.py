@@ -54,6 +54,22 @@ class TestBaseModelSchema:
         schema = derive_schema(plan)
         assert schema.names() == ["orderId", "total", "orderCount"]
 
+    def test_calculated_fields_are_declared_outputs(self):
+        plan = from_(
+            model="SaleOrderQM",
+            columns=["name"],
+            calculated_fields=[
+                {"name": "genderCopy", "expression": "gender"},
+            ],
+        )
+        schema = derive_schema(plan)
+        assert schema.names() == ["name", "genderCopy"]
+        assert schema.get("genderCopy") == ColumnSpec(
+            name="genderCopy",
+            expression="gender",
+            source_model="SaleOrderQM",
+        )
+
     def test_duplicate_output_names_rejected_at_base(self):
         """Two columns aliased to same name — caught at derivation."""
         plan = from_(

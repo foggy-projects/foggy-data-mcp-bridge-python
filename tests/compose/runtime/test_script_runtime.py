@@ -118,6 +118,20 @@ def test_dsl_alias_equivalent_to_from():
     assert isinstance(r.value, BaseModelPlan)
 
 
+def test_dsl_normalizes_camel_case_calculated_fields():
+    r = run_script(
+        (
+            'dsl({model: "OdooHrEmployeeQueryModel", columns: ["name"], '
+            'calculatedFields: [{name: "genderCopy", expression: "gender"}]})'
+        ),
+        _ctx(), semantic_service=_StubSemanticService(),
+    )
+    assert isinstance(r.value, BaseModelPlan)
+    assert r.value.calculated_fields == (
+        {"name": "genderCopy", "expression": "gender"},
+    )
+
+
 def test_documented_join_signature_creates_join_plan():
     r = run_script(
         """
