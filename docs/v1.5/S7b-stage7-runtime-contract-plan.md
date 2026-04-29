@@ -10,7 +10,7 @@
 
 - version: post-v1.5 follow-up
 - priority: P1 when Stage 7 is promoted
-- status: complete-through-s7d; s7e-ready
+- status: complete-through-s7e; s7f-ready
 - owner: `foggy-data-mcp-bridge-python` docs
 - java_reference_repo: `foggy-data-mcp-bridge-wt-dev-compose`
 - related_contract: `docs/v1.5/S7a-plan-stable-view-relation-contract-preflight.md`
@@ -136,7 +136,7 @@ Acceptance:
 
 ### S7e - Outer aggregate
 
-- status: ready
+- status: Java completed; Python mirror ready
 - owner: Java first, Python mirror after snapshot
 
 Requirement:
@@ -152,9 +152,20 @@ Acceptance:
 - 非 aggregatable 字段拒绝。
 - Java snapshot 增加正反例，Python 消费通过。
 
+Java evidence:
+
+- Java opened `supportsOuterAggregate=true` for wrappable relations while
+  keeping `supportsOuterWindow=false`.
+- S7a frozen snapshot remains `_stable_relation_schema_snapshot.json`
+  (`S7a-1`).
+- S7e aggregate evidence is emitted separately as
+  `_stable_relation_outer_aggregate_snapshot.json` (`S7e-1`).
+- S7e snapshot covers positive `SUM + GROUP BY`, ratio aggregate rejection,
+  MySQL 5.7 CTE fail-closed, and SQL Server hoisted CTE.
+
 ### S7f - Outer window
 
-- status: wait-for-s7e
+- status: ready after Python S7e mirror
 - owner: Java first, Python mirror after snapshot
 
 Requirement:

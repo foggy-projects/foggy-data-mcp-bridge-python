@@ -10,7 +10,7 @@
 
 - version: post-v1.5 follow-up
 - priority: P2 overall; individual stages may be promoted by downstream demand
-- status: complete-through-stage-6b; stage-7-complete-through-s7d; s7e-ready
+- status: complete-through-stage-6b; stage-7-complete-through-s7e; s7f-ready
 - owning_repo: `foggy-data-mcp-bridge-python`
 - java_reference_repo: `foggy-data-mcp-bridge-wt-dev-compose`
 - related_closeout: `docs/v1.5/v1.4+v1.5-overall-progress-closeout.md`
@@ -210,7 +210,7 @@ Acceptance:
 
 ### Stage 7 - Future Java contract expansion
 
-- status: S7a Java POC + Python mirror complete; S7b frozen; S7c Java compileToRelation complete; S7d Java relation-as-source read-only complete; S7e ready
+- status: S7a Java POC + Python mirror complete; S7b frozen; S7c Java compileToRelation complete; S7d Java relation-as-source read-only complete; S7e Java outer aggregate complete; Python S7e mirror ready; S7f ready after mirror
 - priority: demand-driven
 - preflight: `docs/v1.5/S7-future-java-contract-expansion-preflight.md`
 - relation_contract: `docs/v1.5/S7a-plan-stable-view-relation-contract-preflight.md`
@@ -254,7 +254,8 @@ Rule:
 - S7b 先冻结 stable relation contract，不直接开放 runtime 能力。
 - S7c 由 Java 先接入真实 `compileToRelation(plan, context) -> CompiledRelation` 入口。
 - S7d 只开放 relation-as-source read-only 外层查询；raw filter 必须声明依赖列并通过 `referencePolicy` 验证，SQL Server hoisted CTE 使用防御性 `;WITH`。
-- S7e / S7f 再分别评估 outer aggregate / outer window。
+- S7e 已由 Java 开放 outer aggregate：仅允许聚合 `aggregatable` 列，ratio / percent 派生列默认拒绝，并输出独立 `_stable_relation_outer_aggregate_snapshot.json` (`S7e-1`) 供 Python mirror 消费。
+- S7f 再评估 outer window。
 - Python 继续作为 Java snapshot consumer / mirror，不在 Java runtime contract 未冻结前抢跑能力。
 
 ## Code Inventory
