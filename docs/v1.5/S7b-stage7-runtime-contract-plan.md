@@ -10,7 +10,7 @@
 
 - version: post-v1.5 follow-up
 - priority: P1 when Stage 7 is promoted
-- status: complete-through-s7e; s7f-ready-after-signoff
+- status: complete-through-s7f; implementation-quality-gate-ready
 - owner: `foggy-data-mcp-bridge-python` docs
 - java_reference_repo: `foggy-data-mcp-bridge-wt-dev-compose`
 - related_contract: `docs/v1.5/S7a-plan-stable-view-relation-contract-preflight.md`
@@ -179,6 +179,7 @@ Python mirror evidence:
 - owner: Java first, Python snapshot consumer mirror
 - preflight: `docs/v1.5/S7f-outer-window-contract-preflight.md`
 - java_commit: `b248404 feat(compose): support relation outer window`
+- java_quality_followup: `9a5ad62 fix(compose): validate relation window frame clauses`
 - java_snapshot: `_stable_relation_outer_window_snapshot.json` (`S7f-1`)
 
 Requirement:
