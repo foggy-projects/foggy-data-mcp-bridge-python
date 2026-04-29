@@ -34,6 +34,9 @@ from foggy.fsscript.expressions.control_flow import ReturnException
 from foggy.fsscript.parser import COMPOSE_QUERY_DIALECT, FsscriptParser
 
 from .. import ComposedSql
+from ..capability.policy import CapabilityPolicy
+from ..capability.registry import CapabilityRegistry
+from ..capability.runtime_integration import build_capability_context
 from ..context.compose_query_context import ComposeQueryContext
 from ..plan import from_ as _plan_from
 from ..plan.column_normalizer import normalize_columns as _normalize_columns
@@ -224,7 +227,11 @@ def _from_dsl(options: Dict[str, Any], *args):
 
 
 def _evaluate_program(
-    script: str, ctx: ComposeQueryContext,
+    script: str,
+    ctx: ComposeQueryContext,
+    *,
+    capability_registry: Optional[CapabilityRegistry] = None,
+    capability_policy: Optional[CapabilityPolicy] = None,
 ) -> Any:
     """Run sandbox scan + parse + evaluate for ``script``.
 
@@ -264,6 +271,11 @@ def _evaluate_program(
         dict(ctx.params) if ctx.params else {}
     )
 
+    # v1.7: inject capability-authorized entries.
+    # Default-empty: no registry/policy → no capability entries.
+    cap_ctx = build_capability_context(capability_registry, capability_policy)
+    evaluator.context.update(cap_ctx)
+
     try:
         return evaluator.evaluate(program)
     except ReturnException as ret_exc:
@@ -277,6 +289,8 @@ def _run_script_no_intercept(
     *,
     semantic_service: Any,
     dialect: str = "mysql",
+    capability_registry: Optional[CapabilityRegistry] = None,
+    capability_policy: Optional[CapabilityPolicy] = None,
 ) -> Any:
     """Public-but-underscored entry: run ``script`` under a fresh
     :class:`ComposeRuntimeBundle` and return the raw evaluator value
@@ -300,7 +314,11 @@ def _run_script_no_intercept(
     )
     token = set_bundle(bundle)
     try:
-        return _evaluate_program(script, ctx)
+        return _evaluate_program(
+            script, ctx,
+            capability_registry=capability_registry,
+            capability_policy=capability_policy,
+        )
     finally:
         _compose_runtime.reset(token)
 
@@ -312,6 +330,8 @@ def run_script(
     semantic_service: Any,
     dialect: str = "mysql",
     preview_mode: bool = False,
+    capability_registry: Optional[CapabilityRegistry] = None,
+    capability_policy: Optional[CapabilityPolicy] = None,
 ) -> ScriptResult:
     """Execute ``script`` and return a :class:`ScriptResult` with plans
     inside any ``{ plans, ... }`` envelope auto-evaluated.
@@ -334,6 +354,13 @@ def run_script(
         converted to :class:`ComposedSql` via ``.to_sql()`` instead of
         being executed against the database. Used by the controller's
         ``preview`` parameter to surface SQL for human review.
+    capability_registry:
+        Optional :class:`CapabilityRegistry` with registered functions
+        and object facades. Default ``None`` → no capability injection.
+    capability_policy:
+        Optional :class:`CapabilityPolicy` controlling which registered
+        capabilities are visible.  Default ``None`` → no capability
+        injection.
 
     Notes
     -----
@@ -351,9 +378,8 @@ def run_script(
     ValueError
         On ``ctx is None`` / ``semantic_service is None``.
     AuthorityResolutionError / ComposeSchemaError / ComposeCompileError /
-    ComposeSandboxViolationError / RuntimeError:
-        Propagated verbatim from upstream. M7 does not introduce new
-        error-code families.
+    ComposeSandboxViolationError / CapabilityError / RuntimeError:
+        Propagated verbatim from upstream.
     """
     if ctx is None:
         raise ValueError("run_script: ctx is required")
@@ -369,7 +395,11 @@ def run_script(
     )
     token = set_bundle(bundle)
     try:
-        raw_value = _evaluate_program(script, ctx)
+        raw_value = _evaluate_program(
+            script, ctx,
+            capability_registry=capability_registry,
+            capability_policy=capability_policy,
+        )
         value = intercept_plans(raw_value, preview_mode=preview_mode)
     finally:
         _compose_runtime.reset(token)
