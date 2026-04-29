@@ -10,7 +10,7 @@
 
 - version: post-v1.5 follow-up
 - priority: P1 when Stage 7 is promoted
-- status: complete-through-s7c; s7d-ready
+- status: complete-through-s7d; s7e-ready
 - owner: `foggy-data-mcp-bridge-python` docs
 - java_reference_repo: `foggy-data-mcp-bridge-wt-dev-compose`
 - related_contract: `docs/v1.5/S7a-plan-stable-view-relation-contract-preflight.md`
@@ -110,7 +110,7 @@ Acceptance:
 
 ### S7d - Relation-as-source read-only outer query
 
-- status: ready
+- status: completed
 - owner: Java first, Python mirror after contract evidence
 
 Requirement:
@@ -129,12 +129,14 @@ Acceptance:
 
 - 外层引用未知列 fail-closed。
 - 外层引用不可 readable/orderable 列 fail-closed。
+- raw filter 必须声明依赖列，否则无法按 `referencePolicy` 验证并 fail-closed。
+- SQL Server hoisted CTE 使用防御性 `;WITH`，且仍不得出现 `FROM (WITH`。
 - datasource identity 继承稳定。
 - output schema 对外稳定。
 
 ### S7e - Outer aggregate
 
-- status: wait-for-s7d
+- status: ready
 - owner: Java first, Python mirror after snapshot
 
 Requirement:
