@@ -175,20 +175,23 @@ Python mirror evidence:
 
 ### S7f - Outer window
 
-- status: ready after S7e signoff
+- status: preflight drafted; waiting for Java contract owner review
 - owner: Java first, Python mirror after snapshot
+- preflight: `docs/v1.5/S7f-outer-window-contract-preflight.md`
 
 Requirement:
 
 - 允许外层对 stable relation 做窗口计算。
 - 只有 `windowable` 列可以作为窗口表达式输入。
 - partition/order 引用也必须通过 `referencePolicy`。
+- MySQL 5.7 保持 `supportsOuterWindow=false`，即使没有 inner CTE 也不得开放窗口函数。
 
 Acceptance:
 
 - 合法 outer window 通过。
 - 不可 windowable 派生列拒绝。
 - 内层 timeWindow 与外层 window 的 schema lineage 可解释。
+- Java 产出 `_stable_relation_outer_window_snapshot.json` (`S7f-1`) 后，Python 只做 snapshot consumer / mirror。
 
 ## Code Inventory
 

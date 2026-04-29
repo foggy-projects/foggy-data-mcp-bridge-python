@@ -210,11 +210,12 @@ Acceptance:
 
 ### Stage 7 - Future Java contract expansion
 
-- status: S7a Java POC + Python mirror complete; S7b frozen; S7c Java compileToRelation complete; S7d Java relation-as-source read-only complete; S7e Java outer aggregate complete + Python mirror complete; S7f ready after signoff
+- status: S7a Java POC + Python mirror complete; S7b frozen; S7c Java compileToRelation complete; S7d Java relation-as-source read-only complete; S7e Java outer aggregate complete + Python mirror complete; S7f preflight drafted and waiting for Java contract owner review
 - priority: demand-driven
 - preflight: `docs/v1.5/S7-future-java-contract-expansion-preflight.md`
 - relation_contract: `docs/v1.5/S7a-plan-stable-view-relation-contract-preflight.md`
 - runtime_contract_plan: `docs/v1.5/S7b-stage7-runtime-contract-plan.md`
+- outer_window_preflight: `docs/v1.5/S7f-outer-window-contract-preflight.md`
 - python_mirror_progress: `docs/v1.5/P2-S7a-stable-relation-python-mirror-progress.md`
 
 Items:
@@ -255,7 +256,7 @@ Rule:
 - S7c 由 Java 先接入真实 `compileToRelation(plan, context) -> CompiledRelation` 入口。
 - S7d 只开放 relation-as-source read-only 外层查询；raw filter 必须声明依赖列并通过 `referencePolicy` 验证，SQL Server hoisted CTE 使用防御性 `;WITH`。
 - S7e has been completed on both Java and Python: Java opened outer aggregate for wrappable relations; Python mirrors MEASURE_DEFAULT with aggregatable, updates for_dialect(), and consumes the S7e snapshot.
-- S7f to evaluate outer window.
+- S7f preflight has been drafted: Java should decide `windowable` policy first, keep MySQL 5.7 fail-closed for outer window, publish `_stable_relation_outer_window_snapshot.json` (`S7f-1`), then Python mirrors the snapshot.
 - Python 继续作为 Java snapshot consumer / mirror，不在 Java runtime contract 未冻结前抢跑能力。
 
 ## Code Inventory
