@@ -4,15 +4,22 @@
 
 - doc_type: capability-recap
 - intended_for: root-controller / Java contract owner / Python mirror owner / reviewer
-- purpose: 在 S7 签收后，复盘 CTE 与 timeWindow 相关能力的当前对齐状态、明确非目标和后续关注点。
+- purpose: 在 S7 签收后，作为 CTE 与 timeWindow 当前能力口径的单一入口，复盘双端对齐状态、明确非目标和后续关注点。
 
 ## Current Decision
 
 - S7 status: signed off with accepted risks.
 - Signoff record: `docs/v1.5/acceptance/S7-stage7-acceptance.md`.
 - Coverage record: `docs/v1.5/coverage/S7-stage7-coverage-audit.md`.
+- Current source of truth: this recap supersedes older pre-S7 notes that still say S7 is waiting for Java contract.
 - S8 relation join / union / in-memory post-processing: not started.
 - Current follow-up focus: CTE and timeWindow capability recap, not new runtime expansion.
+
+## Historical Notes
+
+- `docs/v1.5/S7-future-java-contract-expansion-preflight.md` was written before S7a-S7f landed. It remains useful for motivation and risk explanation, but its old "wait for Java contract" wording is superseded by the S7 signoff.
+- Older timeWindow acceptance records may describe SQL Server real DB coverage as a residual risk. That risk was later closed by Stage 4: SQL Server 2022 joined the real DB matrix with 11 SQL Server tests, and the full matrix reports 28 passed.
+- Java `docs/8.5.0.beta/P2-S7-stage7-runtime-execution-plan.md` has been updated to `complete-through-s7f`; earlier references to S7f being "ready" should be treated as historical.
 
 ## CTE Capability Status
 
