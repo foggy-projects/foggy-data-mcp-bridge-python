@@ -10,7 +10,7 @@
 
 - version: post-v1.5 follow-up
 - priority: P1 when Stage 7 is promoted
-- status: planned-after-s7a-mirror
+- status: complete-through-s7c; s7d-ready
 - owner: `foggy-data-mcp-bridge-python` docs
 - java_reference_repo: `foggy-data-mcp-bridge-wt-dev-compose`
 - related_contract: `docs/v1.5/S7a-plan-stable-view-relation-contract-preflight.md`
@@ -91,7 +91,7 @@ Acceptance:
 
 ### S7c - Java compileToRelation runtime entry
 
-- status: ready
+- status: completed
 - owner: Java
 
 Requirement:
@@ -110,7 +110,7 @@ Acceptance:
 
 ### S7d - Relation-as-source read-only outer query
 
-- status: wait-for-s7c
+- status: ready
 - owner: Java first, Python mirror after contract evidence
 
 Requirement:
