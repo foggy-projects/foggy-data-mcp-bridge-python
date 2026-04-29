@@ -105,7 +105,7 @@ v1.4 已经让 fsscript 语法层支持 `v in (...)` / `v not in (...)`，且借
 - `S7a-plan-stable-view-relation-contract-preflight.md` — Stage 7 stable relation formal contract draft：定义 `CompiledRelation` / `RelationSql` / `OutputSchema` semantics、CTE hoisting / SQL Server 写法规则，二次聚合/窗口后续应消费该 relation，而不是扩展当前 post-calc scalar 通道。
 - `P2-S7a-stable-relation-python-mirror-progress.md` — 记录 S7a Python mirror：已对齐 Java stable relation POC，消费 Java snapshot，并保持 outer aggregate/window 未开放。
 - `S7b-stage7-runtime-contract-plan.md` — Stage 7 runtime contract freeze 计划：S7b 冻结契约，S7c Java 接入 `compileToRelation`，S7d/S7e/S7f 再分阶段开放 relation-as-source、outer aggregate、outer window。
-- `S7f-outer-window-contract-preflight.md` — S7f outer window 开工前边界评估：建议 Java-first、`MEASURE_DEFAULT` 增加 `windowable`、timeWindow 派生 ratio/percent 不默认可作为 window input、MySQL 5.7 保持 fail-closed，Python 等 Java snapshot 后 mirror。
+- `S7f-outer-window-contract-preflight.md` — S7f outer window 边界与镜像记录：Java 已在 `b248404` 开放 outer window 并产出 `S7f-1` snapshot；Python 已 mirror `windowable` / capability / error code / snapshot consumer，不实现 runtime outer window。
 - `quality/S1-S2-post-v1.5-followup-implementation-quality.md` — 记录 Stage 1/2 合并实现质量门结论与后续闭环：Python 侧质量门已完成，Java datasource identity mirror 后续已补齐。
 
 ## 参考文档

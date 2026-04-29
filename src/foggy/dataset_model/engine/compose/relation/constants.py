@@ -57,8 +57,10 @@ class ReferencePolicy:
     #: Convenience: dimension fields — readable, groupable, orderable.
     DIMENSION_DEFAULT: FrozenSet[str] = frozenset({READABLE, GROUPABLE, ORDERABLE})
 
-    #: Convenience: measure fields — readable, aggregatable, orderable.
-    MEASURE_DEFAULT: FrozenSet[str] = frozenset({READABLE, AGGREGATABLE, ORDERABLE})
+    #: Convenience: measure fields — readable, aggregatable, orderable, windowable.
+    MEASURE_DEFAULT: FrozenSet[str] = frozenset({
+        READABLE, AGGREGATABLE, ORDERABLE, WINDOWABLE,
+    })
 
     #: Convenience: timeWindow derived fields — readable, orderable.
     TIME_WINDOW_DERIVED_DEFAULT: FrozenSet[str] = frozenset({READABLE, ORDERABLE})

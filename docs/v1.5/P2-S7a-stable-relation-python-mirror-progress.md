@@ -72,13 +72,14 @@ full regression (--ignore=tests/integration): 3330 passed in 5.86s
   - ratio columns 不包含 aggregatable
   - capabilities: supportsOuterAggregate=false, supportsOuterWindow=false
   - forbiddenSqlMarkers: "FROM (WITH"
-  - Python `for_dialect()` 输出与 Java snapshot 逐字段一致
+  - Python `for_dialect()` 输出与 Java snapshot wrap strategy / CTE fields 一致
+  - 注意：S7a snapshot 保持冻结；S7e/S7f 后续 runtime capability 在独立 snapshot 中开放。
 
 ## 未开放能力 (Non-Goals)
 
-- `supports_outer_aggregate` = false
-- `supports_outer_window` = false
+- S7a snapshot 中 `supports_outer_aggregate` = false
+- S7a snapshot 中 `supports_outer_window` = false
 - 不开放 timeWindow + calculatedFields.agg
 - 不开放 timeWindow + calculatedFields.windowFrame
 - 不实现 named / recursive CTE
-- Stage 7 runtime capability: **NOT opened**
+- Stage 7 runtime capability 在 S7d/S7e/S7f 分阶段开放；Python 当前仅作为 Java snapshot consumer / mirror。

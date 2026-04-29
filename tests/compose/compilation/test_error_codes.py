@@ -22,13 +22,17 @@ class TestNamespaceAndCodes:
 
     def test_all_codes_count(self):
         # NAMESPACE is NOT in ALL_CODES by design
-        assert len(error_codes.ALL_CODES) == 7
+        assert len(error_codes.ALL_CODES) == 14
 
     def test_all_codes_literal_strings(self):
         assert error_codes.UNSUPPORTED_PLAN_SHAPE == "compose-compile-error/unsupported-plan-shape"
         assert error_codes.CROSS_DATASOURCE_REJECTED == "compose-compile-error/cross-datasource-rejected"
         assert error_codes.MISSING_BINDING == "compose-compile-error/missing-binding"
         assert error_codes.PER_BASE_COMPILE_FAILED == "compose-compile-error/per-base-compile-failed"
+        assert error_codes.RELATION_COLUMN_NOT_WINDOWABLE == \
+            "compose-compile-error/relation-column-not-windowable"
+        assert error_codes.RELATION_OUTER_WINDOW_NOT_SUPPORTED == \
+            "compose-compile-error/relation-outer-window-not-supported"
 
     def test_all_codes_share_namespace_prefix(self):
         for code in error_codes.ALL_CODES:
@@ -41,6 +45,8 @@ class TestNamespaceAndCodes:
         assert error_codes.is_valid_code(error_codes.CROSS_DATASOURCE_REJECTED)
         assert error_codes.is_valid_code(error_codes.MISSING_BINDING)
         assert error_codes.is_valid_code(error_codes.PER_BASE_COMPILE_FAILED)
+        assert error_codes.is_valid_code(error_codes.RELATION_COLUMN_NOT_WINDOWABLE)
+        assert error_codes.is_valid_code(error_codes.RELATION_OUTER_WINDOW_NOT_SUPPORTED)
 
     def test_unknown_code_rejected(self):
         assert not error_codes.is_valid_code("compose-compile-error/bogus")
@@ -50,11 +56,12 @@ class TestNamespaceAndCodes:
 
 class TestPhases:
     def test_phases_count(self):
-        assert len(error_codes.VALID_PHASES) == 2
+        assert len(error_codes.VALID_PHASES) == 3
 
     def test_phase_literals(self):
         assert error_codes.is_valid_phase("plan-lower")
         assert error_codes.is_valid_phase("compile")
+        assert error_codes.is_valid_phase("relation-compile")
 
     def test_unknown_phase_rejected(self):
         assert not error_codes.is_valid_phase("runtime")

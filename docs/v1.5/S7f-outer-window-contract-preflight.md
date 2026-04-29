@@ -4,10 +4,26 @@
 
 - doc_type: contract-preflight
 - version: post-v1.5 follow-up / 8.5.0.beta reference
-- status: drafted-for-java-review
+- status: java-complete-python-mirror-complete
 - owner: root-controller
 - java_reference_repo: `foggy-data-mcp-bridge-wt-dev-compose`
 - prerequisite: S7e Java + Python mirror complete
+- java_commit: `b248404 feat(compose): support relation outer window`
+
+## Python Mirror Evidence
+
+- Java snapshot consumed: `_stable_relation_outer_window_snapshot.json`
+  (`contractVersion: S7f-1`, 5 cases).
+- Python mirrors `ReferencePolicy.WINDOWABLE`,
+  `ReferencePolicy.MEASURE_DEFAULT`, `RelationCapabilities.for_dialect()`,
+  and S7f compile error constants.
+- Python does not implement runtime outer window; it remains a Java snapshot
+  consumer / model parity mirror.
+- Focused verification:
+  `pytest tests/compose/schema/test_column_spec_metadata.py tests/compose/relation tests/compose/compilation/test_error_codes.py -q`
+  -> `120 passed`.
+- Full regression: `pytest -q` -> `3468 passed`.
+- `git diff --check`: clean except expected Windows LF/CRLF warnings.
 
 ## Purpose
 

@@ -175,9 +175,11 @@ Python mirror evidence:
 
 ### S7f - Outer window
 
-- status: preflight drafted; waiting for Java contract owner review
-- owner: Java first, Python mirror after snapshot
+- status: Java complete; Python mirror complete
+- owner: Java first, Python snapshot consumer mirror
 - preflight: `docs/v1.5/S7f-outer-window-contract-preflight.md`
+- java_commit: `b248404 feat(compose): support relation outer window`
+- java_snapshot: `_stable_relation_outer_window_snapshot.json` (`S7f-1`)
 
 Requirement:
 
@@ -191,7 +193,15 @@ Acceptance:
 - 合法 outer window 通过。
 - 不可 windowable 派生列拒绝。
 - 内层 timeWindow 与外层 window 的 schema lineage 可解释。
-- Java 产出 `_stable_relation_outer_window_snapshot.json` (`S7f-1`) 后，Python 只做 snapshot consumer / mirror。
+- Java 已产出 `_stable_relation_outer_window_snapshot.json` (`S7f-1`)；Python 只做 snapshot consumer / mirror，不实现 runtime outer window。
+
+Python mirror evidence:
+
+- `ReferencePolicy.MEASURE_DEFAULT` 增加 `windowable`。
+- `RelationCapabilities.for_dialect()` 与 Java S7f matrix 对齐：MySQL 5.7 outer window 保持 false，其余 wrappable 方言为 true。
+- 消费 Java S7f snapshot 的 5 个 case，验证 SQL marker、error code、schema metadata、capability parity。
+- Focused tests: `120 passed`.
+- Full regression: `3468 passed`.
 
 ## Code Inventory
 

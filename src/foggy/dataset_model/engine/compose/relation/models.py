@@ -97,12 +97,13 @@ class RelationCapabilities:
         is_mysql57 = dl in ("mysql", "mysql57")
 
         if not has_with_items:
+            window_capable = not is_mysql57
             return RelationCapabilities(
                 can_inline_as_subquery=True,
                 can_hoist_cte=cte_capable or is_sql_server,
                 contains_with_items=False,
                 supports_outer_aggregate=True,
-                supports_outer_window=False,
+                supports_outer_window=window_capable,
                 requires_top_level_with=False,
                 relation_wrap_strategy=RelationWrapStrategy.INLINE_SUBQUERY,
             )
@@ -124,7 +125,7 @@ class RelationCapabilities:
                 can_hoist_cte=True,
                 contains_with_items=True,
                 supports_outer_aggregate=True,
-                supports_outer_window=False,
+                supports_outer_window=True,
                 requires_top_level_with=True,
                 relation_wrap_strategy=RelationWrapStrategy.HOISTED_CTE,
             )
@@ -135,7 +136,7 @@ class RelationCapabilities:
             can_hoist_cte=True,
             contains_with_items=True,
             supports_outer_aggregate=True,
-            supports_outer_window=False,
+            supports_outer_window=True,
             requires_top_level_with=False,
             relation_wrap_strategy=RelationWrapStrategy.HOISTED_CTE,
         )

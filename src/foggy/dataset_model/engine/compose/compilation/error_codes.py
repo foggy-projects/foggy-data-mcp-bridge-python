@@ -20,7 +20,7 @@ from typing import FrozenSet, Literal
 #: Type alias for the ``phase`` field on :class:`ComposeCompileError`.
 #: Runtime validation lives in :func:`is_valid_phase` — this alias is
 #: purely a signal to static type-checkers and IDE tooling.
-CompilePhase = Literal["plan-lower", "compile"]
+CompilePhase = Literal["plan-lower", "compile", "relation-compile"]
 
 # ---------------------------------------------------------------------------
 # Namespace (shared prefix for all 4 error codes below)
@@ -80,6 +80,35 @@ RELATION_CTE_HOIST_UNSUPPORTED: str = "compose-compile-error/relation-cte-hoist-
 # S7a — Relation and outer plan target different datasources.
 RELATION_DATASOURCE_MISMATCH: str = "compose-compile-error/relation-datasource-mismatch"
 
+# S7d — Column does not exist in the relation's OutputSchema.
+RELATION_COLUMN_NOT_FOUND: str = "compose-compile-error/relation-column-not-found"
+
+# S7d — Column exists but lacks readable reference policy.
+RELATION_COLUMN_NOT_READABLE: str = "compose-compile-error/relation-column-not-readable"
+
+# S7d — Column exists but lacks orderable reference policy.
+RELATION_COLUMN_NOT_ORDERABLE: str = "compose-compile-error/relation-column-not-orderable"
+
+# S7e — Column exists but lacks aggregatable reference policy.
+RELATION_COLUMN_NOT_AGGREGATABLE: str = (
+    "compose-compile-error/relation-column-not-aggregatable"
+)
+
+# S7e — Outer aggregate attempted when supportsOuterAggregate=false.
+RELATION_OUTER_AGGREGATE_NOT_SUPPORTED: str = (
+    "compose-compile-error/relation-outer-aggregate-not-supported"
+)
+
+# S7f — Outer window attempted when supportsOuterWindow=false.
+RELATION_OUTER_WINDOW_NOT_SUPPORTED: str = (
+    "compose-compile-error/relation-outer-window-not-supported"
+)
+
+# S7f — Column exists but lacks windowable reference policy.
+RELATION_COLUMN_NOT_WINDOWABLE: str = (
+    "compose-compile-error/relation-column-not-windowable"
+)
+
 
 # ---------------------------------------------------------------------------
 # Public registries
@@ -95,10 +124,17 @@ ALL_CODES: FrozenSet[str] = frozenset({
     RELATION_WRAP_UNSUPPORTED,
     RELATION_CTE_HOIST_UNSUPPORTED,
     RELATION_DATASOURCE_MISMATCH,
+    RELATION_COLUMN_NOT_FOUND,
+    RELATION_COLUMN_NOT_READABLE,
+    RELATION_COLUMN_NOT_ORDERABLE,
+    RELATION_COLUMN_NOT_AGGREGATABLE,
+    RELATION_OUTER_AGGREGATE_NOT_SUPPORTED,
+    RELATION_OUTER_WINDOW_NOT_SUPPORTED,
+    RELATION_COLUMN_NOT_WINDOWABLE,
 })
 
 #: Valid phase labels carried by :class:`ComposeCompileError.phase`.
-VALID_PHASES: FrozenSet[str] = frozenset({"plan-lower", "compile"})
+VALID_PHASES: FrozenSet[str] = frozenset({"plan-lower", "compile", "relation-compile"})
 
 
 def is_valid_code(code: str) -> bool:

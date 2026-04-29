@@ -111,28 +111,32 @@ class TestRelationCapabilities:
         assert not caps.can_hoist_cte
         assert not caps.can_inline_as_subquery
 
-    def test_s7e_outer_aggregate_opened_for_wrappable_relations(self):
-        """S7e: supportsOuterAggregate is True for wrappable relations;
-        supportsOuterWindow remains False everywhere.
+    def test_s7f_outer_capabilities_opened_for_wrappable_relations(self):
+        """S7f: aggregate and window are open for wrappable window dialects.
 
-        S7a originally asserted both were False.  S7e opens aggregate for
-        all wrappable dialects while keeping window closed.  The only
-        dialect+CTE combo that keeps aggregate=False is MySQL 5.7 + CTE
-        (FAIL_CLOSED).
+        MySQL 5.7 remains fail-closed for outer window even without CTE
+        because it has no window function support.  MySQL 5.7 + CTE is
+        still fully fail-closed for relation wrapping.
         """
         for d in ("mysql8", "postgres", "sqlite", "mssql", "sqlserver", "mysql", "mysql57"):
             for has_cte in (True, False):
                 caps = RelationCapabilities.for_dialect(d, has_cte)
-                assert not caps.supports_outer_window, \
-                    f"S7e must not open outer window for {d}"
-                # MySQL 5.7 + CTE is FAIL_CLOSED → no outer aggregate
                 is_mysql57_cte = d in ("mysql", "mysql57") and has_cte
                 if is_mysql57_cte:
                     assert not caps.supports_outer_aggregate, \
                         f"MySQL 5.7+CTE must keep outer aggregate closed"
+                    assert not caps.supports_outer_window, \
+                        f"MySQL 5.7+CTE must keep outer window closed"
+                elif d in ("mysql", "mysql57"):
+                    assert caps.supports_outer_aggregate, \
+                        f"MySQL 5.7 without CTE still allows aggregate for {d}"
+                    assert not caps.supports_outer_window, \
+                        f"MySQL 5.7 must not open outer window for {d}"
                 else:
                     assert caps.supports_outer_aggregate, \
-                        f"S7e must open outer aggregate for {d} (has_cte={has_cte})"
+                        f"S7f must keep outer aggregate open for {d} (has_cte={has_cte})"
+                    assert caps.supports_outer_window, \
+                        f"S7f must open outer window for {d} (has_cte={has_cte})"
 
 
 class TestCompiledRelation:
@@ -177,6 +181,9 @@ class TestConstants:
     def test_reference_policy(self):
         assert len(ReferencePolicy.ALL) == 5
         assert ReferencePolicy.is_valid(ReferencePolicy.READABLE)
+        assert ReferencePolicy.WINDOWABLE in ReferencePolicy.MEASURE_DEFAULT
+        assert ReferencePolicy.WINDOWABLE not in ReferencePolicy.DIMENSION_DEFAULT
+        assert ReferencePolicy.WINDOWABLE not in ReferencePolicy.TIME_WINDOW_DERIVED_DEFAULT
 
     def test_wrap_strategy(self):
         assert len(RelationWrapStrategy.ALL) == 4

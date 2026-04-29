@@ -75,6 +75,18 @@ class TestEqualityUnchanged:
         )
         assert a == b
 
+    def test_windowable_metadata_still_equal(self):
+        base = ColumnSpec(name="salesAmount", expression="salesAmount")
+        with_windowable = ColumnSpec(
+            name="salesAmount",
+            expression="salesAmount",
+            semantic_kind=SemanticKind.AGGREGATE_MEASURE,
+            reference_policy=ReferencePolicy.MEASURE_DEFAULT,
+        )
+        assert ReferencePolicy.WINDOWABLE in with_windowable.reference_policy
+        assert base == with_windowable
+        assert hash(base) == hash(with_windowable)
+
 
 class TestOutputSchemaWithMetadata:
     def test_schema_accepts_columns_with_metadata(self):
