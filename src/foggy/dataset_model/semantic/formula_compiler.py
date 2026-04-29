@@ -36,6 +36,12 @@ from foggy.dataset_model.semantic.formula_errors import (
     FormulaSyntaxError,
 )
 
+from foggy.dataset_model.engine.compose.capability import (
+    CapabilityPolicy,
+    CapabilityRegistry,
+    SqlFragment,
+)
+
 # FSScript AST 节点
 from foggy.fsscript.expressions.base import Expression
 from foggy.fsscript.expressions.literals import (
@@ -206,9 +212,13 @@ class FormulaCompiler:
         self,
         dialect: SqlDialect,
         config: Optional[FormulaCompilerConfig] = None,
+        capability_registry: Optional[CapabilityRegistry] = None,
+        capability_policy: Optional[CapabilityPolicy] = None,
     ) -> None:
         self._dialect = dialect
         self._config = config or FormulaCompilerConfig()
+        self._registry = capability_registry
+        self._policy = capability_policy
 
     @property
     def dialect(self) -> SqlDialect:
@@ -265,7 +275,11 @@ class FormulaCompiler:
         if tree is None:
             raise FormulaSyntaxError("Expression did not produce any AST node")
 
-        validator = _Validator(self._config, expression)
+        validator = _Validator(
+            self._config, expression,
+            capability_registry=self._registry,
+            capability_policy=self._policy,
+        )
         validator.validate(tree)
 
     def compile(
@@ -321,11 +335,18 @@ class FormulaCompiler:
             raise FormulaSyntaxError("Expression did not produce any AST node")
 
         # 3. 白名单 + 位置约束校验（Step 2.2）
-        validator = _Validator(self._config, expression)
+        validator = _Validator(
+            self._config, expression,
+            capability_registry=self._registry,
+            capability_policy=self._policy,
+        )
         validator.validate(tree)
 
         # 4. SQL 生成（Step 2.3，带方言分派 Step 2.4）
-        generator = _SqlGenerator(self._dialect, field_resolver)
+        generator = _SqlGenerator(
+            self._dialect, field_resolver,
+            capability_registry=self._registry,
+        )
         return generator.generate(tree)
 
 
@@ -349,9 +370,17 @@ class _ValidationContext:
 class _Validator:
     """Step 2.2：FSScript AST 白名单 + 位置约束校验。"""
 
-    def __init__(self, config: FormulaCompilerConfig, expression: str) -> None:
+    def __init__(
+        self,
+        config: FormulaCompilerConfig,
+        expression: str,
+        capability_registry: Optional[CapabilityRegistry] = None,
+        capability_policy: Optional[CapabilityPolicy] = None,
+    ) -> None:
         self._config = config
         self._expression = expression
+        self._registry = capability_registry
+        self._policy = capability_policy
 
     def validate(self, tree: Expression) -> None:
         """顶层校验入口。校验通过时返回 None，违规时抛异常。"""
@@ -557,13 +586,41 @@ class _Validator:
             return
 
         if fn_name not in ALLOWED_FUNCTIONS:
-            raise FormulaFunctionNotAllowedError(
-                ErrorMessages.function_not_allowed(
-                    fn_name,
-                    list(ALLOWED_FUNCTIONS | ALLOWED_AGG_FUNCTIONS),
-                ),
-                expression=self._expression,
-            )
+            # v1.7: 尝试从 registry 获取 sql_scalar
+            is_capability = False
+            if self._registry and self._registry.has_function(fn_name):
+                entry = self._registry.get_function(fn_name)
+                desc = entry.descriptor
+                if desc.kind == "sql_scalar":
+                    # policy 检查
+                    if not self._policy or not self._policy.is_function_allowed(fn_name):
+                        raise FormulaFunctionNotAllowedError(
+                            f"Function '{fn_name}' is registered but not allowed by the current policy",
+                            expression=self._expression,
+                        )
+                    # surface 检查：目前 formula compiler 被用于 formula / compose_column
+                    if "formula" not in desc.allowed_in and "compose_column" not in desc.allowed_in:
+                        raise FormulaFunctionNotAllowedError(
+                            f"Function '{fn_name}' is not allowed in formula/compose_column surface",
+                            expression=self._expression,
+                        )
+                    # 校验参数个数
+                    if len(node.arguments) != len(desc.args_schema):
+                        raise FormulaSyntaxError(
+                            f"Function '{fn_name}' expects {len(desc.args_schema)} arguments, "
+                            f"got {len(node.arguments)}",
+                            expression=self._expression,
+                        )
+                    is_capability = True
+
+            if not is_capability:
+                raise FormulaFunctionNotAllowedError(
+                    ErrorMessages.function_not_allowed(
+                        fn_name,
+                        list(ALLOWED_FUNCTIONS | ALLOWED_AGG_FUNCTIONS),
+                    ),
+                    expression=self._expression,
+                )
 
         # 普通函数：参数个数 / 类型校验
         self._validate_normal_function_args(fn_name, node)
@@ -765,9 +822,15 @@ class _GenContext:
 class _SqlGenerator:
     """Step 2.3：FSScript AST → SQL 生成器。"""
 
-    def __init__(self, dialect: SqlDialect, field_resolver: FieldResolver) -> None:
+    def __init__(
+        self,
+        dialect: SqlDialect,
+        field_resolver: FieldResolver,
+        capability_registry: Optional[CapabilityRegistry] = None,
+    ) -> None:
         self._dialect = dialect
         self._field_resolver = field_resolver
+        self._registry = capability_registry
         self._ctx = _GenContext()
 
     def generate(self, tree: Expression) -> CompiledFormula:
@@ -940,6 +1003,35 @@ class _SqlGenerator:
 
         if fn_name == "now":
             return self._dialect.now_expr()
+
+        # v1.7: 尝试从 registry 渲染 sql_scalar
+        if self._registry and self._registry.has_function(fn_name):
+            entry = self._registry.get_function(fn_name)
+            desc = entry.descriptor
+            if desc.kind == "sql_scalar":
+                if self._dialect.name not in desc.dialects:
+                    raise FormulaFunctionNotAllowedError(
+                        f"Function '{fn_name}' does not support dialect '{self._dialect.name}'",
+                    )
+                # 递归生成参数的 SQL
+                args_dict = {}
+                for idx, arg_schema in enumerate(desc.args_schema):
+                    arg_name = arg_schema["name"]
+                    arg_sql = self._gen_node(node.arguments[idx])
+                    args_dict[arg_name] = arg_sql
+
+                # 调用 renderer
+                fragment = entry.renderer(
+                    args_dict, self._dialect.name, self._ctx.add_param
+                )
+                if not isinstance(fragment, SqlFragment):
+                    raise FormulaSyntaxError(
+                        f"Function '{fn_name}' renderer did not return a SqlFragment"
+                    )
+                # SqlFragment 如果自身带了 params，合并到上下文
+                if fragment.params:
+                    self._ctx.params.extend(fragment.params)
+                return fragment.sql
 
         # validator 应该已经拒绝未知函数；防御兜底
         raise FormulaFunctionNotAllowedError(
