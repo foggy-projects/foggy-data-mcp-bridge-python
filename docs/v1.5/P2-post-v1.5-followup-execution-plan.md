@@ -10,7 +10,7 @@
 
 - version: post-v1.5 follow-up
 - priority: P2 overall; individual stages may be promoted by downstream demand
-- status: complete-through-stage-7; implementation-quality-gate-ready
+- status: complete-through-stage-7; S7-signed-off-with-risks
 - owning_repo: `foggy-data-mcp-bridge-python`
 - java_reference_repo: `foggy-data-mcp-bridge-wt-dev-compose`
 - related_closeout: `docs/v1.5/v1.4+v1.5-overall-progress-closeout.md`
@@ -257,6 +257,8 @@ Rule:
 - S7d 只开放 relation-as-source read-only 外层查询；raw filter 必须声明依赖列并通过 `referencePolicy` 验证，SQL Server hoisted CTE 使用防御性 `;WITH`。
 - S7e has been completed on both Java and Python: Java opened outer aggregate for wrappable relations; Python mirrors MEASURE_DEFAULT with aggregatable, updates for_dialect(), and consumes the S7e snapshot.
 - S7f has been completed on both Java and Python: Java opened outer window for wrappable window-capable dialects in `b248404`, kept MySQL 5.7 fail-closed for outer window, published `_stable_relation_outer_window_snapshot.json` (`S7f-1`), and tightened window frame validation in `9a5ad62`. Python mirrors `windowable`, capability matrix, error codes, and snapshot consumer tests only; it does not implement runtime outer window. Python verification: focused `120 passed`; full regression `3468 passed`.
+- S7 has passed implementation quality gate, coverage audit, and feature acceptance. Signoff record: `docs/v1.5/acceptance/S7-stage7-acceptance.md`; decision: `accepted-with-risks`.
+- CTE / timeWindow capability recap after S7 signoff: `docs/v1.5/S7-CTE-timeWindow-capability-recap.md`.
 - Python 继续作为 Java snapshot consumer / mirror，不在 Java runtime contract 未冻结前抢跑能力。
 
 ## Code Inventory

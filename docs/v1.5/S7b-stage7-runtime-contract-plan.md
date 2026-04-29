@@ -10,12 +10,22 @@
 
 - version: post-v1.5 follow-up
 - priority: P1 when Stage 7 is promoted
-- status: complete-through-s7f; implementation-quality-gate-ready
+- status: complete-through-s7f; signed-off-with-risks
 - owner: `foggy-data-mcp-bridge-python` docs
 - java_reference_repo: `foggy-data-mcp-bridge-wt-dev-compose`
 - related_contract: `docs/v1.5/S7a-plan-stable-view-relation-contract-preflight.md`
 - related_python_mirror: `docs/v1.5/P2-S7a-stable-relation-python-mirror-progress.md`
 - related_java_progress: `foggy-data-mcp-bridge-wt-dev-compose/docs/8.5.0.beta/P2-S7a-stable-relation-contract-progress.md`
+
+## Acceptance Status
+
+- acceptance_status: signed-off
+- acceptance_decision: accepted-with-risks
+- signed_off_by: root-controller
+- signed_off_at: 2026-04-29
+- acceptance_record: docs/v1.5/acceptance/S7-stage7-acceptance.md
+- blocking_items: none
+- follow_up_required: yes
 
 ## 背景
 
