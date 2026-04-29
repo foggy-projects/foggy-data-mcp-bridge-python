@@ -107,6 +107,23 @@ class TestBaseModelPlanShapeFields:
         assert "LIMIT 50" in composed.sql
         assert "OFFSET 10" in composed.sql
 
+    def test_calculated_fields_are_forwarded_to_v1_engine(self, svc, ctx):
+        plan = from_(
+            model="FactSalesModel",
+            columns=["orderStatus$caption"],
+            calculated_fields=[{
+                "name": "grossAmount",
+                "expression": "salesAmount * 1.2",
+            }],
+        )
+
+        composed = compile_plan_to_sql(
+            plan, ctx, semantic_service=svc, dialect="mysql8"
+        )
+
+        assert "grossAmount" in composed.sql
+        assert "sales_amount" in composed.sql
+
     def test_empty_slice_produces_no_where(self, svc, ctx, base_sales):
         composed = compile_plan_to_sql(
             base_sales, ctx, semantic_service=svc, dialect="mysql8"

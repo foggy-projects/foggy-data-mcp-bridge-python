@@ -128,6 +128,7 @@ def plan_hash(plan: QueryPlan) -> CanonicalPlanTuple:
             canonical(plan.slice_),
             canonical(plan.group_by),
             canonical(plan.order_by),
+            canonical(plan.calculated_fields),
             plan.limit,
             plan.start,
             bool(plan.distinct),

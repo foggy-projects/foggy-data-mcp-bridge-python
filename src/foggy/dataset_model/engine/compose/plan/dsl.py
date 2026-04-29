@@ -52,6 +52,7 @@ def from_(
     slice: Optional[List[Any]] = None,
     group_by: Optional[List[str]] = None,
     order_by: Optional[List[str]] = None,
+    calculated_fields: Optional[List[Any]] = None,
     limit: Optional[int] = None,
     start: Optional[int] = None,
     distinct: bool = False,
@@ -110,6 +111,7 @@ def from_(
     slice_tuple = _freeze_opt_list(slice)
     group_by_tuple = _freeze_opt_str_list(group_by)
     order_by_tuple = _freeze_opt_str_list(order_by)
+    calculated_fields_tuple = _freeze_opt_list(calculated_fields)
 
     if has_model:
         if not isinstance(model, str) or not model:
@@ -120,6 +122,7 @@ def from_(
             slice_=slice_tuple,
             group_by=group_by_tuple,
             order_by=order_by_tuple,
+            calculated_fields=calculated_fields_tuple,
             limit=limit,
             start=start,
             distinct=distinct,

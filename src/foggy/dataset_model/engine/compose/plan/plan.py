@@ -664,6 +664,7 @@ class BaseModelPlan(QueryPlan):
     slice_: Tuple[Any, ...] = ()
     group_by: Tuple[str, ...] = ()
     order_by: Tuple[str, ...] = ()
+    calculated_fields: Tuple[Any, ...] = ()
     limit: Optional[int] = None
     start: Optional[int] = None
     distinct: bool = False

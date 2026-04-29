@@ -104,6 +104,9 @@ def _derive_base_model(plan: BaseModelPlan, *, path: str) -> OutputSchema:
     specs = _columns_to_specs(
         plan.columns, source_model=plan.model, plan_path=current_path,
     )
+    specs.extend(_calculated_fields_to_specs(
+        plan.calculated_fields, source_model=plan.model, plan_path=current_path,
+    ))
     output_schema = OutputSchema.of(specs)
     _validate_group_and_order_by(
         plan.group_by, plan.order_by, output_schema, plan_path=current_path,
@@ -326,6 +329,36 @@ def _columns_to_specs(
     parts_list = [
         _parse_alias_or_raise(c, plan_path=plan_path) for c in columns
     ]
+    return _parts_to_specs(
+        parts_list, source_model=source_model, plan_path=plan_path
+    )
+
+
+def _calculated_fields_to_specs(
+    calculated_fields: Iterable[object], *, source_model: Optional[str], plan_path: str
+) -> List[ColumnSpec]:
+    parts_list: List[ColumnAliasParts] = []
+    for cf in calculated_fields:
+        if not isinstance(cf, dict):
+            raise ComposeSchemaError(
+                code=error_codes.COLUMN_SPEC_MALFORMED,
+                message="calculatedFields entries must be objects",
+                phase=error_codes.PHASE_PLAN_BUILD,
+                plan_path=plan_path,
+            )
+        name = cf.get("alias") or cf.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise ComposeSchemaError(
+                code=error_codes.COLUMN_SPEC_MALFORMED,
+                message="calculatedFields entries require a non-empty name",
+                phase=error_codes.PHASE_PLAN_BUILD,
+                plan_path=plan_path,
+            )
+        parts_list.append(ColumnAliasParts(
+            expression=str(cf.get("expression") or name),
+            output_name=name.strip(),
+            has_alias=bool(cf.get("alias")),
+        ))
     return _parts_to_specs(
         parts_list, source_model=source_model, plan_path=plan_path
     )

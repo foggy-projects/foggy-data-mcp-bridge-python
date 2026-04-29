@@ -181,6 +181,7 @@ def _build_request(
 
     return SemanticQueryRequest(
         columns=list(plan.columns),
+        calculated_fields=list(plan.calculated_fields),
         slice=list(plan.slice_),
         group_by=list(plan.group_by),
         order_by=order_by_entries,

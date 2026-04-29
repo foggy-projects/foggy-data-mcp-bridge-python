@@ -208,6 +208,8 @@ def _from_dsl(options: Dict[str, Any], *args):
                 kwargs["group_by"] = v
             elif k == "orderBy":
                 kwargs["order_by"] = v
+            elif k == "calculatedFields":
+                kwargs["calculated_fields"] = v
             else:
                 kwargs[k] = v
 

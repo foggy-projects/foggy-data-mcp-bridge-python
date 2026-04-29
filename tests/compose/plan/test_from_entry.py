@@ -89,11 +89,22 @@ class TestFromOptionalFieldsPropagation:
         assert p.start == 0
         assert p.distinct is True
 
+    def test_calculated_fields_propagated(self):
+        calc = {"name": "grossAmount", "expression": "amount * 1.2"}
+        p = from_(
+            model="SaleOrderQM",
+            columns=["id"],
+            calculated_fields=[calc],
+        )
+
+        assert p.calculated_fields == (calc,)
+
     def test_defaults_when_optional_omitted(self):
         p = from_(model="X", columns=["id"])
         assert p.slice_ == ()
         assert p.group_by == ()
         assert p.order_by == ()
+        assert p.calculated_fields == ()
         assert p.limit is None
         assert p.start is None
         assert p.distinct is False
