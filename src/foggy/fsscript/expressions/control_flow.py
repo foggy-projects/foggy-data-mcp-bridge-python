@@ -90,7 +90,17 @@ class ImportExpression(Expression):
             # If no loader, just return None (simplified behavior)
             return None
 
+        validate_import = getattr(loader, "validate_import", None)
+
         # Load the module and get its exports
+        if validate_import:
+            validate_import(
+                self.module,
+                bindings=self.names,
+                namespace=self.namespace,
+                default_name=self.default_name,
+                context=context,
+            )
         exports = loader.load_module(self.module, context)
 
         if self.namespace:

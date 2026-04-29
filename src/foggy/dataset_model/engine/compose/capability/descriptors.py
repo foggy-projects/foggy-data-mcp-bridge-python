@@ -1,4 +1,4 @@
-"""Capability descriptors for v1.7 controlled function and object facade registration.
+"""Capability descriptors for controlled Compose Script extensions.
 
 Descriptors are immutable (frozen dataclass) declarations of what a
 capability exposes, where it may be used, and what safety properties it
@@ -32,6 +32,10 @@ VALID_RETURN_TYPES: frozenset[str] = frozenset({
 
 # Safe identifier: letters, digits, underscores; must start with a letter.
 _SAFE_NAME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]*$")
+_SAFE_DOTTED_NAME_RE = re.compile(
+    r"^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)*$"
+)
+_SHA256_RE = re.compile(r"^(sha256:)?[a-fA-F0-9]{64}$")
 
 # Reserved names that cannot be overridden by capabilities.
 RESERVED_NAMES: frozenset[str] = frozenset({
@@ -72,6 +76,28 @@ def _validate_name(name: str, label: str) -> None:
         raise CapabilityInvalidDescriptorError(
             f"{label} name '{name}' must not start with double underscore."
         )
+
+
+def _validate_library_name(name: str, label: str) -> None:
+    """Validate a logical fsscript library name.
+
+    Library names may be dotted (for example ``biz.math``), but they are
+    never paths.  Slash, backslash, ``..``, and URL-like forms are rejected
+    by this regex.
+    """
+    if not name:
+        raise CapabilityInvalidDescriptorError(
+            f"{label} name must not be empty."
+        )
+    if not _SAFE_DOTTED_NAME_RE.match(name):
+        raise CapabilityInvalidDescriptorError(
+            f"{label} name '{name}' is not a safe logical library name."
+        )
+    for part in name.split("."):
+        if part in RESERVED_NAMES:
+            raise CapabilityInvalidDescriptorError(
+                f"{label} name segment '{part}' is reserved."
+            )
 
 
 def _validate_side_effect(side_effect: str) -> None:
@@ -239,3 +265,75 @@ class ObjectFacadeDescriptor:
                     f"duplicate method name '{method.name}'."
                 )
             seen_names.add(method.name)
+
+
+# ---------------------------------------------------------------------------
+# Library Descriptor
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class LibraryDescriptor:
+    """Descriptor for a controlled ``.fsscript`` library registration."""
+
+    name: str
+    version: str
+    source_hash: str
+    exports: List[str]
+    dependencies: List[str] = field(default_factory=list)
+    allowed_in: List[str] = field(default_factory=lambda: ["compose_runtime"])
+    audit_tag: str = ""
+
+    def __post_init__(self) -> None:
+        _validate_library_name(self.name, "Library")
+
+        if not self.version:
+            raise CapabilityInvalidDescriptorError(
+                f"Library '{self.name}': version must not be empty."
+            )
+
+        if not _SHA256_RE.match(self.source_hash or ""):
+            raise CapabilityInvalidDescriptorError(
+                f"Library '{self.name}': source_hash must be a sha256 hex digest."
+            )
+
+        if not self.exports:
+            raise CapabilityInvalidDescriptorError(
+                f"Library '{self.name}': exports must not be empty."
+            )
+        seen_exports: set[str] = set()
+        for symbol in self.exports:
+            _validate_name(symbol, "Library export")
+            if symbol in seen_exports:
+                raise CapabilityInvalidDescriptorError(
+                    f"Library '{self.name}': duplicate export '{symbol}'."
+                )
+            seen_exports.add(symbol)
+
+        seen_deps: set[str] = set()
+        for dep in self.dependencies:
+            _validate_library_name(dep, "Library dependency")
+            if dep == self.name:
+                raise CapabilityInvalidDescriptorError(
+                    f"Library '{self.name}': dependency cannot reference itself."
+                )
+            if dep in seen_deps:
+                raise CapabilityInvalidDescriptorError(
+                    f"Library '{self.name}': duplicate dependency '{dep}'."
+                )
+            seen_deps.add(dep)
+
+        if not self.allowed_in:
+            raise CapabilityInvalidDescriptorError(
+                f"Library '{self.name}': allowed_in must not be empty."
+            )
+        for surface in self.allowed_in:
+            if surface not in VALID_ALLOWED_IN:
+                raise CapabilityInvalidDescriptorError(
+                    f"Library '{self.name}': allowed_in value '{surface}' "
+                    f"is not recognized. Allowed: {sorted(VALID_ALLOWED_IN)}."
+                )
+
+        if not self.audit_tag:
+            raise CapabilityInvalidDescriptorError(
+                f"Library '{self.name}': audit_tag must not be empty."
+            )

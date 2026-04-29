@@ -30,11 +30,19 @@ class CapabilityPolicy:
         are allowed (useless but safe).
     allowed_scopes:
         Set of auth_scope values the current execution is entitled to.
+    allowed_libraries:
+        Set of controlled fsscript library names the script may import.
+    allowed_symbols:
+        Optional per-library symbol allow-list. If a library is allowed
+        but absent from this mapping, every descriptor-declared export is
+        allowed. If present, only the listed symbols are importable.
     """
 
     allowed_functions: FrozenSet[str] = field(default_factory=frozenset)
     allowed_objects: Dict[str, FrozenSet[str]] = field(default_factory=dict)
     allowed_scopes: FrozenSet[str] = field(default_factory=frozenset)
+    allowed_libraries: FrozenSet[str] = field(default_factory=frozenset)
+    allowed_symbols: Dict[str, FrozenSet[str]] = field(default_factory=dict)
 
     def is_function_allowed(self, name: str) -> bool:
         return name in self.allowed_functions
@@ -50,6 +58,17 @@ class CapabilityPolicy:
 
     def is_scope_allowed(self, scope: str) -> bool:
         return scope in self.allowed_scopes
+
+    def is_library_allowed(self, name: str) -> bool:
+        return name in self.allowed_libraries
+
+    def is_symbol_allowed(self, library_name: str, symbol: str) -> bool:
+        if not self.is_library_allowed(library_name):
+            return False
+        symbols = self.allowed_symbols.get(library_name)
+        if symbols is None:
+            return True
+        return symbol in symbols
 
     @staticmethod
     def empty() -> CapabilityPolicy:

@@ -37,6 +37,7 @@ from .. import ComposedSql
 from ..capability.policy import CapabilityPolicy
 from ..capability.registry import CapabilityRegistry
 from ..capability.runtime_integration import build_capability_context
+from ..capability.library_loader import ControlledLibraryModuleLoader
 from ..context.compose_query_context import ComposeQueryContext
 from ..plan import from_ as _plan_from
 from ..plan.column_normalizer import normalize_columns as _normalize_columns
@@ -232,6 +233,8 @@ def _evaluate_program(
     *,
     capability_registry: Optional[CapabilityRegistry] = None,
     capability_policy: Optional[CapabilityPolicy] = None,
+    library_registry: Optional[CapabilityRegistry] = None,
+    library_policy: Optional[CapabilityPolicy] = None,
 ) -> Any:
     """Run sandbox scan + parse + evaluate for ``script``.
 
@@ -251,17 +254,31 @@ def _evaluate_program(
         return None
 
     # Layer A & C static scan.
-    scan_script_source(source)
+    allow_controlled_imports = (
+        library_registry is not None and library_policy is not None
+    )
+    scan_script_source(
+        source,
+        allow_controlled_imports=allow_controlled_imports,
+    )
 
     parser = FsscriptParser(source, dialect=COMPOSE_QUERY_DIALECT)
     program = parser.parse_program()
 
-    # Evaluator with NO module loader and NO bean registry — disables
-    # ``import 'x'`` and ``import '@bean'``, the two paths that could
-    # reach arbitrary Python or bean-registered objects.
+    module_loader = None
+    if allow_controlled_imports:
+        module_loader = ControlledLibraryModuleLoader(
+            library_registry,
+            library_policy,
+            surface="compose_runtime",
+        )
+
+    # Evaluator with NO bean registry.  Module loader stays None by default;
+    # v1.8 only supplies a registry-backed loader when the caller explicitly
+    # provides library_registry + library_policy.
     evaluator = ExpressionEvaluator(
         context={},
-        module_loader=None,
+        module_loader=module_loader,
         bean_registry=None,
     )
     evaluator.context["from"] = _from_dsl
@@ -291,6 +308,8 @@ def _run_script_no_intercept(
     dialect: str = "mysql",
     capability_registry: Optional[CapabilityRegistry] = None,
     capability_policy: Optional[CapabilityPolicy] = None,
+    library_registry: Optional[CapabilityRegistry] = None,
+    library_policy: Optional[CapabilityPolicy] = None,
 ) -> Any:
     """Public-but-underscored entry: run ``script`` under a fresh
     :class:`ComposeRuntimeBundle` and return the raw evaluator value
@@ -318,6 +337,8 @@ def _run_script_no_intercept(
             script, ctx,
             capability_registry=capability_registry,
             capability_policy=capability_policy,
+            library_registry=library_registry,
+            library_policy=library_policy,
         )
     finally:
         _compose_runtime.reset(token)
@@ -332,6 +353,8 @@ def run_script(
     preview_mode: bool = False,
     capability_registry: Optional[CapabilityRegistry] = None,
     capability_policy: Optional[CapabilityPolicy] = None,
+    library_registry: Optional[CapabilityRegistry] = None,
+    library_policy: Optional[CapabilityPolicy] = None,
 ) -> ScriptResult:
     """Execute ``script`` and return a :class:`ScriptResult` with plans
     inside any ``{ plans, ... }`` envelope auto-evaluated.
@@ -361,6 +384,13 @@ def run_script(
         Optional :class:`CapabilityPolicy` controlling which registered
         capabilities are visible.  Default ``None`` → no capability
         injection.
+    library_registry:
+        Optional registry containing controlled fsscript libraries.
+        Default ``None`` keeps import disabled at Layer A.
+    library_policy:
+        Optional policy controlling visible libraries / symbols.
+        Must be provided together with ``library_registry`` to enable
+        controlled imports.
 
     Notes
     -----
@@ -399,6 +429,8 @@ def run_script(
             script, ctx,
             capability_registry=capability_registry,
             capability_policy=capability_policy,
+            library_registry=library_registry,
+            library_policy=library_policy,
         )
         value = intercept_plans(raw_value, preview_mode=preview_mode)
     finally:

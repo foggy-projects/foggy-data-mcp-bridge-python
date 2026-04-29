@@ -9,10 +9,12 @@ is the job of :class:`CapabilityPolicy`.
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any, Callable, Dict, Optional
 
 from .descriptors import (
     FunctionDescriptor,
+    LibraryDescriptor,
     ObjectFacadeDescriptor,
     RESERVED_NAMES,
 )
@@ -35,6 +37,7 @@ class CapabilityRegistry:
     def __init__(self) -> None:
         self._functions: Dict[str, _FunctionEntry] = {}
         self._objects: Dict[str, _ObjectEntry] = {}
+        self._libraries: Dict[str, _LibraryEntry] = {}
 
     # ------------------------------------------------------------------
     # Function registration
@@ -152,6 +155,44 @@ class CapabilityRegistry:
         )
 
     # ------------------------------------------------------------------
+    # Library registration
+    # ------------------------------------------------------------------
+
+    def register_library(
+        self,
+        descriptor: LibraryDescriptor,
+        *,
+        source: str,
+    ) -> None:
+        """Register a controlled fsscript library source.
+
+        ``source`` is trusted provider input, but the descriptor still
+        anchors it with a sha256 hash so deployment drift is detected
+        before script execution.
+        """
+        name = descriptor.name
+        if name in self._libraries:
+            raise CapabilityInvalidDescriptorError(
+                f"Library '{name}' is already registered."
+            )
+        if not source or not str(source).strip():
+            raise CapabilityInvalidDescriptorError(
+                f"Library '{name}': source must not be empty."
+            )
+
+        expected = descriptor.source_hash.removeprefix("sha256:")
+        actual = hashlib.sha256(source.encode("utf-8")).hexdigest()
+        if expected.lower() != actual.lower():
+            raise CapabilityInvalidDescriptorError(
+                f"Library '{name}': source_hash does not match source."
+            )
+
+        self._libraries[name] = _LibraryEntry(
+            descriptor=descriptor,
+            source=source,
+        )
+
+    # ------------------------------------------------------------------
     # Lookup
     # ------------------------------------------------------------------
 
@@ -173,11 +214,23 @@ class CapabilityRegistry:
             )
         return entry
 
+    def get_library(self, name: str) -> _LibraryEntry:
+        """Return the library entry or raise."""
+        entry = self._libraries.get(name)
+        if entry is None:
+            raise CapabilityNotRegisteredError(
+                f"Library '{name}' is not registered."
+            )
+        return entry
+
     def has_function(self, name: str) -> bool:
         return name in self._functions
 
     def has_object(self, name: str) -> bool:
         return name in self._objects
+
+    def has_library(self, name: str) -> bool:
+        return name in self._libraries
 
     @property
     def function_names(self) -> frozenset[str]:
@@ -187,8 +240,12 @@ class CapabilityRegistry:
     def object_names(self) -> frozenset[str]:
         return frozenset(self._objects.keys())
 
+    @property
+    def library_names(self) -> frozenset[str]:
+        return frozenset(self._libraries.keys())
+
     def is_empty(self) -> bool:
-        return not self._functions and not self._objects
+        return not self._functions and not self._objects and not self._libraries
 
 
 # ---------------------------------------------------------------------------
@@ -223,3 +280,17 @@ class _ObjectEntry:
     ) -> None:
         self.descriptor = descriptor
         self.target = target
+
+
+class _LibraryEntry:
+    """Internal storage for a registered fsscript library."""
+
+    __slots__ = ("descriptor", "source")
+
+    def __init__(
+        self,
+        descriptor: LibraryDescriptor,
+        source: str,
+    ) -> None:
+        self.descriptor = descriptor
+        self.source = source

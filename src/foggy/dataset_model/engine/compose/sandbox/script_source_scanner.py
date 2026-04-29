@@ -91,6 +91,23 @@ IO_PATTERNS = [
     re.compile(r"\bFile\b"),
 ]
 
+CONTROLLED_IMPORT_STATEMENT = re.compile(
+    r"""
+    \bimport\s+
+    (?:
+        \*\s+as\s+[A-Za-z_][A-Za-z0-9_]* |
+        \{[^{};]+\} |
+        [A-Za-z_][A-Za-z0-9_]*
+    )
+    \s+from\s+
+    ['"][A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)*['"]
+    \s*;?
+    """,
+    re.VERBOSE,
+)
+
+DYNAMIC_IMPORT_PATTERN = re.compile(r"\bimport\s*\(")
+
 # A-06 / A-07: security parameter keywords that must not appear in DSL bodies
 SECURITY_PARAM_PATTERNS = [
     re.compile(r"\bauthorization\b\s*:"),
@@ -132,7 +149,11 @@ def _matches_any(source: str, patterns: list[re.Pattern]) -> bool:
     return any(p.search(source) for p in patterns)
 
 
-def scan_script_source(script: str) -> None:
+def scan_script_source(
+    script: str,
+    *,
+    allow_controlled_imports: bool = False,
+) -> None:
     """Scan the source for Layer A violations.
 
     Parameters
@@ -229,8 +250,20 @@ def scan_script_source(script: str) -> None:
             PHASE_SCRIPT_PARSE,
         )
 
-    # A-09: module / IO
-    if _matches_any(script, IO_PATTERNS):
+    # A-09: module / IO.  v1.8 can enable static registry-backed imports,
+    # but all dynamic import / require / file / process forms remain denied.
+    if allow_controlled_imports:
+        io_patterns = [p for p in IO_PATTERNS if p.pattern != r"\bimport\s"]
+        import_remainder = CONTROLLED_IMPORT_STATEMENT.sub("", script)
+        import_denied = (
+            DYNAMIC_IMPORT_PATTERN.search(script) is not None
+            or re.search(r"\bimport\s", import_remainder) is not None
+        )
+    else:
+        io_patterns = IO_PATTERNS
+        import_denied = False
+
+    if _matches_any(script, io_patterns) or import_denied:
         raise ComposeSandboxViolationError(
             LAYER_A_IO_DENIED,
             "File/process/module primitives are not available in compose scripts.",

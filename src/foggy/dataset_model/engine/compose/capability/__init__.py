@@ -14,8 +14,10 @@ Default state:  Registry empty, policy empty, visible surface unchanged.
 Public API
 ----------
 * :class:`FunctionDescriptor` / :class:`MethodDescriptor` / :class:`ObjectFacadeDescriptor`
+* :class:`LibraryDescriptor`
 * :class:`CapabilityRegistry`
 * :class:`CapabilityPolicy`
+* :class:`ControlledLibraryModuleLoader`
 * :class:`SqlFragment`
 * :class:`ObjectFacadeProxy`
 * :class:`CapabilityError` and subclasses
@@ -25,27 +27,35 @@ from __future__ import annotations
 
 from .descriptors import (
     FunctionDescriptor,
+    LibraryDescriptor,
     MethodDescriptor,
     ObjectFacadeDescriptor,
 )
 from .errors import (
     CapabilityError,
+    CapabilityImportCycleError,
+    CapabilityImportNotAllowedError,
     CapabilityInvalidDescriptorError,
     CapabilityMethodNotDeclaredError,
     CapabilityNotAllowedError,
     CapabilityNotRegisteredError,
     CapabilityReturnTypeDeniedError,
     CapabilitySideEffectDeniedError,
+    CapabilitySymbolCollisionError,
+    CapabilitySymbolNotDeclaredError,
     CapabilityTimeoutError,
     CapabilityUnsupportedDialectError,
 )
 from .facade_proxy import ObjectFacadeProxy
+from .library_loader import ControlledLibraryModuleLoader
 from .policy import CapabilityPolicy
 from .registry import CapabilityRegistry
 from .sql_fragment import SqlFragment
 
 __all__ = [
     "CapabilityError",
+    "CapabilityImportCycleError",
+    "CapabilityImportNotAllowedError",
     "CapabilityInvalidDescriptorError",
     "CapabilityMethodNotDeclaredError",
     "CapabilityNotAllowedError",
@@ -54,9 +64,13 @@ __all__ = [
     "CapabilityRegistry",
     "CapabilityReturnTypeDeniedError",
     "CapabilitySideEffectDeniedError",
+    "CapabilitySymbolCollisionError",
+    "CapabilitySymbolNotDeclaredError",
     "CapabilityTimeoutError",
     "CapabilityUnsupportedDialectError",
+    "ControlledLibraryModuleLoader",
     "FunctionDescriptor",
+    "LibraryDescriptor",
     "MethodDescriptor",
     "ObjectFacadeDescriptor",
     "ObjectFacadeProxy",

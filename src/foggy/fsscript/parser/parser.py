@@ -815,7 +815,7 @@ class FsscriptParser:
         if self._match(TokenType.MULTIPLY):
             self._expect(TokenType.AS)
             name = self._expect(TokenType.IDENTIFIER).value
-            self._expect(TokenType.FROM)
+            self._expect_import_from()
             module = self._expect(TokenType.STRING).value
             self._match(TokenType.SEMICOLON)
             return ImportExpression(
@@ -838,7 +838,7 @@ class FsscriptParser:
                 if not self._match(TokenType.COMMA):
                     break
             self._expect(TokenType.RBRACE)
-            self._expect(TokenType.FROM)
+            self._expect_import_from()
             module = self._expect(TokenType.STRING).value
             self._match(TokenType.SEMICOLON)
             return ImportExpression(
@@ -851,7 +851,7 @@ class FsscriptParser:
         # import defaultExport from 'module'
         if self._check(TokenType.IDENTIFIER):
             name = self._advance().value
-            self._expect(TokenType.FROM)
+            self._expect_import_from()
             module = self._expect(TokenType.STRING).value
             self._match(TokenType.SEMICOLON)
             return ImportExpression(
@@ -862,6 +862,19 @@ class FsscriptParser:
             )
 
         return NullExpression()
+
+    def _expect_import_from(self) -> Token:
+        """Expect the ``from`` import separator.
+
+        Compose Query dialect intentionally lets ``from`` be a callable
+        identifier.  That means import statements can see it as IDENTIFIER
+        instead of TokenType.FROM, so import parsing accepts both forms.
+        """
+        if self._check(TokenType.FROM):
+            return self._advance()
+        if self._check(TokenType.IDENTIFIER) and self._current().value == "from":
+            return self._advance()
+        return self._expect(TokenType.FROM)
 
     def _parse_block(self) -> BlockExpression:
         """Parse a block of statements."""

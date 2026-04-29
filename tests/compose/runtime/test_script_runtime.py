@@ -152,14 +152,15 @@ def test_documented_join_signature_creates_join_plan():
 
 def test_module_loader_and_bean_registry_are_disabled():
     """M7 hard contract: evaluator is constructed with
-    ``module_loader=None`` + ``bean_registry=None``. Assert the helper
-    that actually wires the evaluator (``_evaluate_program``) keeps the
-    "no arbitrary import / @bean" red line."""
+    ``bean_registry=None`` and no module loader by default. Assert the
+    helper keeps the "no arbitrary import / @bean" red line while allowing
+    v1.8 to opt into a registry-backed loader."""
     import inspect
     from foggy.dataset_model.engine.compose.runtime import script_runtime
 
     src = inspect.getsource(script_runtime._evaluate_program)
-    assert "module_loader=None" in src
+    assert "module_loader = None" in src
+    assert "ControlledLibraryModuleLoader" in src
     assert "bean_registry=None" in src
 
 

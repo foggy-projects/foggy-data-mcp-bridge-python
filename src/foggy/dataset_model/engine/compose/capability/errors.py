@@ -25,6 +25,10 @@ CAPABILITY_METHOD_NOT_DECLARED = "capability/method-not-declared"
 CAPABILITY_SIDE_EFFECT_DENIED = "capability/side-effect-denied"
 CAPABILITY_RETURN_TYPE_DENIED = "capability/return-type-denied"
 CAPABILITY_TIMEOUT = "capability/timeout"
+CAPABILITY_IMPORT_NOT_ALLOWED = "capability/import-not-allowed"
+CAPABILITY_SYMBOL_NOT_DECLARED = "capability/symbol-not-declared"
+CAPABILITY_IMPORT_CYCLE = "capability/import-cycle"
+CAPABILITY_SYMBOL_COLLISION = "capability/symbol-collision"
 
 ALL_CAPABILITY_CODES: frozenset[str] = frozenset({
     CAPABILITY_NOT_REGISTERED,
@@ -35,6 +39,10 @@ ALL_CAPABILITY_CODES: frozenset[str] = frozenset({
     CAPABILITY_SIDE_EFFECT_DENIED,
     CAPABILITY_RETURN_TYPE_DENIED,
     CAPABILITY_TIMEOUT,
+    CAPABILITY_IMPORT_NOT_ALLOWED,
+    CAPABILITY_SYMBOL_NOT_DECLARED,
+    CAPABILITY_IMPORT_CYCLE,
+    CAPABILITY_SYMBOL_COLLISION,
 })
 
 
@@ -125,3 +133,31 @@ class CapabilityTimeoutError(CapabilityError):
 
     def __init__(self, message: str) -> None:
         super().__init__(CAPABILITY_TIMEOUT, message)
+
+
+class CapabilityImportNotAllowedError(CapabilityError):
+    """Library import is registered but not allowed by runtime policy."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(CAPABILITY_IMPORT_NOT_ALLOWED, message)
+
+
+class CapabilitySymbolNotDeclaredError(CapabilityError):
+    """Imported symbol is not declared by the library descriptor."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(CAPABILITY_SYMBOL_NOT_DECLARED, message)
+
+
+class CapabilityImportCycleError(CapabilityError):
+    """Controlled library import cycle was detected."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(CAPABILITY_IMPORT_CYCLE, message)
+
+
+class CapabilitySymbolCollisionError(CapabilityError):
+    """Import would overwrite an existing evaluator binding."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(CAPABILITY_SYMBOL_COLLISION, message)
