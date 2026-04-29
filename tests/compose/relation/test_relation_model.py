@@ -111,14 +111,28 @@ class TestRelationCapabilities:
         assert not caps.can_hoist_cte
         assert not caps.can_inline_as_subquery
 
-    def test_outer_capabilities_not_opened(self):
-        for d in ("mysql8", "postgres", "sqlite", "mssql", "mysql"):
+    def test_s7e_outer_aggregate_opened_for_wrappable_relations(self):
+        """S7e: supportsOuterAggregate is True for wrappable relations;
+        supportsOuterWindow remains False everywhere.
+
+        S7a originally asserted both were False.  S7e opens aggregate for
+        all wrappable dialects while keeping window closed.  The only
+        dialect+CTE combo that keeps aggregate=False is MySQL 5.7 + CTE
+        (FAIL_CLOSED).
+        """
+        for d in ("mysql8", "postgres", "sqlite", "mssql", "sqlserver", "mysql", "mysql57"):
             for has_cte in (True, False):
                 caps = RelationCapabilities.for_dialect(d, has_cte)
-                assert not caps.supports_outer_aggregate, \
-                    f"S7a must not open outer aggregate for {d}"
                 assert not caps.supports_outer_window, \
-                    f"S7a must not open outer window for {d}"
+                    f"S7e must not open outer window for {d}"
+                # MySQL 5.7 + CTE is FAIL_CLOSED → no outer aggregate
+                is_mysql57_cte = d in ("mysql", "mysql57") and has_cte
+                if is_mysql57_cte:
+                    assert not caps.supports_outer_aggregate, \
+                        f"MySQL 5.7+CTE must keep outer aggregate closed"
+                else:
+                    assert caps.supports_outer_aggregate, \
+                        f"S7e must open outer aggregate for {d} (has_cte={has_cte})"
 
 
 class TestCompiledRelation:

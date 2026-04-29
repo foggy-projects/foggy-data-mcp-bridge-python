@@ -10,7 +10,7 @@
 
 - version: post-v1.5 follow-up
 - priority: P1 when Stage 7 is promoted
-- status: complete-through-s7e; s7f-ready
+- status: complete-through-s7e; s7f-ready-after-signoff
 - owner: `foggy-data-mcp-bridge-python` docs
 - java_reference_repo: `foggy-data-mcp-bridge-wt-dev-compose`
 - related_contract: `docs/v1.5/S7a-plan-stable-view-relation-contract-preflight.md`
@@ -163,9 +163,19 @@ Java evidence:
 - S7e snapshot covers positive `SUM + GROUP BY`, ratio aggregate rejection,
   MySQL 5.7 CTE fail-closed, and SQL Server hoisted CTE.
 
+Python mirror evidence:
+
+- `ReferencePolicy.MEASURE_DEFAULT` updated to include `aggregatable`.
+- `RelationCapabilities.for_dialect()` updated: `supports_outer_aggregate=True`
+  for wrappable relations; MySQL 5.7 + CTE remains `False`.
+- New snapshot consumer: `tests/compose/relation/test_stable_relation_outer_aggregate_snapshot.py`.
+- 25 S7e tests consuming `_stable_relation_outer_aggregate_snapshot.json`.
+- S7a snapshot tests remain frozen and passing.
+- Python S7e focused: `79 passed, 0 failures`.
+
 ### S7f - Outer window
 
-- status: ready after Python S7e mirror
+- status: ready after S7e signoff
 - owner: Java first, Python mirror after snapshot
 
 Requirement:
