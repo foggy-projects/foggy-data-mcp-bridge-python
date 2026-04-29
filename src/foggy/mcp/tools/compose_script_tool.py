@@ -73,13 +73,15 @@ class ComposeScriptTool(BaseMcpTool):
         Forwarded to :func:`run_script`. Default ``"mysql"``.
     """
 
-    tool_name: ClassVar[str] = "compose.script"
+    tool_name: ClassVar[str] = "dataset.compose_script"
     tool_description: ClassVar[str] = (
-        "Run a Compose Query script (JavaScript-like syntax). Use for "
-        "multi-model queries requiring query/union/join composition. "
-        "Single-model queries should still use 'query_model'. Note: calling "
-        ".execute() twice on the same plan will trigger two authority "
-        "resolver invocations; for best performance call execute() once."
+        "Run a secure FSScript SemanticDSL script for multi-model queries, "
+        "derived queries, joins, unions, and time-window analysis. Use only "
+        "dsl({...}), .join(...), and .union(...). Return query plans as an "
+        "envelope such as return { plans: plan }; do not call .execute() "
+        "directly unless specifically instructed. Do not generate raw SQL, "
+        "raw WITH blocks, file I/O, network calls, dynamic imports, eval, "
+        "or host-controlled security and datasource routing parameters."
     )
     tool_category: ClassVar[ToolCategory] = ToolCategory.ANALYSIS
     tool_tags: ClassVar[List[str]] = ["compose", "query", "script"]
@@ -115,11 +117,13 @@ class ComposeScriptTool(BaseMcpTool):
                 "type": "string",
                 "required": True,
                 "description": (
-                    "Compose Query script. Build base plans via "
-                    "`from({model: 'XxxModel', columns: [...], slice: [...]})`. "
-                    "Chain with `.query()`, `.union()`, `.join()`; end with "
-                    "`.execute()` to get rows or `.toSql()` for SQL + params "
-                    "preview without execution."
+                    "FSScript SemanticDSL script. Build base plans with "
+                    "`dsl({...})`, combine with `.join(other, type, on)` or "
+                    "`.union(other, options)`, and return an envelope such as "
+                    "`return { plans: plan };`. Do not call `.execute()` "
+                    "directly unless specifically instructed, and do not pass "
+                    "host-controlled identity, permission, namespace, or "
+                    "datasource routing parameters."
                 ),
             },
         ]
@@ -144,7 +148,7 @@ class ComposeScriptTool(BaseMcpTool):
             return self._error_payload(
                 error_code="host-misconfig",
                 phase="internal",
-                message="ToolExecutionContext is required for compose.script",
+                message="ToolExecutionContext is required for dataset.compose_script",
             )
 
         # 1. Build AuthorityResolver via factory

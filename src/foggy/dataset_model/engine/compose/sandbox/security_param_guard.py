@@ -23,6 +23,13 @@ _FORBIDDEN_PARAMS: frozenset = frozenset(
         "systemSlice",
         "fieldAccess",
         "policySnapshotId",
+        "dataSource",
+        "dataSourceName",
+        "datasource",
+        "datasourceName",
+        "routeModel",
+        "route_model",
+        "namespace",
     }
 )
 

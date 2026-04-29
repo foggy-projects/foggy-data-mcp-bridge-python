@@ -102,6 +102,48 @@ class TestListModelsRpc:
         tool_names = [t.name for t in tools]
         assert "dataset.list_models" in tool_names
 
+    def test_tool_config_includes_compose_script(self):
+        """Tool config loader should expose the shared compose script name."""
+        from foggy.mcp.schemas.tool_config_loader import get_tool_config_loader
+
+        loader = get_tool_config_loader()
+        tools = {t.name: t for t in loader.get_tools()}
+        compose_tool = tools.get("dataset.compose_script")
+        assert compose_tool is not None
+        assert "dataset.compose_script" in compose_tool.description
+        assert "dsl({...})" in compose_tool.description
+        assert "timeRole=business_date" in compose_tool.description
+        assert "timeWindow.field" in compose_tool.description
+        assert "Do NOT guess time fields" in compose_tool.description
+        assert "System time field" in compose_tool.description
+        assert "created_at" in compose_tool.description
+        assert "return { plans:" in compose_tool.description
+        assert "Do not use `.execute()` directly" in compose_tool.description
+        assert "Query.from" not in compose_tool.description
+        schema = compose_tool.inputSchema
+        assert schema.get("properties", {}).get("script", {}).get("type") == "string"
+        script_desc = schema.get("properties", {}).get("script", {}).get("description", "")
+        assert "dsl({...})" in script_desc
+        assert "return { plans:" in script_desc
+        assert ".execute() directly" in script_desc
+        assert "Query.from" not in script_desc
+        assert "script" in schema.get("required", [])
+
+    def test_query_model_description_points_complex_work_to_compose_script(self):
+        """query_model description should keep the single-model boundary clear."""
+        from foggy.mcp.schemas.tool_config_loader import get_tool_config_loader
+
+        loader = get_tool_config_loader()
+        tools = {t.name: t for t in loader.get_tools()}
+        query_tool = tools.get("dataset.query_model")
+        assert query_tool is not None
+        assert "dataset.compose_script" in query_tool.description
+        assert "Join" in query_tool.description
+        assert "Union" in query_tool.description
+        assert "sum/avg/count(if(...))" in query_tool.description
+        assert "description_model" not in query_tool.description
+        assert "dataset.describe_model_internal" in query_tool.description
+
     def test_list_models_schema_is_empty_object(self):
         """list_models schema should be an empty object (no parameters)."""
         from foggy.mcp.schemas.tool_config_loader import get_tool_config_loader

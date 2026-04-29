@@ -118,6 +118,19 @@ def test_dsl_alias_equivalent_to_from():
     assert isinstance(r.value, BaseModelPlan)
 
 
+def test_documented_join_signature_creates_join_plan():
+    r = run_script(
+        """
+        const left = dsl({model: "Sales", columns: ["id"]});
+        const right = dsl({model: "Invoices", columns: ["saleId"]});
+        return left.join(right, "left", [{left: "id", op: "=", right: "saleId"}]);
+        """,
+        _ctx(), semantic_service=_StubSemanticService(),
+    )
+    assert r.value.type == "left"
+    assert r.value.on[0].left == "id"
+
+
 # ---------------------------------------------------------------------------
 # Evaluator lockdown — allowed globals + no import
 # ---------------------------------------------------------------------------

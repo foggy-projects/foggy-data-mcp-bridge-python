@@ -421,6 +421,7 @@ class QueryPlan(ABC):
         self,
         other: "QueryPlan",
         options_dict: Optional[Dict[str, Any]] = None,
+        on_arg: Optional[List["JoinOn"]] = None,
         *,
         type: str = "left",
         on: Optional[List["JoinOn"]] = None,
@@ -440,10 +441,16 @@ class QueryPlan(ABC):
             is rejected — cross joins are NOT in the M2 scope.
         """
         if options_dict is not None:
-            if not isinstance(options_dict, dict):
-                raise TypeError("options_dict must be a dictionary")
-            type = options_dict.get("type", type)
-            on = options_dict.get("on", on)
+            if isinstance(options_dict, dict):
+                type = options_dict.get("type", type)
+                on = options_dict.get("on", on)
+            elif isinstance(options_dict, str):
+                type = options_dict
+                on = on_arg if on_arg is not None else on
+            else:
+                raise TypeError("join options must be a dictionary or join type string")
+        elif on_arg is not None:
+            raise TypeError("positional join conditions require a join type string")
             
         _require_plan(other, "join.other")
         norm_type = _normalise_join_type(type)

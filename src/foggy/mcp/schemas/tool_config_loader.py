@@ -49,6 +49,10 @@ BUILTIN_TOOLS: Dict[str, Dict[str, str]] = {
         "description_file": "query_model_v3.md",
         "schema_file": "query_model_v3_schema.json",
     },
+    "dataset.compose_script": {
+        "description_file": "compose_script_m2.md",
+        "schema_file": "compose_query_schema.json",
+    },
     # Tools below require external services — schema files not yet copied
     # "dataset_nl.query": { ... },
     # "dataset.compose_query": { ... },

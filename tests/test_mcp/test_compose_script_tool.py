@@ -105,6 +105,11 @@ def test_parameters_schema_exposes_only_script():
     assert params[0]["name"] == "script"
     assert params[0]["required"] is True
     assert params[0]["type"] == "string"
+    assert "dsl({...})" in params[0]["description"]
+    assert "return { plans: plan }" in params[0]["description"]
+    assert "Do not call `.execute()` directly" in params[0]["description"]
+    assert "host-controlled" in params[0]["description"]
+    assert "from({" not in params[0]["description"]
 
 
 def test_tool_identity():
@@ -112,8 +117,12 @@ def test_tool_identity():
         authority_resolver_factory=_resolver_factory,
         semantic_service=_StubSemanticService(),
     )
-    assert tool.tool_name == "compose.script"
-    assert tool.name == "compose.script"
+    assert tool.tool_name == "dataset.compose_script"
+    assert tool.name == "dataset.compose_script"
+    assert "SemanticDSL" in tool.description
+    assert "return { plans: plan }" in tool.description
+    assert "do not call .execute() directly" in tool.description
+    assert "raw SQL" in tool.description
 
 
 # ---------------------------------------------------------------------------
@@ -229,13 +238,33 @@ async def test_happy_path_returns_plan_object(monkeypatch):
         semantic_service=_StubSemanticService(),
     )
     result = await tool.execute(
-        {"script": 'from({model: "X", columns: ["id"]})'},
+        {"script": 'dsl({model: "X", columns: ["id"]})'},
         _tool_ctx(),
     )
     assert result.success is True
     # Plan object surface
     value = result.data["value"]
     assert value.model == "X"
+
+
+@pytest.mark.asyncio
+async def test_documented_join_signature_returns_plan_object():
+    tool = ComposeScriptTool(
+        authority_resolver_factory=_resolver_factory,
+        semantic_service=_StubSemanticService(),
+    )
+    result = await tool.execute(
+        {
+            "script": (
+                'const left = dsl({model: "X", columns: ["id"]});'
+                'const right = dsl({model: "Y", columns: ["xId"]});'
+                'return left.join(right, "left", [{left: "id", op: "=", right: "xId"}]);'
+            )
+        },
+        _tool_ctx(),
+    )
+    assert result.success is True
+    assert result.data["value"].type == "left"
 
 
 # ---------------------------------------------------------------------------

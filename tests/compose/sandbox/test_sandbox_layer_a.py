@@ -75,17 +75,27 @@ def test_a05_date_now_should_be_denied(runner):
 
 
 def test_a06_security_param_injection_should_be_denied(runner):
-    script = "from({model:'X', authorization:'Bearer hack'})"
+    script = "dsl({model:'X', authorization:'Bearer hack'})"
     assert_sandbox_violation(
         lambda: runner.run(script), LAYER_A_SECURITY_PARAM, "A", "security-param-denied"
     )
 
 
-def test_a07_security_param_in_derived_should_be_denied(runner):
+@pytest.mark.parametrize(
+    "forbidden_key",
+    [
+        "systemSlice",
+        "deniedColumns",
+        "fieldAccess",
+        "dataSourceName",
+        "routeModel",
+        "namespace",
+    ],
+)
+def test_a07_host_controlled_query_fields_should_be_denied(runner, forbidden_key):
     script = """
-    const base = from({model:'X', columns:['id']});
-    base.query({columns:['id'], systemSlice:[{field:'orgId', op:'=', value:'other-org'}]});
-    """
+    dsl({model:'X', columns:['id'], %s: []});
+    """ % forbidden_key
     assert_sandbox_violation(
         lambda: runner.run(script), LAYER_A_SECURITY_PARAM, "A", "security-param-denied"
     )
