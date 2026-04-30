@@ -13,8 +13,17 @@ Public surface (M7):
 * :data:`ALLOWED_SCRIPT_GLOBALS` — frozen evaluator-visible surface
   (test-assertion target).
 
-This subpackage does NOT introduce any new ``compose-*-error/*``
-namespace codes. All structured errors come from M1–M6.
+v1.9 P2.1 additions:
+
+* :class:`ScriptRunState` / :class:`ScriptRunContext` — run lifecycle
+  state machine.
+* :class:`PauseRequest` / :class:`SuspensionResult` / :class:`ResumeCommand`
+  / :class:`RejectCommand` — suspension data models.
+* :class:`SuspensionManager` — in-process resume / reject API skeleton.
+* :class:`ScriptSuspendError` (and subclasses) — ``script/*`` error codes.
+
+Structured errors: M1–M6 codes from ``compose-*-error/*`` unchanged;
+v1.9 adds the ``script/*`` namespace for suspend / resume errors.
 """
 
 from __future__ import annotations
@@ -30,8 +39,33 @@ from .script_runtime import (
     run_script,
     set_bundle,
 )
+from .suspend_errors import (
+    ALL_SUSPEND_CODES,
+    ScriptPauseNotAllowedError,
+    ScriptPauseNotInRunError,
+    ScriptResumePayloadInvalidError,
+    ScriptResumeTokenInvalidError,
+    ScriptSuspendError,
+    ScriptSuspendLimitExceededError,
+    ScriptSuspendRejectedError,
+    ScriptSuspendStateInvalidError,
+    ScriptSuspendTimeoutError,
+)
+from .suspension import (
+    MAX_TIMEOUT_MS,
+    PauseRequest,
+    RejectCommand,
+    ResumeCommand,
+    ScriptRunContext,
+    ScriptRunState,
+    SuspensionResult,
+    TERMINAL_STATES,
+    VALID_TRANSITIONS,
+)
+from .suspension_manager import SuspensionManager
 
 __all__ = [
+    # --- M7 existing ---
     "ALLOWED_SCRIPT_GLOBALS",
     "ComposeRuntimeBundle",
     "ScriptResult",
@@ -42,4 +76,25 @@ __all__ = [
     "run_script",
     "set_bundle",
     "to_compose_context",
+    # --- v1.9 P2.1 ---
+    "ALL_SUSPEND_CODES",
+    "MAX_TIMEOUT_MS",
+    "PauseRequest",
+    "RejectCommand",
+    "ResumeCommand",
+    "ScriptRunContext",
+    "ScriptRunState",
+    "ScriptSuspendError",
+    "ScriptPauseNotAllowedError",
+    "ScriptPauseNotInRunError",
+    "ScriptResumePayloadInvalidError",
+    "ScriptResumeTokenInvalidError",
+    "ScriptSuspendLimitExceededError",
+    "ScriptSuspendRejectedError",
+    "ScriptSuspendStateInvalidError",
+    "ScriptSuspendTimeoutError",
+    "SuspensionManager",
+    "SuspensionResult",
+    "TERMINAL_STATES",
+    "VALID_TRANSITIONS",
 ]
