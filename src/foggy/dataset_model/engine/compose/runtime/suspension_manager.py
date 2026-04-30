@@ -63,8 +63,12 @@ from .suspension import (
 )
 
 __all__ = [
+    "MAX_SUSPEND_COUNT",
     "SuspensionManager",
 ]
+
+#: Default maximum number of concurrent suspensions allowed per manager instance.
+MAX_SUSPEND_COUNT: int = 100
 
 
 # ---------------------------------------------------------------------------
@@ -122,10 +126,11 @@ class SuspensionManager:
         mgr.complete_run(run_ctx.run_id)
     """
 
-    def __init__(self) -> None:
+    def __init__(self, max_suspend_count: int = MAX_SUSPEND_COUNT) -> None:
         self._runs: Dict[str, ScriptRunContext] = {}
         self._slots: Dict[str, _WaitSlot] = {}  # keyed by suspend_id
         self._lock = threading.Lock()
+        self._max_suspend_count = max_suspend_count
 
     # -- registration -------------------------------------------------------
 
@@ -228,6 +233,12 @@ class SuspensionManager:
 
         # --- atomic section: state + result + slot under ONE lock ---
         with self._lock:
+            if len(self._slots) >= self._max_suspend_count:
+                from .suspend_errors import ScriptSuspendLimitExceededError
+                raise ScriptSuspendLimitExceededError(
+                    f"max suspend count ({self._max_suspend_count}) exceeded"
+                )
+
             run_ctx = self._runs.get(run_id)
             if run_ctx is None:
                 raise ScriptResumeTokenInvalidError(
@@ -264,11 +275,14 @@ class SuspensionManager:
         timer.start()
 
         # Block until resume / reject / timeout wakes us.
-        slot.event.wait()
-
-        # Clean up slot reference.
-        with self._lock:
-            self._slots.pop(suspend_id, None)
+        # Use try/finally to guarantee slot cleanup if the handler thread
+        # crashes or receives an async interrupt (e.g., KeyboardInterrupt).
+        try:
+            slot.event.wait()
+        finally:
+            # Clean up slot reference.
+            with self._lock:
+                self._slots.pop(suspend_id, None)
 
         # Check outcome.
         if slot.error is not None:

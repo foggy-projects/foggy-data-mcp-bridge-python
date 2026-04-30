@@ -303,6 +303,32 @@ def _evaluate_program(
     cap_ctx = build_capability_context(capability_registry, capability_policy)
     evaluator.context.update(cap_ctx)
 
+    if capability_policy is not None and capability_policy.allow_script_pause:
+        from .pause_primitive import compose_pause
+
+        def _runtime_pause(*args: Any) -> Any:
+            if len(args) != 1 or not isinstance(args[0], dict):
+                raise TypeError("runtime.pause must be called with an options object")
+            opts = args[0]
+            reason = opts.get("reason")
+            timeout_ms = opts.get("timeout_ms")
+            if not reason:
+                raise ValueError("runtime.pause requires 'reason'")
+            if not timeout_ms:
+                raise ValueError("runtime.pause requires 'timeout_ms'")
+            
+            return compose_pause(
+                reason=reason,
+                summary=opts.get("summary"),
+                timeout_ms=timeout_ms,
+                resume_schema=opts.get("resume_schema"),
+                audit_tag=opts.get("audit_tag"),
+            )
+            
+        evaluator.context["runtime"] = {
+            "pause": _runtime_pause
+        }
+
     try:
         return evaluator.evaluate(program)
     except ReturnException as ret_exc:

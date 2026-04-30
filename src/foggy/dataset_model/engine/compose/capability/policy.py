@@ -43,6 +43,7 @@ class CapabilityPolicy:
     allowed_scopes: FrozenSet[str] = field(default_factory=frozenset)
     allowed_libraries: FrozenSet[str] = field(default_factory=frozenset)
     allowed_symbols: Dict[str, FrozenSet[str]] = field(default_factory=dict)
+    allow_script_pause: bool = False
 
     def is_function_allowed(self, name: str) -> bool:
         return name in self.allowed_functions
