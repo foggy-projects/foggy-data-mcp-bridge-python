@@ -1,4 +1,4 @@
-"""v1.9 P2.1 — In-process suspension manager.
+"""v1.9 P2.1 + P2.2 — In-process suspension manager.
 
 :class:`SuspensionManager` maintains a dict of active
 :class:`ScriptRunContext` keyed by ``run_id``.  It provides the
@@ -15,15 +15,19 @@ P2.1 scope
 * ``reject`` — validate same, transition to REJECTED.
 * ``timeout`` — validate same, transition to TIMED_OUT.
 
-P2.2 additions (not implemented here)
---------------------------------------
-* Actual thread / coroutine blocking on pause.
-* Timer-based automatic timeout scheduling.
-* Resource-limit enforcement (P2.3).
+P2.2 additions
+--------------
+* ``pause_and_wait`` — handler-callable blocking pause.  Creates the
+  suspension, starts a ``threading.Timer`` for auto-timeout, and
+  blocks the calling thread on a ``threading.Event`` until resume,
+  reject, or timeout.
+* ``resume`` / ``reject`` / ``timeout`` now wake the blocked thread
+  by setting the ``Event``.
+* Timer is cancelled on resume or reject.
 
 Design decisions
 ~~~~~~~~~~~~~~~~
-* All mutations are ``threading.Lock``-protected for P2.2-readiness.
+* All mutations are ``threading.Lock``-protected.
 * ``resume()`` returns the payload dict.  ``reject()`` raises
   :class:`ScriptSuspendRejectedError`.  ``timeout()`` raises
   :class:`ScriptSuspendTimeoutError`.  This matches the spec
@@ -31,11 +35,14 @@ Design decisions
   do not return status values.
 * Completed / aborted runs are removed from the active map to bound
   memory usage.
+* ``_WaitSlot`` bundles the ``Event``, result/error, and ``Timer``
+  for each suspended run.
 """
 
 from __future__ import annotations
 
 import threading
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
@@ -58,6 +65,35 @@ from .suspension import (
 __all__ = [
     "SuspensionManager",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Internal wait slot — one per active suspension
+# ---------------------------------------------------------------------------
+
+@dataclass
+class _WaitSlot:
+    """Bundles the synchronization primitives for one suspension.
+
+    Created by ``pause_and_wait``, consumed by ``resume`` / ``reject``
+    / ``timeout``.
+
+    Attributes
+    ----------
+    event:
+        The ``Event`` the handler thread blocks on.
+    payload:
+        Set by ``resume()`` before signalling the event.
+    error:
+        Set by ``reject()`` or ``timeout()`` before signalling.
+    timer:
+        The auto-timeout ``Timer``; cancelled on resume or reject.
+    """
+
+    event: threading.Event = field(default_factory=threading.Event)
+    payload: Optional[Dict[str, Any]] = None
+    error: Optional[BaseException] = None
+    timer: Optional[threading.Timer] = None
 
 
 class SuspensionManager:
@@ -88,6 +124,7 @@ class SuspensionManager:
 
     def __init__(self) -> None:
         self._runs: Dict[str, ScriptRunContext] = {}
+        self._slots: Dict[str, _WaitSlot] = {}  # keyed by suspend_id
         self._lock = threading.Lock()
 
     # -- registration -------------------------------------------------------
@@ -154,6 +191,87 @@ class SuspensionManager:
             run_ctx.suspension = result
             return result
 
+    # -- P2.2: blocking pause -----------------------------------------------
+
+    def pause_and_wait(
+        self,
+        run_id: str,
+        request: PauseRequest,
+    ) -> Dict[str, Any]:
+        """Suspend a RUNNING run and block until resume, reject, or timeout.
+
+        This is the handler-thread entry point.  It:
+
+        1. Calls ``request_suspension`` to transition to SUSPENDED.
+        2. Creates a ``_WaitSlot`` with a ``threading.Event``.
+        3. Starts a ``threading.Timer`` for auto-timeout.
+        4. Blocks on ``Event.wait()``.
+        5. On wake-up, returns the payload or raises the error.
+
+        Returns
+        -------
+        Dict[str, Any]
+            The resume payload.
+
+        Raises
+        ------
+        ScriptSuspendRejectedError
+            On explicit reject.
+        ScriptSuspendTimeoutError
+            On timeout.
+        ScriptResumeTokenInvalidError / ScriptSuspendStateInvalidError
+            On invalid state.
+        """
+        result = self.request_suspension(run_id, request)
+        suspend_id = result.suspend_id
+        timeout_seconds = request.timeout_ms / 1000.0
+
+        slot = _WaitSlot()
+
+        # Schedule auto-timeout timer.
+        timer = threading.Timer(
+            timeout_seconds,
+            self._auto_timeout,
+            args=(run_id, suspend_id),
+        )
+        timer.daemon = True
+        slot.timer = timer
+
+        with self._lock:
+            self._slots[suspend_id] = slot
+
+        timer.start()
+
+        # Block until resume / reject / timeout wakes us.
+        slot.event.wait()
+
+        # Clean up slot reference.
+        with self._lock:
+            self._slots.pop(suspend_id, None)
+
+        # Check outcome.
+        if slot.error is not None:
+            raise slot.error
+
+        return slot.payload if slot.payload is not None else {}
+
+    def _auto_timeout(self, run_id: str, suspend_id: str) -> None:
+        """Timer callback — mark the run as timed out and wake the
+        blocked thread.
+
+        Swallows ``ScriptSuspendStateInvalidError`` if the run was
+        already resumed/rejected before the timer fired.
+        """
+        try:
+            self._resolve(
+                run_id, suspend_id,
+                new_state=ScriptRunState.TIMED_OUT,
+                error=ScriptSuspendTimeoutError("suspend timed out"),
+            )
+        except (ScriptSuspendStateInvalidError, ScriptResumeTokenInvalidError):
+            # Already resolved — timer arrived late.  Ignore.
+            pass
+
     # -- resume / reject / timeout ------------------------------------------
 
     def resume(self, command: ResumeCommand) -> Dict[str, Any]:
@@ -173,9 +291,18 @@ class SuspensionManager:
             run_ctx = self._require_suspended(
                 command.script_run_id, command.suspend_id,
             )
-            # clear suspension result when resuming to prevent leaking stale data
+            # clear suspension result when resuming
             run_ctx.suspension = None
             run_ctx.transition(ScriptRunState.RUNNING)
+
+            # Wake blocked thread with payload.
+            slot = self._slots.get(command.suspend_id)
+            if slot is not None:
+                if slot.timer is not None:
+                    slot.timer.cancel()
+                slot.payload = dict(command.payload)
+                slot.event.set()
+
             return dict(command.payload)
 
     def reject(self, command: RejectCommand) -> None:
@@ -191,14 +318,17 @@ class SuspensionManager:
         ScriptSuspendStateInvalidError
             If state is not SUSPENDED.
         """
-        with self._lock:
-            run_ctx = self._require_suspended(
-                command.script_run_id, command.suspend_id,
-            )
-            run_ctx.transition(ScriptRunState.REJECTED)
-        # Raise OUTSIDE the lock — callers catch this.
         reason = command.reason or "suspend rejected"
-        raise ScriptSuspendRejectedError(reason)
+        error = ScriptSuspendRejectedError(reason)
+
+        self._resolve(
+            command.script_run_id, command.suspend_id,
+            new_state=ScriptRunState.REJECTED,
+            error=error,
+        )
+
+        # Raise for direct callers (non-blocking path / P2.1 compat).
+        raise error
 
     def timeout(self, run_id: str, suspend_id: str) -> None:
         """Mark a suspended run as timed out.
@@ -212,10 +342,15 @@ class SuspensionManager:
         ScriptSuspendStateInvalidError
             If state is not SUSPENDED.
         """
-        with self._lock:
-            run_ctx = self._require_suspended(run_id, suspend_id)
-            run_ctx.transition(ScriptRunState.TIMED_OUT)
-        raise ScriptSuspendTimeoutError("suspend timed out")
+        error = ScriptSuspendTimeoutError("suspend timed out")
+
+        self._resolve(
+            run_id, suspend_id,
+            new_state=ScriptRunState.TIMED_OUT,
+            error=error,
+        )
+
+        raise error
 
     # -- lifecycle ----------------------------------------------------------
 
@@ -248,6 +383,16 @@ class SuspensionManager:
         """
         with self._lock:
             run_ctx = self._require_run(run_id)
+            # If there's an active suspension slot, wake it with abort.
+            if run_ctx.suspension is not None:
+                slot = self._slots.pop(run_ctx.suspension.suspend_id, None)
+                if slot is not None:
+                    if slot.timer is not None:
+                        slot.timer.cancel()
+                    slot.error = ScriptSuspendTimeoutError(
+                        "run aborted while suspended"
+                    )
+                    slot.event.set()
             run_ctx.transition(ScriptRunState.ABORTED)
             del self._runs[run_id]
 
@@ -298,3 +443,29 @@ class SuspensionManager:
                 f"expected SUSPENDED"
             )
         return run_ctx
+
+    def _resolve(
+        self,
+        run_id: str,
+        suspend_id: str,
+        *,
+        new_state: ScriptRunState,
+        error: Optional[BaseException] = None,
+        payload: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Transition state and wake the blocked thread.
+
+        Used internally by ``resume``, ``reject``, ``timeout``, and
+        the auto-timeout timer.
+        """
+        with self._lock:
+            run_ctx = self._require_suspended(run_id, suspend_id)
+            run_ctx.transition(new_state)
+
+            slot = self._slots.get(suspend_id)
+            if slot is not None:
+                if slot.timer is not None:
+                    slot.timer.cancel()
+                slot.error = error
+                slot.payload = payload
+                slot.event.set()

@@ -21,6 +21,10 @@ Design invariants
 - ``pure_runtime`` functions with ``compose_runtime`` in ``allowed_in`` are
   injected as callable wrappers.
 - Object facades are injected as :class:`ObjectFacadeProxy` instances.
+
+v1.9 P2.2: ``ScriptSuspendError`` is allowed to propagate through
+the runtime wrapper unsanitized — it is an Engine-level controlled
+exception from the pause primitive.
 """
 
 from __future__ import annotations
@@ -36,6 +40,11 @@ from .errors import (
 from .facade_proxy import ObjectFacadeProxy, _is_safe_return_value
 from .policy import CapabilityPolicy
 from .registry import CapabilityRegistry
+
+# v1.9 P2.2: ScriptSuspendError is imported lazily inside
+# _make_runtime_wrapper to avoid circular import:
+#   runtime_integration -> runtime.suspend_errors -> runtime/__init__ ->
+#   script_runtime -> runtime_integration
 
 
 def build_capability_context(
@@ -98,7 +107,15 @@ def _make_runtime_wrapper(fn_name: str, handler: Callable) -> Callable:
     """Create a wrapper that validates return types from pure_runtime handlers."""
 
     def wrapper(*args, **kwargs):
-        result = handler(*args, **kwargs)
+        try:
+            result = handler(*args, **kwargs)
+        except Exception as e:
+            # v1.9 P2.2: let controlled suspend errors propagate
+            # unsanitized.  Lazy import to avoid circular.
+            from ..runtime.suspend_errors import ScriptSuspendError
+            if isinstance(e, ScriptSuspendError):
+                raise
+            raise
         if not _is_safe_return_value(result):
             raise CapabilityReturnTypeDeniedError(
                 f"Function '{fn_name}' returned a value of disallowed type."

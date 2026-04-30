@@ -6,6 +6,12 @@ and undeclared attribute access is denied.
 
 Return values are validated against safe types.  Method calls are
 timeout-guarded and error-sanitized.
+
+v1.9 P2.2: ``ScriptSuspendError`` is allowed to propagate through
+the method dispatcher unsanitized — it is a controlled exception from
+the pause primitive, not an internal host leak.  The ``_script_run_context``
+ContextVar is propagated into the child thread so ``compose_pause``
+can read the run context.
 """
 
 from __future__ import annotations
@@ -21,6 +27,11 @@ from .errors import (
     CapabilityTimeoutError,
 )
 from .policy import CapabilityPolicy
+
+# v1.9 P2.2: ScriptSuspendError and _script_run_context are imported
+# lazily inside method bodies to avoid a circular import:
+#   facade_proxy -> runtime.suspend_errors -> runtime/__init__ ->
+#   script_runtime -> runtime_integration -> facade_proxy
 
 
 # Types considered safe for return values (v1.7).
@@ -168,8 +179,16 @@ class _MethodDispatcher:
         result = _SENTINEL
         error: Optional[BaseException] = None
 
+        # v1.9 P2.2: capture current run context so child thread can
+        # call compose_pause().  Lazy import to avoid circular.
+        from ..runtime.pause_primitive import _script_run_context
+        run_ctx_snapshot = _script_run_context.get()
+
         def _run():
             nonlocal result, error
+            # Propagate the run context into this child thread.
+            from ..runtime.pause_primitive import _script_run_context as _src
+            _src.set(run_ctx_snapshot)
             try:
                 result = actual_method(*args, **kwargs)
             except Exception as exc:
@@ -186,7 +205,13 @@ class _MethodDispatcher:
             )
 
         if error is not None:
-            # Sanitize the error — do not expose internal details.
+            # v1.9 P2.2: let controlled suspend errors propagate
+            # unsanitized — they are Engine-level exceptions, not
+            # internal host leaks.  Lazy import to avoid circular.
+            from ..runtime.suspend_errors import ScriptSuspendError
+            if isinstance(error, ScriptSuspendError):
+                raise error
+            # Sanitize other errors — do not expose internal details.
             raise CapabilityMethodNotDeclaredError(
                 f"Method '{method_name}' on object '{self._obj_name}' "
                 f"raised an error during execution."

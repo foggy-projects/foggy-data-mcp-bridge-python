@@ -22,6 +22,12 @@ v1.9 P2.1 additions:
 * :class:`SuspensionManager` — in-process resume / reject API skeleton.
 * :class:`ScriptSuspendError` (and subclasses) — ``script/*`` error codes.
 
+v1.9 P2.2 additions:
+
+* :func:`compose_pause` — handler-callable blocking pause primitive.
+* :func:`current_run_context` / :func:`set_run_context` — ContextVar
+  accessors for the current :class:`ScriptRunContext`.
+
 Structured errors: M1–M6 codes from ``compose-*-error/*`` unchanged;
 v1.9 adds the ``script/*`` namespace for suspend / resume errors.
 """
@@ -63,6 +69,11 @@ from .suspension import (
     VALID_TRANSITIONS,
 )
 from .suspension_manager import SuspensionManager
+from .pause_primitive import (
+    compose_pause,
+    current_run_context,
+    set_run_context,
+)
 
 __all__ = [
     # --- M7 existing ---
@@ -97,4 +108,8 @@ __all__ = [
     "SuspensionResult",
     "TERMINAL_STATES",
     "VALID_TRANSITIONS",
+    # --- v1.9 P2.2 ---
+    "compose_pause",
+    "current_run_context",
+    "set_run_context",
 ]

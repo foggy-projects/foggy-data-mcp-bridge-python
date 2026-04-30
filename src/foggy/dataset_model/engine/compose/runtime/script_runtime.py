@@ -53,6 +53,11 @@ from ..sandbox import (
 
 from .plans_interceptor import intercept_plans
 
+# v1.9 P2.2: run context propagation and suspension manager.
+from .pause_primitive import set_run_context
+from .suspension import ScriptRunContext
+from .suspension_manager import SuspensionManager
+
 __all__ = [
     "ALLOWED_SCRIPT_GLOBALS",
     "ComposeRuntimeBundle",
@@ -99,6 +104,11 @@ class ComposeRuntimeBundle:
 _compose_runtime: ContextVar[Optional[ComposeRuntimeBundle]] = ContextVar(
     "_compose_runtime", default=None
 )
+
+#: v1.9 P2.2: module-level default SuspensionManager shared by all
+#: ``run_script`` invocations.  Callers that need a custom manager
+#: (e.g. tests) can pass ``suspension_manager`` to ``run_script``.
+_default_suspension_manager = SuspensionManager()
 
 
 def current_bundle() -> Optional[ComposeRuntimeBundle]:
@@ -310,6 +320,7 @@ def _run_script_no_intercept(
     capability_policy: Optional[CapabilityPolicy] = None,
     library_registry: Optional[CapabilityRegistry] = None,
     library_policy: Optional[CapabilityPolicy] = None,
+    suspension_manager: Optional[SuspensionManager] = None,
 ) -> Any:
     """Public-but-underscored entry: run ``script`` under a fresh
     :class:`ComposeRuntimeBundle` and return the raw evaluator value
@@ -332,6 +343,14 @@ def _run_script_no_intercept(
         ctx=ctx, semantic_service=semantic_service, dialect=dialect,
     )
     token = set_bundle(bundle)
+
+    # v1.9 P2.2: push run context onto ContextVar.
+    mgr = suspension_manager or _default_suspension_manager
+    run_ctx = ScriptRunContext()
+    run_ctx._manager = mgr  # type: ignore[attr-defined]
+    mgr.register_run(run_ctx)
+    run_token = set_run_context(run_ctx)
+
     try:
         return _evaluate_program(
             script, ctx,
@@ -341,7 +360,15 @@ def _run_script_no_intercept(
             library_policy=library_policy,
         )
     finally:
+        set_run_context(None)  # reset uses the token approach but we
+        # just set None since we're done with this run.
         _compose_runtime.reset(token)
+        # Complete the run if still running (not suspended/aborted).
+        if not run_ctx.is_terminal and run_ctx.state.value == "RUNNING":
+            try:
+                mgr.complete_run(run_ctx.run_id)
+            except Exception:
+                pass
 
 
 def run_script(
@@ -355,6 +382,7 @@ def run_script(
     capability_policy: Optional[CapabilityPolicy] = None,
     library_registry: Optional[CapabilityRegistry] = None,
     library_policy: Optional[CapabilityPolicy] = None,
+    suspension_manager: Optional[SuspensionManager] = None,
 ) -> ScriptResult:
     """Execute ``script`` and return a :class:`ScriptResult` with plans
     inside any ``{ plans, ... }`` envelope auto-evaluated.
@@ -391,6 +419,9 @@ def run_script(
         Optional policy controlling visible libraries / symbols.
         Must be provided together with ``library_registry`` to enable
         controlled imports.
+    suspension_manager:
+        Optional :class:`SuspensionManager`.  Default ``None`` uses the
+        module-level default manager.
 
     Notes
     -----
@@ -410,6 +441,9 @@ def run_script(
     AuthorityResolutionError / ComposeSchemaError / ComposeCompileError /
     ComposeSandboxViolationError / CapabilityError / RuntimeError:
         Propagated verbatim from upstream.
+    ScriptSuspendRejectedError / ScriptSuspendTimeoutError:
+        If a handler calls ``compose_pause`` and the pause is rejected
+        or times out.
     """
     if ctx is None:
         raise ValueError("run_script: ctx is required")
@@ -424,6 +458,14 @@ def run_script(
         ctx=ctx, semantic_service=semantic_service, dialect=dialect,
     )
     token = set_bundle(bundle)
+
+    # v1.9 P2.2: push run context onto ContextVar.
+    mgr = suspension_manager or _default_suspension_manager
+    run_ctx = ScriptRunContext()
+    run_ctx._manager = mgr  # type: ignore[attr-defined]
+    mgr.register_run(run_ctx)
+    run_token = set_run_context(run_ctx)
+
     try:
         raw_value = _evaluate_program(
             script, ctx,
@@ -434,7 +476,14 @@ def run_script(
         )
         value = intercept_plans(raw_value, preview_mode=preview_mode)
     finally:
+        set_run_context(None)
         _compose_runtime.reset(token)
+        # Complete the run if still running.
+        if not run_ctx.is_terminal and run_ctx.state.value == "RUNNING":
+            try:
+                mgr.complete_run(run_ctx.run_id)
+            except Exception:
+                pass
 
     # Lift sql/params for the legacy single-ComposedSql return path.
     # Envelope mode keeps these None — callers walk ``value["plans"]``.
