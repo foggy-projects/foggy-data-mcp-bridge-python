@@ -54,7 +54,7 @@ from ..sandbox import (
 from .plans_interceptor import intercept_plans
 
 # v1.9 P2.2: run context propagation and suspension manager.
-from .pause_primitive import set_run_context
+from .pause_primitive import set_run_context, _script_run_context
 from .suspension import ScriptRunContext
 from .suspension_manager import SuspensionManager
 
@@ -360,8 +360,7 @@ def _run_script_no_intercept(
             library_policy=library_policy,
         )
     finally:
-        set_run_context(None)  # reset uses the token approach but we
-        # just set None since we're done with this run.
+        _script_run_context.reset(run_token)
         _compose_runtime.reset(token)
         # Complete the run if still running (not suspended/aborted).
         if not run_ctx.is_terminal and run_ctx.state.value == "RUNNING":
@@ -476,7 +475,7 @@ def run_script(
         )
         value = intercept_plans(raw_value, preview_mode=preview_mode)
     finally:
-        set_run_context(None)
+        _script_run_context.reset(run_token)
         _compose_runtime.reset(token)
         # Complete the run if still running.
         if not run_ctx.is_terminal and run_ctx.state.value == "RUNNING":

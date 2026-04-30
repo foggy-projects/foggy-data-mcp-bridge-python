@@ -202,11 +202,12 @@ class SuspensionManager:
 
         This is the handler-thread entry point.  It:
 
-        1. Calls ``request_suspension`` to transition to SUSPENDED.
-        2. Creates a ``_WaitSlot`` with a ``threading.Event``.
-        3. Starts a ``threading.Timer`` for auto-timeout.
-        4. Blocks on ``Event.wait()``.
-        5. On wake-up, returns the payload or raises the error.
+        1. Under a **single lock acquisition** transitions to SUSPENDED,
+           creates the :class:`SuspensionResult`, and registers the
+           ``_WaitSlot`` so a concurrent ``resume`` cannot miss it.
+        2. Starts a ``threading.Timer`` for auto-timeout.
+        3. Blocks on ``Event.wait()``.
+        4. On wake-up, returns the payload or raises the error.
 
         Returns
         -------
@@ -222,24 +223,44 @@ class SuspensionManager:
         ScriptResumeTokenInvalidError / ScriptSuspendStateInvalidError
             On invalid state.
         """
-        result = self.request_suspension(run_id, request)
-        suspend_id = result.suspend_id
         timeout_seconds = request.timeout_ms / 1000.0
-
         slot = _WaitSlot()
 
-        # Schedule auto-timeout timer.
-        timer = threading.Timer(
-            timeout_seconds,
-            self._auto_timeout,
-            args=(run_id, suspend_id),
-        )
-        timer.daemon = True
-        slot.timer = timer
-
+        # --- atomic section: state + result + slot under ONE lock ---
         with self._lock:
-            self._slots[suspend_id] = slot
+            run_ctx = self._runs.get(run_id)
+            if run_ctx is None:
+                raise ScriptResumeTokenInvalidError(
+                    f"run {run_id} is not registered"
+                )
+            # transition validates RUNNING → SUSPENDED
+            run_ctx.transition(ScriptRunState.SUSPENDED)
 
+            suspend_id = generate_suspend_id()
+            timeout_at = datetime.now(timezone.utc) + timedelta(
+                milliseconds=request.timeout_ms
+            )
+            result = SuspensionResult(
+                script_run_id=run_id,
+                suspend_id=suspend_id,
+                reason=request.reason,
+                summary=request.summary,
+                timeout_at=timeout_at,
+            )
+            run_ctx.suspension = result
+
+            # Install slot BEFORE releasing lock so resume() can find it.
+            timer = threading.Timer(
+                timeout_seconds,
+                self._auto_timeout,
+                args=(run_id, suspend_id),
+            )
+            timer.daemon = True
+            slot.timer = timer
+            self._slots[suspend_id] = slot
+        # --- end atomic section ---
+
+        # Start timer outside lock (timer callback will acquire lock).
         timer.start()
 
         # Block until resume / reject / timeout wakes us.
