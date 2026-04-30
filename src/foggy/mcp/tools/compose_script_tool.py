@@ -137,6 +137,7 @@ class ComposeScriptTool(BaseMcpTool):
         arguments: Dict[str, Any],
         context: Optional[ToolExecutionContext] = None,
     ) -> ToolResult:
+        binding_envelope = arguments.pop("__foggyAuthorityBinding", None) if arguments else None
         script = arguments.get("script") if arguments else None
         if not isinstance(script, str) or not script:
             return self._error_payload(
@@ -153,7 +154,26 @@ class ComposeScriptTool(BaseMcpTool):
 
         # 1. Build AuthorityResolver via factory
         try:
-            resolver = self._resolver_factory(context)
+            if context and context.get_header("X-Foggy-Remote-Compose") == "1":
+                if binding_envelope is None:
+                    return self._error_payload(
+                        error_code="compose-authority-resolve/resolver-not-available",
+                        phase="authority-resolve",
+                        message="Missing __foggyAuthorityBinding in Odoo remote compose mode"
+                    )
+                from foggy.dataset_model.engine.compose.authority.binding_resolver import AuthorityBindingResolver
+                resolver = AuthorityBindingResolver(binding_envelope, expected_namespace="odoo")
+            else:
+                resolver = self._resolver_factory(context)
+        except AuthorityResolutionError as exc:
+            # Constructor-time envelope validation failure (P1: fail-closed
+            # at construction) — route same as resolve()-time errors.
+            return self._error_payload(
+                error_code=exc.code,
+                phase="permission-resolve",
+                message=str(exc),
+                model=getattr(exc, "model_involved", None),
+            )
         except Exception as exc:
             return self._error_payload(
                 error_code="host-misconfig",

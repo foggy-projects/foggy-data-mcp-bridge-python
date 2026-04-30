@@ -163,6 +163,12 @@ class SuspensionManager:
     ) -> SuspensionResult:
         """Suspend a RUNNING script run.
 
+        .. warning::
+           This is an internal / compatibility API for non-blocking 
+           paths. It does NOT enforce `MAX_SUSPEND_COUNT` and does not 
+           create a wait slot. The recommended v1.9 entry point for 
+           handler-internal pause is :func:`pause_and_wait`.
+
         Returns a :class:`SuspensionResult` that upstream can use to
         build a user-facing prompt.
 

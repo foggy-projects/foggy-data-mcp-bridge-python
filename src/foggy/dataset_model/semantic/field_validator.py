@@ -71,7 +71,7 @@ _EXPR_KEYWORDS: frozenset[str] = frozenset({
     "rank", "row_number", "dense_rank", "ntile", "lag", "lead",
     "first_value", "last_value",
     # Common scalar functions
-    "coalesce", "ifnull", "nvl", "nullif", "cast", "convert",
+    "coalesce", "ifnull", "nvl", "nullif", "calculate", "remove", "cast", "convert",
     "concat", "substring", "left", "right",
     "floor", "ceil", "ceiling", "mod", "power", "sqrt",
 })

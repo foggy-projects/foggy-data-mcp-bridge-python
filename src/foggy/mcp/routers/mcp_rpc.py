@@ -18,8 +18,10 @@ import asyncio
 import uuid
 
 from foggy.mcp_spi import LocalDatasetAccessor, SemanticMetadataRequest
+from foggy.mcp_spi.context import ToolExecutionContext
 from foggy.mcp_spi.semantic import DeniedColumn
 from foggy.dataset_model.semantic import SemanticQueryService
+from foggy.mcp.tools.compose_script_tool import ComposeScriptTool
 
 
 logger = logging.getLogger(__name__)
@@ -123,6 +125,23 @@ def _build_text_content(text: str) -> list[dict[str, str]]:
     }]
 
 
+def _header_value(headers: Dict[str, str], name: str) -> Optional[str]:
+    value = headers.get(name)
+    if value is not None:
+        return value
+    lowered = name.lower()
+    for key, candidate in headers.items():
+        if key.lower() == lowered:
+            return candidate
+    return None
+
+
+def _missing_compose_authority_resolver(_context):
+    raise RuntimeError(
+        "dataset.compose_script requires host-provided authority binding or embedded authority resolver"
+    )
+
+
 def _normalize_denied_columns(raw_denied_columns: Any) -> Optional[list[dict[str, Any]]]:
     """Normalize deniedColumns from Odoo grouped form to flat engine form.
 
@@ -217,7 +236,10 @@ def create_mcp_router(
     # Available tools — loaded from shared schema files (aligned with Java)
     TOOLS = SHARED_TOOLS
 
-    async def handle_request(request: McpJsonRpcRequest) -> McpJsonRpcResponse:
+    async def handle_request(
+        request: McpJsonRpcRequest,
+        http_headers: Optional[Dict[str, str]] = None,
+    ) -> McpJsonRpcResponse:
         """Handle MCP JSON-RPC request."""
         try:
             method = request.method
@@ -449,6 +471,46 @@ def create_mcp_router(
                         }
                     )
 
+                elif tool_name == "dataset.compose_script":
+                    headers = dict(http_headers or {})
+                    tool_context = ToolExecutionContext.create(
+                        request_id=str(request.id or uuid.uuid4()),
+                        user_id=_header_value(headers, "X-User-Id"),
+                        namespace=(
+                            _header_value(headers, "X-Namespace")
+                            or _header_value(headers, "X-NS")
+                        ),
+                        headers=headers,
+                    )
+                    compose_tool = ComposeScriptTool(
+                        _missing_compose_authority_resolver,
+                        _get_service(),
+                        default_dialect="postgresql",
+                    )
+                    tool_result = await compose_tool.execute(dict(tool_args or {}), context=tool_context)
+                    if tool_result.success:
+                        payload = {"status": "success"}
+                        if isinstance(tool_result.data, dict):
+                            payload.update(tool_result.data)
+                        else:
+                            payload["value"] = tool_result.data
+                    else:
+                        payload = {
+                            "status": "error",
+                            "data": tool_result.data or {
+                                "error_code": tool_result.error_code,
+                                "message": tool_result.error,
+                            },
+                        }
+                    return McpJsonRpcResponse(
+                        id=request.id,
+                        result={
+                            "content": _build_text_content(
+                                json.dumps(_json_serializable(payload), ensure_ascii=False)
+                            )
+                        },
+                    )
+
                 elif tool_name in ("validate_query", "dataset.validate_query"):
                     model_name = tool_args.get("model")
                     if not model_name:
@@ -646,7 +708,7 @@ async def _handle_mcp_post(request: Request, handle_request):
                 continue
             has_notifications_only = False
             mcp_req = McpJsonRpcRequest(**req)
-            resp = await handle_request(mcp_req)
+            resp = await handle_request(mcp_req, dict(request.headers))
             responses.append(resp.to_json_rpc())
 
         if has_notifications_only:
@@ -665,7 +727,7 @@ async def _handle_mcp_post(request: Request, handle_request):
             return Response(status_code=202, headers=mcp_headers)
 
         mcp_req = McpJsonRpcRequest(**body)
-        response = await handle_request(mcp_req)
+        response = await handle_request(mcp_req, dict(request.headers))
 
         if want_sse:
             return _create_sse_response([response.to_json_rpc()], session_id)

@@ -111,6 +111,10 @@ ALLOWED_FUNCTIONS: frozenset[str] = frozenset({
     "date_diff",
     "date_add",
     "now",
+    # v1.5.1 P1 restricted CALCULATE MVP
+    "calculate",
+    "remove",
+    "nullif",
 })
 
 # 聚合函数白名单（只允许在 §4 聚合包裹模式的最外层使用）
@@ -182,6 +186,16 @@ class CompiledFormula:
     bind_params: tuple
     referenced_fields: frozenset[str] = field(default_factory=frozenset)
     used_functions: frozenset[str] = field(default_factory=frozenset)
+
+
+@dataclass(frozen=True)
+class CalculateQueryContext:
+    """Query-level context required by restricted CALCULATE lowering."""
+
+    group_by_fields: tuple[str, ...] = ()
+    system_slice_fields: frozenset[str] = field(default_factory=frozenset)
+    supports_grouped_aggregate_window: bool = True
+    time_window_post_calculated_fields: bool = False
 
 
 @dataclass
@@ -279,6 +293,7 @@ class FormulaCompiler:
             self._config, expression,
             capability_registry=self._registry,
             capability_policy=self._policy,
+            calculate_context=CalculateQueryContext(),
         )
         validator.validate(tree)
 
@@ -286,6 +301,8 @@ class FormulaCompiler:
         self,
         expression: str,
         field_resolver: FieldResolver,
+        *,
+        calculate_context: Optional[CalculateQueryContext] = None,
     ) -> CompiledFormula:
         """编译 formula 表达式为 SQL 片段 + bind_params。
 
@@ -339,6 +356,7 @@ class FormulaCompiler:
             self._config, expression,
             capability_registry=self._registry,
             capability_policy=self._policy,
+            calculate_context=calculate_context,
         )
         validator.validate(tree)
 
@@ -346,6 +364,7 @@ class FormulaCompiler:
         generator = _SqlGenerator(
             self._dialect, field_resolver,
             capability_registry=self._registry,
+            calculate_context=calculate_context,
         )
         return generator.generate(tree)
 
@@ -365,6 +384,8 @@ class _ValidationContext:
 
     top_level: bool = False
     inside_count: bool = False
+    inside_calculate_sum: bool = False
+    inside_calculate_ratio: bool = False
 
 
 class _Validator:
@@ -376,11 +397,14 @@ class _Validator:
         expression: str,
         capability_registry: Optional[CapabilityRegistry] = None,
         capability_policy: Optional[CapabilityPolicy] = None,
+        calculate_context: Optional[CalculateQueryContext] = None,
     ) -> None:
         self._config = config
         self._expression = expression
         self._registry = capability_registry
         self._policy = capability_policy
+        self._calculate_context = calculate_context
+        self._has_calculate = False
 
     def validate(self, tree: Expression) -> None:
         """顶层校验入口。校验通过时返回 None，违规时抛异常。"""
@@ -402,6 +426,7 @@ class _Validator:
             )
 
         # 3. 递归校验节点
+        self._has_calculate = _contains_function(tree, "calculate")
         self._validate_node(tree, _ValidationContext(top_level=True))
 
     def _validate_node(self, node: Expression, ctx: _ValidationContext) -> None:
@@ -496,8 +521,22 @@ class _Validator:
             self._validate_in_expression(node)
             return
 
+        if (
+            op == BinaryOperator.DIVIDE
+            and _contains_function(node.right, "calculate")
+            and not _is_nullif_calculate_zero(node.right)
+        ):
+            raise FormulaSyntaxError(
+                "CALCULATE_RATIO_REQUIRES_NULLIF",
+                expression=self._expression,
+            )
+
         # 普通二元：递归校验左右
-        child_ctx = _ValidationContext(top_level=False, inside_count=False)
+        child_ctx = _ValidationContext(
+            top_level=False,
+            inside_count=False,
+            inside_calculate_ratio=ctx.inside_calculate_ratio or self._has_calculate,
+        )
         self._validate_node(node.left, child_ctx)
         self._validate_node(node.right, child_ctx)
 
@@ -577,6 +616,16 @@ class _Validator:
     ) -> None:
         fn_name = self._extract_function_name(node)
 
+        if fn_name == "calculate":
+            self._validate_calculate_call(node)
+            return
+
+        if fn_name == "remove":
+            raise FormulaSyntaxError(
+                "CALCULATE_EXPR_UNSUPPORTED: REMOVE outside CALCULATE",
+                expression=self._expression,
+            )
+
         if fn_name in ALLOWED_AGG_FUNCTIONS:
             self._validate_aggregate_call(fn_name, node, ctx)
             return
@@ -625,10 +674,89 @@ class _Validator:
         # 普通函数：参数个数 / 类型校验
         self._validate_normal_function_args(fn_name, node)
 
+        if fn_name == "nullif" and _is_nullif_calculate_zero(node):
+            self._validate_node(
+                node.arguments[0],
+                _ValidationContext(top_level=False, inside_count=False),
+            )
+            self._validate_literal(node.arguments[1])  # type: ignore[arg-type]
+            return
+
         # 递归校验参数
         child_ctx = _ValidationContext(top_level=False, inside_count=False)
         for arg in node.arguments:
+            if _contains_function(arg, "calculate"):
+                raise FormulaSyntaxError(
+                    "CALCULATE_EXPR_UNSUPPORTED",
+                    expression=self._expression,
+                )
             self._validate_node(arg, child_ctx)
+
+    def _validate_calculate_call(self, node: FunctionCallExpression) -> None:
+        if _contains_function_in_children(node, "calculate"):
+            raise FormulaSyntaxError(
+                "CALCULATE_NESTED_UNSUPPORTED",
+                expression=self._expression,
+            )
+
+        if self._calculate_context is None:
+            raise FormulaSyntaxError(
+                "CALCULATE_CONTEXT_UNAVAILABLE",
+                expression=self._expression,
+            )
+        if self._calculate_context.time_window_post_calculated_fields:
+            raise FormulaSyntaxError(
+                "CALCULATE_TIMEWINDOW_POST_CALC_UNSUPPORTED",
+                expression=self._expression,
+            )
+        if not self._calculate_context.supports_grouped_aggregate_window:
+            raise FormulaSyntaxError(
+                "CALCULATE_WINDOW_UNSUPPORTED",
+                expression=self._expression,
+            )
+
+        args = node.arguments
+        if len(args) != 2:
+            raise FormulaSyntaxError(
+                "CALCULATE_EXPR_UNSUPPORTED",
+                expression=self._expression,
+            )
+
+        aggregate = args[0]
+        remove = args[1]
+        if (
+            not isinstance(aggregate, FunctionCallExpression)
+            or self._extract_function_name(aggregate) != "sum"
+            or len(aggregate.arguments) != 1
+        ):
+            raise FormulaSyntaxError(
+                "CALCULATE_EXPR_UNSUPPORTED",
+                expression=self._expression,
+            )
+        if (
+            not isinstance(remove, FunctionCallExpression)
+            or self._extract_function_name(remove) != "remove"
+        ):
+            raise FormulaSyntaxError(
+                "CALCULATE_EXPR_UNSUPPORTED",
+                expression=self._expression,
+            )
+        if not remove.arguments:
+            raise FormulaSyntaxError(
+                "CALCULATE_EXPR_UNSUPPORTED",
+                expression=self._expression,
+            )
+        for arg in remove.arguments:
+            if not isinstance(arg, VariableExpression):
+                raise FormulaSyntaxError(
+                    "CALCULATE_REMOVE_FIELD_NOT_GROUPED",
+                    expression=self._expression,
+                )
+
+        self._validate_node(
+            aggregate.arguments[0],
+            _ValidationContext(top_level=False, inside_count=False),
+        )
 
     def _validate_aggregate_call(
         self,
@@ -637,9 +765,20 @@ class _Validator:
         ctx: _ValidationContext,
     ) -> None:
         """聚合函数位置约束（Spec §4.1）：只能在 top_level。"""
-        if not ctx.top_level:
+        if (
+            not ctx.top_level
+            and not ctx.inside_calculate_sum
+            and not ctx.inside_calculate_ratio
+        ):
             raise FormulaAggNotOutermostError(
                 ErrorMessages.agg_not_outermost(fn_name),
+                expression=self._expression,
+            )
+        if self._has_calculate and any(
+            _contains_function(arg, "calculate") for arg in node.arguments
+        ):
+            raise FormulaSyntaxError(
+                "CALCULATE_EXPR_UNSUPPORTED",
                 expression=self._expression,
             )
 
@@ -784,6 +923,12 @@ class _Validator:
                     ErrorMessages.invalid_arg_count("now", 0, len(args), snippet),
                     expression=self._expression,
                 )
+        elif fn_name == "nullif":
+            if len(args) != 2:
+                raise FormulaSyntaxError(
+                    ErrorMessages.invalid_arg_count("nullif", 2, len(args), snippet),
+                    expression=self._expression,
+                )
         # 其他白名单函数无额外约束
 
     def _extract_function_name(self, node: FunctionCallExpression) -> str:
@@ -794,7 +939,7 @@ class _Validator:
         """
         func = node.function
         if isinstance(func, VariableExpression):
-            return func.name
+            return func.name.lower()
         raise FormulaNodeNotAllowedError(
             f"Function call must be a simple name; got {type(func).__name__}",
             expression=self._expression,
@@ -827,10 +972,12 @@ class _SqlGenerator:
         dialect: SqlDialect,
         field_resolver: FieldResolver,
         capability_registry: Optional[CapabilityRegistry] = None,
+        calculate_context: Optional[CalculateQueryContext] = None,
     ) -> None:
         self._dialect = dialect
         self._field_resolver = field_resolver
         self._registry = capability_registry
+        self._calculate_context = calculate_context
         self._ctx = _GenContext()
 
     def generate(self, tree: Expression) -> CompiledFormula:
@@ -932,7 +1079,7 @@ class _SqlGenerator:
     def _gen_function_call(self, node: FunctionCallExpression) -> str:
         # validator 保证 function 是 VariableExpression
         assert isinstance(node.function, VariableExpression)
-        fn_name = node.function.name
+        fn_name = node.function.name.lower()
         self._ctx.used_functions.add(fn_name)
 
         if fn_name in ALLOWED_AGG_FUNCTIONS:
@@ -961,6 +1108,19 @@ class _SqlGenerator:
         if fn_name == "coalesce":
             parts = [self._gen_node(a) for a in node.arguments]
             return "COALESCE(" + ", ".join(parts) + ")"
+
+        if fn_name == "nullif":
+            left = self._gen_node(node.arguments[0])
+            if _is_calculate_call(node.arguments[0]) and _is_zero_literal(node.arguments[1]):
+                return f"NULLIF({left}, 0)"
+            right = self._gen_node(node.arguments[1])
+            return f"NULLIF({left}, {right})"
+
+        if fn_name == "calculate":
+            return self._gen_calculate(node)
+
+        if fn_name == "remove":
+            raise FormulaSyntaxError("CALCULATE_EXPR_UNSUPPORTED: REMOVE outside CALCULATE")
 
         if fn_name == "abs":
             x = self._gen_node(node.arguments[0])
@@ -1047,7 +1207,7 @@ class _SqlGenerator:
             fn_name == "count"
             and isinstance(inner, FunctionCallExpression)
             and isinstance(inner.function, VariableExpression)
-            and inner.function.name == "distinct"
+            and inner.function.name.lower() == "distinct"
         ):
             # distinct 的唯一参数
             distinct_inner = inner.arguments[0]
@@ -1061,6 +1221,63 @@ class _SqlGenerator:
         inner_sql = self._gen_node(inner)
         upper = fn_name.upper()
         return f"{upper}({inner_sql})"
+
+    def _gen_calculate(self, node: FunctionCallExpression) -> str:
+        ctx = self._calculate_context
+        if ctx is None:
+            raise FormulaSyntaxError("CALCULATE_CONTEXT_UNAVAILABLE")
+        if ctx.time_window_post_calculated_fields:
+            raise FormulaSyntaxError("CALCULATE_TIMEWINDOW_POST_CALC_UNSUPPORTED")
+        if not ctx.supports_grouped_aggregate_window:
+            raise FormulaSyntaxError("CALCULATE_WINDOW_UNSUPPORTED")
+
+        aggregate = node.arguments[0]
+        remove = node.arguments[1]
+        assert isinstance(aggregate, FunctionCallExpression)
+        assert isinstance(remove, FunctionCallExpression)
+
+        metric_sql = self._gen_node(aggregate.arguments[0])
+        removed_fields = self._calculate_remove_fields(remove)
+        group_by_fields = tuple(ctx.group_by_fields or ())
+        group_by_set = set(group_by_fields)
+
+        for field_name in removed_fields:
+            if field_name not in group_by_set:
+                raise FormulaSyntaxError(
+                    f"CALCULATE_REMOVE_FIELD_NOT_GROUPED: {field_name}"
+                )
+            if _field_matches_any(field_name, ctx.system_slice_fields):
+                raise FormulaSyntaxError(
+                    f"CALCULATE_SYSTEM_SLICE_OVERRIDE_DENIED: {field_name}"
+                )
+
+        partitions: list[str] = []
+        removed_set = set(removed_fields)
+        for field_name in group_by_fields:
+            if field_name in removed_set:
+                continue
+            resolved = self._field_resolver(field_name)
+            if isinstance(resolved, tuple):
+                sql, nested_params = resolved
+                if nested_params:
+                    self._ctx.params.extend(nested_params)
+            else:
+                sql = resolved
+            self._ctx.referenced_fields.add(field_name)
+            partitions.append(sql)
+
+        over = ""
+        if partitions:
+            over = "PARTITION BY " + ", ".join(partitions)
+        return f"SUM(SUM({metric_sql})) OVER ({over})"
+
+    def _calculate_remove_fields(self, node: FunctionCallExpression) -> tuple[str, ...]:
+        fields: list[str] = []
+        for arg in node.arguments:
+            if not isinstance(arg, VariableExpression):
+                raise FormulaSyntaxError("CALCULATE_REMOVE_FIELD_NOT_GROUPED")
+            fields.append(arg.name)
+        return tuple(fields)
 
 
 # ---------------------------------------------------------------------------
@@ -1104,6 +1321,56 @@ def _count_calls(node: Expression) -> int:
             total += 1
         stack.extend(_fs_children(current))
     return total
+
+
+def _function_name(node: Expression) -> Optional[str]:
+    if (
+        isinstance(node, FunctionCallExpression)
+        and isinstance(node.function, VariableExpression)
+    ):
+        return node.function.name.lower()
+    return None
+
+
+def _is_calculate_call(node: Expression) -> bool:
+    return _function_name(node) == "calculate"
+
+
+def _contains_function(node: Expression, name: str) -> bool:
+    target = name.lower()
+    stack: list[Expression] = [node]
+    while stack:
+        current = stack.pop()
+        if _function_name(current) == target:
+            return True
+        stack.extend(_fs_children(current))
+    return False
+
+
+def _contains_function_in_children(node: FunctionCallExpression, name: str) -> bool:
+    return any(_contains_function(child, name) for child in node.arguments)
+
+
+def _is_zero_literal(node: Expression) -> bool:
+    return isinstance(node, NumberExpression) and node.value == 0
+
+
+def _is_nullif_calculate_zero(node: Expression) -> bool:
+    return (
+        _function_name(node) == "nullif"
+        and len(node.arguments) == 2
+        and _is_calculate_call(node.arguments[0])
+        and _is_zero_literal(node.arguments[1])
+    )
+
+
+def _field_matches_any(field_name: str, fields: frozenset[str]) -> bool:
+    for protected in fields:
+        if field_name == protected:
+            return True
+        if field_name.startswith(protected + "$") or protected.startswith(field_name + "$"):
+            return True
+    return False
 
 
 def _is_null_literal(node: Expression) -> bool:

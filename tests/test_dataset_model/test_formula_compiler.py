@@ -22,11 +22,13 @@ from __future__ import annotations
 import pytest
 
 from foggy.dataset_model.semantic.formula_compiler import (
+    CalculateQueryContext,
     CompiledFormula,
     FormulaCompiler,
     FormulaCompilerConfig,
 )
 from foggy.dataset_model.semantic.formula_dialect import SqlDialect
+from foggy.dataset_model.semantic.field_validator import extract_field_dependencies
 from foggy.dataset_model.semantic.formula_errors import (
     FormulaAggNotOutermostError,
     FormulaDepthError,
@@ -610,6 +612,185 @@ class TestReq003:
             "sum(if(is_not_null(stageIsWon) && stageIsWon, expectedRevenue, 0))",
         )
         assert r.sql_fragment.startswith("SUM(CASE WHEN")
+
+
+# --------------------------------------------------------------------------- #
+# TestCalculateMvp — v1.5.1 P1 restricted CALCULATE MVP
+# --------------------------------------------------------------------------- #
+
+
+class TestCalculateMvp:
+    def _resolver(self, name: str) -> str:
+        return {
+            "salesAmount": "t.sales_amount",
+            "customer$customerType": "d3.customer_type",
+            "product$categoryName": "d2.category_name",
+        }.get(name, name)
+
+    def _compile(
+        self,
+        compiler: FormulaCompiler,
+        expr: str,
+        ctx: CalculateQueryContext,
+    ) -> CompiledFormula:
+        return compiler.compile(expr, self._resolver, calculate_context=ctx)
+
+    def test_remove_all_group_by_lowers_to_global_window(
+        self,
+        sqlite_compiler: FormulaCompiler,
+    ) -> None:
+        ctx = CalculateQueryContext(
+            group_by_fields=("customer$customerType",),
+            supports_grouped_aggregate_window=True,
+        )
+        result = self._compile(
+            sqlite_compiler,
+            "SUM(salesAmount) / NULLIF(CALCULATE(SUM(salesAmount), "
+            "REMOVE(customer$customerType)), 0)",
+            ctx,
+        )
+
+        assert result.sql_fragment == (
+            "(SUM(t.sales_amount) / "
+            "NULLIF(SUM(SUM(t.sales_amount)) OVER (), 0))"
+        )
+        assert result.bind_params == ()
+        assert result.referenced_fields == frozenset({"salesAmount"})
+
+    def test_remove_one_group_by_keeps_remaining_partition(
+        self,
+        sqlite_compiler: FormulaCompiler,
+    ) -> None:
+        ctx = CalculateQueryContext(
+            group_by_fields=("customer$customerType", "product$categoryName"),
+            supports_grouped_aggregate_window=True,
+        )
+        result = self._compile(
+            sqlite_compiler,
+            "SUM(salesAmount) / NULLIF(CALCULATE(SUM(salesAmount), "
+            "REMOVE(product$categoryName)), 0)",
+            ctx,
+        )
+
+        assert result.sql_fragment == (
+            "(SUM(t.sales_amount) / NULLIF(SUM(SUM(t.sales_amount)) "
+            "OVER (PARTITION BY d3.customer_type), 0))"
+        )
+        assert result.referenced_fields == frozenset(
+            {"salesAmount", "customer$customerType"}
+        )
+
+    @pytest.mark.parametrize(
+        ("expr", "message"),
+        [
+            (
+                "SUM(salesAmount) / CALCULATE(SUM(salesAmount), "
+                "REMOVE(customer$customerType))",
+                "CALCULATE_RATIO_REQUIRES_NULLIF",
+            ),
+            (
+                "SUM(salesAmount) / NULLIF(CALCULATE(SUM(salesAmount), "
+                "REMOVE(product$categoryName)), 0)",
+                "CALCULATE_REMOVE_FIELD_NOT_GROUPED",
+            ),
+            (
+                "SUM(salesAmount) / NULLIF(CALCULATE(AVG(salesAmount), "
+                "REMOVE(customer$customerType)), 0)",
+                "CALCULATE_EXPR_UNSUPPORTED",
+            ),
+            (
+                "SUM(salesAmount) / NULLIF(CALCULATE(SUM(salesAmount), "
+                "REMOVE(customer$customerType + 1)), 0)",
+                "CALCULATE_REMOVE_FIELD_NOT_GROUPED",
+            ),
+            (
+                "SUM(salesAmount) / NULLIF(CALCULATE(SUM(CALCULATE("
+                "SUM(salesAmount), REMOVE(customer$customerType))), "
+                "REMOVE(customer$customerType)), 0)",
+                "CALCULATE_NESTED_UNSUPPORTED",
+            ),
+        ],
+    )
+    def test_restricted_calculate_rejections(
+        self,
+        sqlite_compiler: FormulaCompiler,
+        expr: str,
+        message: str,
+    ) -> None:
+        ctx = CalculateQueryContext(
+            group_by_fields=("customer$customerType",),
+            supports_grouped_aggregate_window=True,
+        )
+
+        with pytest.raises(FormulaSyntaxError, match=message):
+            self._compile(sqlite_compiler, expr, ctx)
+
+    def test_remove_system_slice_field_is_denied(
+        self,
+        sqlite_compiler: FormulaCompiler,
+    ) -> None:
+        ctx = CalculateQueryContext(
+            group_by_fields=("customer$customerType",),
+            system_slice_fields=frozenset({"customer"}),
+            supports_grouped_aggregate_window=True,
+        )
+
+        with pytest.raises(
+            FormulaSyntaxError,
+            match="CALCULATE_SYSTEM_SLICE_OVERRIDE_DENIED",
+        ):
+            self._compile(
+                sqlite_compiler,
+                "SUM(salesAmount) / NULLIF(CALCULATE(SUM(salesAmount), "
+                "REMOVE(customer$customerType)), 0)",
+                ctx,
+            )
+
+    def test_mysql_window_support_is_explicitly_rejected(
+        self,
+        mysql_compiler: FormulaCompiler,
+    ) -> None:
+        ctx = CalculateQueryContext(
+            group_by_fields=("customer$customerType",),
+            supports_grouped_aggregate_window=False,
+        )
+
+        with pytest.raises(FormulaSyntaxError, match="CALCULATE_WINDOW_UNSUPPORTED"):
+            self._compile(
+                mysql_compiler,
+                "SUM(salesAmount) / NULLIF(CALCULATE(SUM(salesAmount), "
+                "REMOVE(customer$customerType)), 0)",
+                ctx,
+            )
+
+    def test_time_window_post_calculate_is_rejected(
+        self,
+        sqlite_compiler: FormulaCompiler,
+    ) -> None:
+        ctx = CalculateQueryContext(
+            group_by_fields=("customer$customerType",),
+            supports_grouped_aggregate_window=True,
+            time_window_post_calculated_fields=True,
+        )
+
+        with pytest.raises(
+            FormulaSyntaxError,
+            match="CALCULATE_TIMEWINDOW_POST_CALC_UNSUPPORTED",
+        ):
+            self._compile(
+                sqlite_compiler,
+                "SUM(salesAmount) / NULLIF(CALCULATE(SUM(salesAmount), "
+                "REMOVE(customer$customerType)), 0)",
+                ctx,
+            )
+
+    def test_dependency_extraction_includes_remove_fields_for_governance(self) -> None:
+        deps = extract_field_dependencies(
+            "SUM(salesAmount) / NULLIF(CALCULATE(SUM(salesAmount), "
+            "REMOVE(customer$customerType)), 0)"
+        )
+
+        assert deps == {"salesAmount", "customer$customerType"}
 
 
 # --------------------------------------------------------------------------- #

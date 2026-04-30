@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from foggy.mcp.routers.mcp_rpc import create_mcp_router
 from foggy.mcp.schemas.tool_config_loader import ToolConfigLoader
+from foggy.mcp_spi.tool import ToolResult
 from foggy.mcp_spi.semantic import DeniedColumn
 from foggy.mcp_spi import SemanticQueryResponse
 
@@ -72,6 +73,56 @@ def _make_client(accessor=None, semantic_service=None) -> TestClient:
         prefix="/mcp/analyst",
     )
     return TestClient(app)
+
+
+def test_compose_script_rpc_dispatches_with_remote_headers(monkeypatch):
+    from foggy.mcp.routers import mcp_rpc
+
+    captured = {}
+
+    class _FakeComposeScriptTool:
+        def __init__(self, resolver_factory, semantic_service, default_dialect="postgresql"):
+            captured["default_dialect"] = default_dialect
+            captured["semantic_service"] = semantic_service
+
+        async def execute(self, arguments, context=None):
+            captured["arguments"] = arguments
+            captured["context"] = context
+            return ToolResult.success_result(
+                "dataset.compose_script",
+                data={"value": [{"id": 1}], "sql": "SELECT 1"},
+            )
+
+    monkeypatch.setattr(mcp_rpc, "ComposeScriptTool", _FakeComposeScriptTool)
+    service = _FakeSemanticService()
+    client = _make_client(semantic_service=service)
+
+    response = client.post(
+        "/mcp/analyst/rpc",
+        headers={
+            "X-Foggy-Remote-Compose": "1",
+            "X-User-Id": "7",
+            "X-Namespace": "odoo",
+        },
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "dataset.compose_script",
+                "arguments": {"script": "return 1;"},
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    payload = json.loads(body["result"]["content"][0]["text"])
+    assert payload == {"status": "success", "value": [{"id": 1}], "sql": "SELECT 1"}
+    assert captured["arguments"] == {"script": "return 1;"}
+    assert captured["context"].user_id == "7"
+    assert captured["context"].namespace == "odoo"
+    assert captured["context"].get_header("X-Foggy-Remote-Compose") == "1"
 
 
 def test_llm_visible_schema_does_not_expose_format():

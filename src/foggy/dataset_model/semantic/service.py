@@ -66,7 +66,10 @@ from foggy.dataset_model.semantic.physical_column_mapping import (
     build_physical_column_mapping,
 )
 from foggy.dataset_model.semantic.error_sanitizer import sanitize_engine_error
-from foggy.dataset_model.semantic.formula_compiler import FormulaCompiler
+from foggy.dataset_model.semantic.formula_compiler import (
+    CalculateQueryContext,
+    FormulaCompiler,
+)
 from foggy.dataset_model.semantic.formula_dialect import SqlDialect
 from foggy.dataset_model.semantic.formula_errors import FormulaError
 from foggy.dataset_model.semantic.inline_expression import (
@@ -217,12 +220,7 @@ class SemanticQueryService(SemanticServiceResolver):
         """
         if self._formula_compiler is not None:
             return self._formula_compiler
-        dialect_name = "mysql"
-        if self._dialect is not None and hasattr(self._dialect, "name"):
-            try:
-                dialect_name = self._dialect.name()
-            except Exception:
-                dialect_name = "mysql"
+        dialect_name = self._dialect_name_or_default("mysql")
         try:
             sql_dialect = SqlDialect.of(dialect_name)
         except ValueError:
@@ -231,6 +229,79 @@ class SemanticQueryService(SemanticServiceResolver):
             sql_dialect = SqlDialect.of("mysql")
         self._formula_compiler = FormulaCompiler(sql_dialect)
         return self._formula_compiler
+
+    def _build_calculate_query_context(
+        self,
+        request: SemanticQueryRequest,
+        *,
+        time_window_post_calculated_fields: bool = False,
+    ) -> CalculateQueryContext:
+        return CalculateQueryContext(
+            group_by_fields=tuple(
+                field
+                for field in (
+                    self._extract_request_field_name(item)
+                    for item in (request.group_by or [])
+                )
+                if field
+            ),
+            system_slice_fields=frozenset(
+                self._collect_condition_fields(request.system_slice or [])
+            ),
+            supports_grouped_aggregate_window=self._calculate_window_supported(),
+            time_window_post_calculated_fields=time_window_post_calculated_fields,
+        )
+
+    def _calculate_window_supported(self) -> bool:
+        dialect_name = self._dialect_name_or_default("")
+        return bool(dialect_name) and dialect_name.lower() != "mysql"
+
+    def _dialect_name_or_default(self, default: str) -> str:
+        if self._dialect is None or not hasattr(self._dialect, "name"):
+            return default
+        try:
+            name_attr = getattr(self._dialect, "name")
+            value = name_attr() if callable(name_attr) else name_attr
+            return str(value) if value else default
+        except Exception:
+            return default
+
+    @classmethod
+    def _collect_condition_fields(cls, items: Any) -> set[str]:
+        fields: set[str] = set()
+        if items is None:
+            return fields
+        if isinstance(items, dict):
+            field_name = (
+                items.get("field")
+                or items.get("fieldName")
+                or items.get("column")
+            )
+            if isinstance(field_name, str):
+                fields.add(field_name)
+            for key in ("conditions", "children", "filters", "$and", "$or"):
+                nested = items.get(key)
+                if nested:
+                    fields.update(cls._collect_condition_fields(nested))
+            return fields
+        if isinstance(items, list):
+            for item in items:
+                fields.update(cls._collect_condition_fields(item))
+            return fields
+        field_name = getattr(items, "field", None) or getattr(items, "field_name", None)
+        if isinstance(field_name, str):
+            fields.add(field_name)
+        return fields
+
+    @staticmethod
+    def _extract_request_field_name(item: Any) -> Optional[str]:
+        if isinstance(item, str):
+            return item
+        if isinstance(item, dict):
+            value = item.get("field") or item.get("fieldName") or item.get("column")
+            return value if isinstance(value, str) else None
+        value = getattr(item, "field", None) or getattr(item, "field_name", None)
+        return value if isinstance(value, str) else None
 
     def get_physical_column_mapping(self, model_name: str) -> Optional[PhysicalColumnMapping]:
         """Get or lazily build the physical column mapping for a model.
@@ -888,10 +959,12 @@ class SemanticQueryService(SemanticServiceResolver):
         # groupBy / orderBy, its params travel together with the inlined SQL
         # fragment so the final positional `?` binding stays consistent.
         compiled_calcs_params: Dict[str, List[Any]] = {}
+        calculate_context = self._build_calculate_query_context(request)
 
         for cf in calc_field_defs:
             select_sql, select_params = self._build_calculated_field_sql(
-                cf, model, ensure_join, compiled_calcs, compiled_calcs_params
+                cf, model, ensure_join, compiled_calcs, compiled_calcs_params,
+                calculate_context=calculate_context,
             )
             alias = cf.alias or cf.name
             builder.select(
@@ -1304,7 +1377,14 @@ class SemanticQueryService(SemanticServiceResolver):
                     return f"tw_result.{self._qi(name)}"
                 raise ValueError(TimeWindowValidator.POST_CALC_FIELD_NOT_FOUND)
 
-            compiled = self._get_formula_compiler().compile(cf.expression, _resolver)
+            compiled = self._get_formula_compiler().compile(
+                cf.expression,
+                _resolver,
+                calculate_context=CalculateQueryContext(
+                    time_window_post_calculated_fields=True,
+                    supports_grouped_aggregate_window=self._calculate_window_supported(),
+                ),
+            )
             alias = cf.alias or cf.name
             select_parts.append(
                 f"{compiled.sql_fragment} AS {self._qi(alias)}"
@@ -2304,6 +2384,7 @@ class SemanticQueryService(SemanticServiceResolver):
         ensure_join=None,
         compiled_calcs: Optional[Dict[str, str]] = None,
         compiled_calcs_params: Optional[Dict[str, List[Any]]] = None,
+        calculate_context: Optional[CalculateQueryContext] = None,
     ) -> Tuple[str, List[Any]]:
         """Build SQL expression for a calculated field, including OVER() for window functions.
 
@@ -2372,7 +2453,11 @@ class SemanticQueryService(SemanticServiceResolver):
                         return sql, list(nested)
                 return sql
             try:
-                compiled = self._get_formula_compiler().compile(cf.expression, _resolver)
+                compiled = self._get_formula_compiler().compile(
+                    cf.expression,
+                    _resolver,
+                    calculate_context=calculate_context,
+                )
             except FormulaError:
                 # Propagate formula-level validation errors to the caller
                 # so the SemanticQueryService can turn them into a clear
