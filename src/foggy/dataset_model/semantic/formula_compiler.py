@@ -682,14 +682,10 @@ class _Validator:
             self._validate_literal(node.arguments[1])  # type: ignore[arg-type]
             return
 
-        # 递归校验参数
+        # Scalar wrappers such as ROUND/COALESCE may wrap a restricted
+        # CALCULATE ratio; aggregate/window wrappers remain blocked above.
         child_ctx = _ValidationContext(top_level=False, inside_count=False)
         for arg in node.arguments:
-            if _contains_function(arg, "calculate"):
-                raise FormulaSyntaxError(
-                    "CALCULATE_EXPR_UNSUPPORTED",
-                    expression=self._expression,
-                )
             self._validate_node(arg, child_ctx)
 
     def _validate_calculate_call(self, node: FunctionCallExpression) -> None:

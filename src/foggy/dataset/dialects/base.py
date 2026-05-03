@@ -48,6 +48,11 @@ class FDialect(ABC):
         pass
 
     @property
+    def supports_grouped_aggregate_window(self) -> bool:
+        """Whether grouped aggregate windows such as SUM(SUM(x)) OVER are supported."""
+        return True
+
+    @property
     @abstractmethod
     def quote_char(self) -> str:
         """Character used to quote identifiers."""

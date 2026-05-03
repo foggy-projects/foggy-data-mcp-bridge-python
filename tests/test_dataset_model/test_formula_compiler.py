@@ -680,6 +680,27 @@ class TestCalculateMvp:
             {"salesAmount", "customer$customerType"}
         )
 
+    def test_scalar_wrapper_around_calculate_ratio_is_allowed(
+        self,
+        sqlite_compiler: FormulaCompiler,
+    ) -> None:
+        ctx = CalculateQueryContext(
+            group_by_fields=("customer$customerType",),
+            supports_grouped_aggregate_window=True,
+        )
+        result = self._compile(
+            sqlite_compiler,
+            "ROUND(SUM(salesAmount) / NULLIF(CALCULATE(SUM(salesAmount), "
+            "REMOVE(customer$customerType)), 0), 4)",
+            ctx,
+        )
+
+        assert result.sql_fragment == (
+            "ROUND((SUM(t.sales_amount) / "
+            "NULLIF(SUM(SUM(t.sales_amount)) OVER (), 0)), ?)"
+        )
+        assert result.bind_params == (4,)
+
     @pytest.mark.parametrize(
         ("expr", "message"),
         [

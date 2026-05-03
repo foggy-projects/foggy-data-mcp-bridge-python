@@ -33,6 +33,10 @@ class MySqlDialect(FDialect):
         return True
 
     @property
+    def supports_grouped_aggregate_window(self) -> bool:
+        return False
+
+    @property
     def quote_char(self) -> str:
         return "`"
 
