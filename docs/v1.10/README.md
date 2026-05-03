@@ -3,6 +3,7 @@
 ## 文档作用
 
 - doc_type: workitem-group
+- status: reviewed-for-p1-execution-prompt
 - intended_for: root-controller / python-engine-agent / reviewer / signoff-owner
 - purpose: 跟踪 Python Pivot 9.2 对 v1.9 accepted-with-risks 遗留项的规划、实施、测试覆盖与验收边界。
 
@@ -16,7 +17,7 @@ Python Pivot v1.9 已完成 Stage 5A DomainTransport 与 Stage 5B C2 rows 轴两
 
 | 功能 | 状态 | 备注 |
 |---|---|---|
-| P0 文档与边界对齐 | draft | 当前文档包。 |
+| P0 文档与边界对齐 | reviewed | 文档包已通过评审，可进入 P1 execution prompt。 |
 | P1 cascade subtotal/grandTotal 语义与 oracle | proposed | 最高优先级；先语义评审，再实现。 |
 | P2 SQL Server cascade oracle / refusal evidence | proposed | 不改变 DSL，先补方言证据。 |
 | P3 MySQL 5.7 live evidence / refusal evidence | proposed | 不默认启用 cascade；先确认环境与能力。 |
@@ -38,4 +39,3 @@ Python Pivot v1.9 已完成 Stage 5A DomainTransport 与 Stage 5B C2 rows 轴两
 - Python v1.9 release readiness: `docs/v1.9/acceptance/python-pivot-9.1-release-readiness.md`
 - Python v1.9 Stage 5B acceptance: `docs/v1.9/acceptance/pivot-stage5b-c2-cascade-acceptance.md`
 - Java 9.2 follow-up roadmap: `D:/foggy-projects/foggy-data-mcp/foggy-data-mcp-bridge-wt-dev-compose/docs/9.2.0/README.md`
-

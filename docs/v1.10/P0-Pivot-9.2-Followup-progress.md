@@ -3,6 +3,7 @@
 ## 文档作用
 
 - doc_type: progress-template
+- status: active
 - intended_for: python-engine-agent / reviewer / signoff-owner
 - purpose: 作为 Python Pivot 9.2 follow-up 的阶段性进度回写模板。
 
@@ -76,4 +77,3 @@ Next recommended action after P0 review:
 1. Run `plan-evaluator` on this package.
 2. If accepted, generate a P1 execution prompt for cascade subtotal/grandTotal semantic review and oracle-first implementation.
 3. Do not start P4 tree+cascade runtime implementation before a separate semantic decision record exists.
-

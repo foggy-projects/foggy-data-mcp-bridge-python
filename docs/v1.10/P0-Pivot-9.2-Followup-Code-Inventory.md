@@ -3,6 +3,7 @@
 ## 文档作用
 
 - doc_type: code-inventory
+- status: reviewed-for-p1-execution-prompt
 - intended_for: python-engine-agent / reviewer
 - purpose: 列出 Python Pivot 9.2 follow-up 涉及的参考文档、源码触点、测试触点和预期改动类型。
 
@@ -65,4 +66,3 @@
 - Do not change public Pivot JSON shape.
 - Do not relax fail-closed guards.
 - Do not update schema/prompt to claim 9.2 behavior before tests pass.
-

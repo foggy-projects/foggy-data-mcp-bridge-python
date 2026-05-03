@@ -3,6 +3,7 @@
 ## 文档作用
 
 - doc_type: implementation-plan
+- status: reviewed-for-p1-execution-prompt
 - intended_for: python-engine-agent / reviewer / signoff-owner
 - purpose: 将 Python Pivot 9.2 follow-up 拆成可评审、可独立签收的阶段。
 
@@ -167,4 +168,3 @@
 - 高风险阶段执行 formal quality gate。
 - 执行 coverage audit。
 - 创建 feature acceptance record。
-

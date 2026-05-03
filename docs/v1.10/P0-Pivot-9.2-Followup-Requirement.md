@@ -3,6 +3,7 @@
 ## 文档作用
 
 - doc_type: requirement
+- status: reviewed-for-p1-execution-prompt
 - intended_for: root-controller / python-engine-agent / reviewer / signoff-owner
 - purpose: 定义 Python Pivot 9.2 follow-up 的目标、边界、非目标和验收标准。
 
@@ -72,4 +73,3 @@ v1.10 不要求所有候选项都实现。成功定义是：
 - P1/P2/P3/P6 中至少一个被实现并签收，或明确被拒绝/延期且证据充分。
 - 所有未实现项都有稳定 fail-closed 行为和文档化边界。
 - `pytest -q` 通过；涉及外部 DB 的阶段必须记录 profile、命令和 skipped/blocked 原因。
-
