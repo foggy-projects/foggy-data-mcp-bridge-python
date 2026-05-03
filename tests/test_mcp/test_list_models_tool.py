@@ -112,18 +112,23 @@ class TestListModelsRpc:
         assert compose_tool is not None
         assert "dataset.compose_script" in compose_tool.description
         assert "dsl({...})" in compose_tool.description
+        assert "跨模型 Join / Union" in compose_tool.description
+        assert "单模型过滤、分组、聚合、calculatedFields、pivot" in compose_tool.description
+        assert "dataset.query_model.payload.pivot" in compose_tool.description
         assert "timeRole=business_date" in compose_tool.description
         assert "timeWindow.field" in compose_tool.description
-        assert "Do NOT guess time fields" in compose_tool.description
-        assert "System time field" in compose_tool.description
+        assert "不要猜测时间字段" in compose_tool.description
         assert "created_at" in compose_tool.description
         assert "return { plans:" in compose_tool.description
-        assert "Do not use `.execute()` directly" in compose_tool.description
+        assert "不要直接 `.execute()`" in compose_tool.description
         assert "Query.from" not in compose_tool.description
         schema = compose_tool.inputSchema
         assert schema.get("properties", {}).get("script", {}).get("type") == "string"
         script_desc = schema.get("properties", {}).get("script", {}).get("description", "")
         assert "dsl({...})" in script_desc
+        assert "single-model pivot" in script_desc
+        assert "parentShare" in script_desc
+        assert "baselineRatio" in script_desc
         assert "return { plans:" in script_desc
         assert ".execute() directly" in script_desc
         assert "Query.from" not in script_desc
