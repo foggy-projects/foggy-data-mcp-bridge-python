@@ -13,6 +13,12 @@ def _service(dialect):
     return svc
 
 
+class MySql8Dialect(MySqlDialect):
+    @property
+    def supports_grouped_aggregate_window(self) -> bool:
+        return True
+
+
 def test_service_calculate_context_lowers_remove_to_grouped_window() -> None:
     request = SemanticQueryRequest(
         columns=["customer$customerType", "totalShare"],
@@ -64,3 +70,29 @@ def test_service_calculate_rejects_mysql_window_unsupported() -> None:
 
     assert response.error is not None
     assert "CALCULATE_WINDOW_UNSUPPORTED" in response.error
+
+
+def test_service_calculate_allows_mysql8_grouped_aggregate_window() -> None:
+    request = SemanticQueryRequest(
+        columns=["customer$customerType", "totalShare"],
+        group_by=["customer$customerType"],
+        calculated_fields=[
+            {
+                "name": "totalShare",
+                "expression": (
+                    "SUM(salesAmount) / NULLIF(CALCULATE(SUM(salesAmount), "
+                    "REMOVE(customer$customerType)), 0)"
+                ),
+            }
+        ],
+    )
+
+    response = _service(MySql8Dialect()).query_model(
+        "FactSalesModel",
+        request,
+        mode="validate",
+    )
+
+    assert response.error is None
+    assert response.sql is not None
+    assert "SUM(SUM(t.sales_amount)) OVER ()" in response.sql

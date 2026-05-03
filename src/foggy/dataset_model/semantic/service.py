@@ -253,6 +253,8 @@ class SemanticQueryService(SemanticServiceResolver):
         )
 
     def _calculate_window_supported(self) -> bool:
+        if self._dialect and hasattr(self._dialect, "supports_grouped_aggregate_window"):
+            return self._dialect.supports_grouped_aggregate_window
         dialect_name = self._dialect_name_or_default("")
         return bool(dialect_name) and dialect_name.lower() != "mysql"
 
