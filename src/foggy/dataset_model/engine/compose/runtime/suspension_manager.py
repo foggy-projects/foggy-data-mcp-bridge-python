@@ -41,10 +41,11 @@ Design decisions
 
 from __future__ import annotations
 
+import logging
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from .suspend_errors import (
     ScriptResumeTokenInvalidError,
@@ -69,6 +70,8 @@ __all__ = [
 
 #: Default maximum number of concurrent suspensions allowed per manager instance.
 MAX_SUSPEND_COUNT: int = 100
+
+_logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -126,11 +129,17 @@ class SuspensionManager:
         mgr.complete_run(run_ctx.run_id)
     """
 
-    def __init__(self, max_suspend_count: int = MAX_SUSPEND_COUNT) -> None:
+    def __init__(
+        self,
+        max_suspend_count: int = MAX_SUSPEND_COUNT,
+        *,
+        on_suspended: Optional[Callable[[SuspensionResult], None]] = None,
+    ) -> None:
         self._runs: Dict[str, ScriptRunContext] = {}
         self._slots: Dict[str, _WaitSlot] = {}  # keyed by suspend_id
         self._lock = threading.Lock()
         self._max_suspend_count = max_suspend_count
+        self._on_suspended = on_suspended
 
     # -- registration -------------------------------------------------------
 
@@ -236,6 +245,7 @@ class SuspensionManager:
         """
         timeout_seconds = request.timeout_ms / 1000.0
         slot = _WaitSlot()
+        callback_result: Optional[SuspensionResult] = None
 
         # --- atomic section: state + result + slot under ONE lock ---
         with self._lock:
@@ -275,10 +285,17 @@ class SuspensionManager:
             timer.daemon = True
             slot.timer = timer
             self._slots[suspend_id] = slot
+            if self._on_suspended is not None:
+                callback_result = self._snapshot_suspension(result)
         # --- end atomic section ---
 
         # Start timer outside lock (timer callback will acquire lock).
         timer.start()
+        if callback_result is not None:
+            try:
+                self._on_suspended(callback_result)
+            except Exception:
+                _logger.exception("SuspensionManager.on_suspended failed")
 
         # Block until resume / reject / timeout wakes us.
         # Use try/finally to guarantee slot cleanup if the handler thread
@@ -447,6 +464,40 @@ class SuspensionManager:
                 if r.state == ScriptRunState.SUSPENDED
             )
 
+    def list_active_suspensions(self) -> list[SuspensionResult]:
+        """Return snapshots for currently blocked active suspensions.
+
+        A run is query-visible only while it is ``SUSPENDED``, has a
+        ``SuspensionResult``, and still has an active wait slot created
+        by ``pause_and_wait``.  The returned models are deep copies, so
+        callers cannot mutate manager-owned state through nested dicts.
+        """
+        with self._lock:
+            return [
+                self._snapshot_suspension(run_ctx.suspension)
+                for run_ctx in self._runs.values()
+                if (
+                    run_ctx.state == ScriptRunState.SUSPENDED
+                    and run_ctx.suspension is not None
+                    and run_ctx.suspension.suspend_id in self._slots
+                )
+            ]
+
+    def get_active_suspension(
+        self, script_run_id: str,
+    ) -> Optional[SuspensionResult]:
+        """Return the active suspension snapshot for one run, if any."""
+        with self._lock:
+            run_ctx = self._runs.get(script_run_id)
+            if (
+                run_ctx is None
+                or run_ctx.state != ScriptRunState.SUSPENDED
+                or run_ctx.suspension is None
+                or run_ctx.suspension.suspend_id not in self._slots
+            ):
+                return None
+            return self._snapshot_suspension(run_ctx.suspension)
+
     def active_run_count(self) -> int:
         """Total number of tracked (non-terminal) runs."""
         with self._lock:
@@ -462,6 +513,12 @@ class SuspensionManager:
                 f"run {run_id} is not registered"
             )
         return run_ctx
+
+    def _snapshot_suspension(
+        self, suspension: SuspensionResult,
+    ) -> SuspensionResult:
+        """Return a deep copy of a public suspension result model."""
+        return suspension.model_copy(deep=True)
 
     def _require_suspended(
         self, run_id: str, suspend_id: str,
