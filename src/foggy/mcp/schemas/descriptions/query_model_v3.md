@@ -51,6 +51,43 @@
 - 表达式中引用了其他的计算字段。
 如果只是普通的 `sum(field)` 或 `sum(if(...))`，请直接写在 `columns` 中。
 
+**跨当前分组占比：使用受限 `CALCULATE`**
+
+当用户询问“各分类占总额占比”“各产品在客户类型内占比”这类跨当前分组的分母问题，在 `calculatedFields.expression` 中使用：
+```text
+SUM(metric) / NULLIF(CALCULATE(SUM(metric), REMOVE(groupByDim)), 0)
+```
+
+示例：全国/全局占比，移除当前唯一分组维度：
+```json
+{
+  "columns": ["customer$customerType", "salesAmount", "totalShare"],
+  "groupBy": ["customer$customerType"],
+  "calculatedFields": [
+    {
+      "name": "totalShare",
+      "expression": "SUM(salesAmount) / NULLIF(CALCULATE(SUM(salesAmount), REMOVE(customer$customerType)), 0)"
+    }
+  ]
+}
+```
+
+示例：父级/组内占比，保留未移除的 groupBy 作为分区：
+```json
+{
+  "columns": ["customer$customerType", "product$categoryName", "salesAmount", "typeShare"],
+  "groupBy": ["customer$customerType", "product$categoryName"],
+  "calculatedFields": [
+    {
+      "name": "typeShare",
+      "expression": "ROUND(SUM(salesAmount) / NULLIF(CALCULATE(SUM(salesAmount), REMOVE(product$categoryName)), 0), 4)"
+    }
+  ]
+}
+```
+
+限制：`CALCULATE` 只支持 `CALCULATE(SUM(metric), REMOVE(groupByDim...))`；`REMOVE` 只能移除当前 `groupBy` 中的维度；占比分母必须使用 `NULLIF(CALCULATE(...), 0)`；不要用 `CALCULATE` 做同比、环比、累计或滚动窗口，这些需求继续使用 `timeWindow`。
+
 ### timeWindow (可选)
 声明式时间窗口分析。遇到同比、环比、周同比、年初至今、月累计、滚动 7/30/90 天这类需求，优先使用 `timeWindow`，不要手写窗口 SQL。
 
@@ -88,6 +125,27 @@
 ```
 
 限制：`targetMetrics` 不可引用 calculatedFields；后置 calculatedFields 不能设置 `agg` 或窗口字段。
+
+
+### pivot (可选，Python 9.1 运行时子集)
+`pivot` 用于 Pivot V9 透视查询。Python 9.1 已支持 `flat` / `grid` 输出、原生度量、普通行列轴、单层 `having` / `TopN` / `crossjoin`，以及受控的 rows 轴两级 cascade TopN staged SQL。
+
+当前只生成 Python 已验收子集：
+- 度量优先使用字符串原生度量，例如 `"salesAmount"`；不要生成 `parentShare` / `baselineRatio`，Python 9.1 在 cascade 场景会 fail-closed。
+- cascade 仅支持 rows 轴 exactly two-level `limit + orderBy`；不要在 columns 轴上生成 `limit` / `having`。
+- 不要生成 `outputFormat: "tree"`、`rowSubtotals`、`columnSubtotals`、`grandTotal`、`properties`；这些在 Python 9.1 仍会 fail-closed。
+
+```json
+{
+  "pivot": {
+    "rows": ["product$categoryName", {"field": "product$subCategoryName", "limit": 3, "orderBy": [{"field": "salesAmount", "dir": "desc"}]}],
+    "metrics": ["salesAmount"],
+    "outputFormat": "grid"
+  }
+}
+```
+
+限制：`pivot` 与顶层 `columns`、`timeWindow` 互斥；公开 DSL 不开放 `CELL_AT`、`AXIS_MEMBER`、`AXIS_REF`、`ROLLUP_TO` 或 metric `expr`。超出 Python 9.1 子集时必须 fail-closed，不要降级为不等价的普通 `groupBy` 查询。
 
 
 ### slice (可选)

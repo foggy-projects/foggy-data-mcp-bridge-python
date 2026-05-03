@@ -18,7 +18,7 @@
             "type": "object",
             "properties": {
               "name": { "type": "string", "description": "字段名称，在 columns 中引用" },
-              "expression": { "type": "string", "description": "表达式，支持算术运算、函数、窗口函数(RANK/ROW_NUMBER/LAG等)" },
+              "expression": { "type": "string", "description": "表达式，支持算术运算、函数、窗口函数(RANK/ROW_NUMBER/LAG等)，以及受限 CALCULATE(SUM(metric), REMOVE(groupByDim))" },
               "agg": { "type": "string", "enum": ["SUM", "AVG", "MAX", "MIN", "COUNT", "COUNT_DISTINCT", "STDDEV_POP", "STDDEV_SAMP", "VAR_POP", "VAR_SAMP"], "description": "聚合类型，groupBy 场景使用" },
               "partitionBy": { "type": "array", "items": { "type": "string" }, "description": "窗口函数 PARTITION BY 字段列表" },
               "windowOrderBy": { "type": "array", "items": { "type": "object", "properties": { "field": { "type": "string" }, "dir": { "type": "string", "enum": ["asc", "desc"] } } }, "description": "窗口函数 ORDER BY" },
@@ -164,8 +164,80 @@
         "limit": { "type": "integer", "default": 1000, "description": "每页记录数" },
         "returnTotal": { "type": "boolean", "default": false, "description": "是否返回总记录数" },
         "distinct": { "type": "boolean", "default": false, "description": "是否去重（SELECT DISTINCT）。适用于'列出所有…'类查询，与 groupBy 互斥" },
-        "withSubtotals": { "type": "boolean", "default": false, "description": "是否追加小计/总计行。对 groupBy 聚合结果追加分组小计和总计行，通过 _rowType 字段标记（data/subtotal/grandTotal）" }
-      }
+        "withSubtotals": { "type": "boolean", "default": false, "description": "是否追加小计/总计行。对 groupBy 聚合结果追加分组小计和总计行，通过 _rowType 字段标记（data/subtotal/grandTotal）" },
+        "pivot": {
+          "type": "object",
+          "description": "Pivot V9 透视查询合同。Python 9.1 运行时支持 flat/grid 输出、原生度量、普通行列轴、单层 having/TopN/crossjoin，以及受控的 rows 轴两级 cascade TopN staged SQL。公开 DSL 仅允许 rows/columns/metrics/properties/options/layout，严禁 CELL_AT、AXIS_MEMBER、ROLLUP_TO 或 expr。tree 输出、subtotals/grandTotal、properties、columns 轴 cascade、tree+cascade 及派生度量 cascade 在 Python 9.1 均会 fail-closed 拒绝。",
+          "additionalProperties": false,
+          "properties": {
+            "rows": {
+              "type": "array",
+              "description": "行轴字段。支持字符串字段名，或带 orderBy/limit/having 的轴字段对象。",
+              "items": { "$ref": "#/definitions/pivotAxisItem" }
+            },
+            "columns": {
+              "type": "array",
+              "description": "列轴字段。Python 9.1 支持普通列轴；columns 轴 limit/having/cascade 会 fail-closed。",
+              "items": { "$ref": "#/definitions/pivotAxisItem" }
+            },
+            "metrics": {
+              "type": "array",
+              "description": "透视度量。Python 9.1 运行时支持字符串原生度量或 type=native 且 name=of 的对象；parentShare/baselineRatio 为合同兼容形状，在 Python cascade 场景会 fail-closed。禁止 expr/CELL_AT/AXIS_MEMBER。",
+              "items": {
+                "oneOf": [
+                  { "type": "string" },
+                  { "$ref": "#/definitions/pivotMetricItem" }
+                ]
+              }
+            },
+            "properties": {
+              "type": "array",
+              "description": "维度属性带出。Python 9.1 暂不执行 properties，会 fail-closed。",
+              "items": { "type": "string" }
+            },
+            "options": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "crossjoin": { "type": "boolean", "default": false },
+                "rowSubtotals": { "type": "boolean", "default": false, "description": "Python 9.1 暂不支持，true 会 fail-closed。" },
+                "columnSubtotals": { "type": "boolean", "default": false, "description": "Python 9.1 暂不支持，true 会 fail-closed。" },
+                "grandTotal": { "type": "boolean", "default": false, "description": "Python 9.1 暂不支持，true 会 fail-closed。" }
+              }
+            },
+            "outputFormat": {
+              "type": "string",
+              "enum": ["flat", "grid", "tree"],
+              "description": "Python 9.1 运行时仅支持 flat/grid；tree 为合同兼容形状，执行时会 fail-closed。",
+              "default": "tree"
+            },
+            "layout": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "metricPlacement": {
+                  "type": "string",
+                  "enum": ["columns", "rows"],
+                  "default": "columns"
+                }
+              }
+            }
+          },
+          "required": ["metrics"]
+        }
+      },
+      "allOf": [
+        {
+          "not": {
+            "required": ["pivot", "columns"]
+          }
+        },
+        {
+          "not": {
+            "required": ["pivot", "timeWindow"]
+          }
+        }
+      ]
     },
     "mode": {
       "type": "string",
@@ -174,5 +246,82 @@
       "description": "execute(执行), validate(仅验证)"
     }
   },
-  "required": ["model", "payload"]
+  "required": ["model", "payload"],
+  "definitions": {
+    "pivotMetricFilter": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "metric": { "type": "string" },
+        "op": { "type": "string" },
+        "value": {}
+      },
+      "required": ["metric", "op", "value"]
+    },
+    "pivotAxisItem": {
+      "oneOf": [
+        { "type": "string" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "field": { "type": "string" },
+            "orderBy": {
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  { "type": "string" },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "field": { "type": "string" },
+                      "dir": { "type": "string", "enum": ["asc", "desc", "ASC", "DESC"] }
+                    },
+                    "required": ["field"]
+                  }
+                ]
+              }
+            },
+            "limit": { "type": "integer", "minimum": 1 },
+            "having": { "$ref": "#/definitions/pivotMetricFilter" },
+            "hierarchyMode": { "type": "string", "enum": ["tree"] },
+            "expandDepth": { "type": "integer", "minimum": 0 }
+          },
+          "required": ["field"]
+        }
+      ]
+    },
+    "pivotMetricItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "type": { "type": "string", "enum": ["native", "parentShare", "baselineRatio"] },
+        "of": { "type": "string" },
+        "axis": { "type": "string", "enum": ["rows"] },
+        "level": { "type": "string" },
+        "parentLevel": { "type": "string" },
+        "baseline": { "type": "string", "enum": ["first", "last"] },
+        "orderBy": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              { "type": "string" },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "field": { "type": "string" },
+                  "dir": { "type": "string", "enum": ["asc", "desc", "ASC", "DESC"] }
+                },
+                "required": ["field"]
+              }
+            ]
+          }
+        }
+      },
+      "required": ["name", "type", "of"]
+    }
+  }
 }
