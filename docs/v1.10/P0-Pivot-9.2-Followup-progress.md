@@ -13,7 +13,7 @@
 - target: Python Pivot 9.2 Follow-Up
 - upstream_requirement: `docs/v1.10/P0-Pivot-9.2-Followup-Requirement.md`
 - implementation_plan: `docs/v1.10/P0-Pivot-9.2-Followup-Implementation-Plan.md`
-- current_status: p4-tree-cascade-semantic-accepted-deferred
+- current_status: v1.10-followups-closed
 - last_updated: 2026-05-03
 
 ## Phase Progress
@@ -25,7 +25,7 @@
 | P2 | SQL Server cascade evidence | accepted-refusal | `acceptance/pivot-9.2-sqlserver-cascade-refusal-acceptance.md` |
 | P3 | MySQL 5.7 evidence | accepted-refusal | `acceptance/pivot-9.2-mysql57-refusal-acceptance.md` |
 | P4 | tree + cascade semantic review | accepted-deferred | `acceptance/pivot-9.2-tree-cascade-semantic-review.md` |
-| P5 | outer Pivot cache feasibility | deferred | N/A |
+| P5 | outer Pivot cache feasibility | accepted-deferred | `acceptance/pivot-9.2-outer-cache-feasibility.md` |
 | P6 | production telemetry examples | accepted-docs | `operations/pivot-9.2-telemetry-log-query-examples.md` |
 
 ## Implementation Self-Check Template
@@ -39,7 +39,7 @@ When an implementation phase completes, fill this section before requesting revi
 - [x] QueryModel lifecycle, permissions, systemSlice, deniedColumns, sanitizer preserved.
 - [x] No temporary scripts, scratch files, or unrelated changes included.
 - [x] Tests and docs updated.
-- self_check_conclusion: P4 is semantic-review-only; tree+cascade remains fail-closed with `PIVOT_CASCADE_TREE_REJECTED` and no runtime support was added.
+- self_check_conclusion: P1-P6 are closed for v1.10. P5 is feasibility-only; no outer Pivot cache runtime was added because permission-aware cache key, invalidation, and telemetry evidence are not yet signed.
 
 ## Testing Progress Template
 
@@ -62,19 +62,18 @@ When an implementation phase completes, fill this section before requesting revi
 | MySQL 5.7 has live/refusal evidence | accepted-refusal | P3 acceptance + coverage docs |
 | tree+cascade remains rejected until semantic signoff | accepted-deferred | P4 semantic review keeps runtime rejected until a future signed spec exists |
 | telemetry examples do not leak sensitive details | accepted-docs | P6 operations guide + quality docs |
-| schema/prompt match runtime | pending | TBD |
+| schema/prompt match runtime | accepted-docs | P6 public contract update and `acceptance/pivot-9.2-telemetry-docs-acceptance.md` |
 
 ## Blockers
 
 | Blocker | Status | Owner | Notes |
 |---|---|---|---|
-| P5 outer Pivot cache feasibility not started | open | root-controller / performance owner | Requires production latency evidence; runtime remains unchanged. |
+| Future outer Pivot cache implementation | deferred | performance owner | Requires production latency evidence plus signed permission-aware cache key and invalidation spec. |
 
 ## Follow-Up
 
-Next recommended action after P4 acceptance:
+Next recommended action after v1.10 follow-up closure:
 
-1. Run final full `pytest -q`.
-2. Review and sign off P4 docs.
-3. Decide whether P5 outer Pivot cache feasibility has enough production telemetry evidence to evaluate now.
-4. Do not start tree+cascade runtime implementation before a future semantic spec and oracle matrix are signed.
+1. Review and sign off P1-P6 docs as the Python Pivot 9.2 follow-up closeout.
+2. Do not start tree+cascade runtime implementation before a future semantic spec and oracle matrix are signed.
+3. Do not start outer Pivot cache runtime before production telemetry, permission-aware cache key, and invalidation strategy are signed.

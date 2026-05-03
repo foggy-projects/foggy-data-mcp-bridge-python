@@ -22,7 +22,7 @@ Python Pivot v1.9 已完成 Stage 5A DomainTransport 与 Stage 5B C2 rows 轴两
 | P2 SQL Server cascade oracle / refusal evidence | accepted-refusal | SQL Server C2 cascade 稳定 fail-closed；不声明 oracle parity。 |
 | P3 MySQL 5.7 live evidence / refusal evidence | accepted-refusal | 显式 `mysql5.7` cascade / large-domain transport 稳定 fail-closed；不声明 oracle parity。 |
 | P4 tree + cascade semantic review | accepted-deferred | 已完成语义评审；runtime 继续 `PIVOT_CASCADE_TREE_REJECTED`。 |
-| P5 outer Pivot cache feasibility | deferred | 等 telemetry/性能证据证明需要。 |
+| P5 outer Pivot cache feasibility | accepted-deferred | 已完成 feasibility；不新增 runtime cache，等待 telemetry 和权限安全 cache key 规格。 |
 | P6 production telemetry examples | accepted-docs | 已补生产日志 marker、查询示例、拒绝分类和隐私规则。 |
 
 ## 文档清单
@@ -49,6 +49,9 @@ Python Pivot v1.9 已完成 Stage 5A DomainTransport 与 Stage 5B C2 rows 轴两
 | `acceptance/pivot-9.2-tree-cascade-semantic-review.md` | P4 tree+cascade 语义评审结论 |
 | `coverage/pivot-9.2-tree-cascade-semantic-coverage-audit.md` | P4 语义评审覆盖审计 |
 | `quality/pivot-9.2-tree-cascade-semantic-quality.md` | P4 语义评审质量门 |
+| `acceptance/pivot-9.2-outer-cache-feasibility.md` | P5 outer Pivot cache 可行性结论 |
+| `coverage/pivot-9.2-outer-cache-feasibility-coverage-audit.md` | P5 可行性覆盖审计 |
+| `quality/pivot-9.2-outer-cache-feasibility-quality.md` | P5 可行性质量门 |
 
 ## 外部基线
 
