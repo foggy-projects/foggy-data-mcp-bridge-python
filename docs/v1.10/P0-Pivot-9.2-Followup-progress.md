@@ -13,7 +13,7 @@
 - target: Python Pivot 9.2 Follow-Up
 - upstream_requirement: `docs/v1.10/P0-Pivot-9.2-Followup-Requirement.md`
 - implementation_plan: `docs/v1.10/P0-Pivot-9.2-Followup-Implementation-Plan.md`
-- current_status: p3-mysql57-refusal-accepted
+- current_status: p6-telemetry-docs-accepted
 - last_updated: 2026-05-03
 
 ## Phase Progress
@@ -26,7 +26,7 @@
 | P3 | MySQL 5.7 evidence | accepted-refusal | `acceptance/pivot-9.2-mysql57-refusal-acceptance.md` |
 | P4 | tree + cascade semantic review | deferred | N/A |
 | P5 | outer Pivot cache feasibility | deferred | N/A |
-| P6 | production telemetry examples | not-started | N/A |
+| P6 | production telemetry examples | accepted-docs | `operations/pivot-9.2-telemetry-log-query-examples.md` |
 
 ## Implementation Self-Check Template
 
@@ -39,7 +39,7 @@ When an implementation phase completes, fill this section before requesting revi
 - [x] QueryModel lifecycle, permissions, systemSlice, deniedColumns, sanitizer preserved.
 - [x] No temporary scripts, scratch files, or unrelated changes included.
 - [x] Tests and docs updated.
-- self_check_conclusion: P3 keeps explicit `mysql5.7` C2 cascade and large-domain transport fail-closed before executor SQL execution; no MySQL 5.7 oracle parity is claimed.
+- self_check_conclusion: P6 is documentation-only and records safe production log-query examples without adding runtime telemetry or exposing raw SQL/params.
 
 ## Testing Progress Template
 
@@ -61,20 +61,20 @@ When an implementation phase completes, fill this section before requesting revi
 | SQL Server has parity/refusal evidence | accepted-refusal | P2 acceptance + coverage docs |
 | MySQL 5.7 has live/refusal evidence | accepted-refusal | P3 acceptance + coverage docs |
 | tree+cascade remains rejected until semantic signoff | pending | TBD |
-| telemetry examples do not leak sensitive details | pending | TBD |
+| telemetry examples do not leak sensitive details | accepted-docs | P6 operations guide + quality docs |
 | schema/prompt match runtime | pending | TBD |
 
 ## Blockers
 
 | Blocker | Status | Owner | Notes |
 |---|---|---|---|
-| P6 production telemetry examples not started | open | python-engine-agent | Next low-risk follow-up candidate. |
+| P4 tree+cascade semantic review not started | open | root-controller / semantic reviewer | Runtime remains fail-closed until separate decision record exists. |
 
 ## Follow-Up
 
-Next recommended action after P3 acceptance:
+Next recommended action after P6 acceptance:
 
 1. Run final full `pytest -q`.
-2. Review and sign off P3 docs.
-3. Choose P6 telemetry examples as the next low-risk task, or start P4 semantic review without runtime changes.
+2. Review and sign off P6 docs.
+3. Start P4 tree+cascade semantic review without runtime changes, or defer it until product demand appears.
 4. Do not start P4 tree+cascade runtime implementation before a separate semantic decision record exists.

@@ -23,7 +23,7 @@ Python Pivot v1.9 已完成 Stage 5A DomainTransport 与 Stage 5B C2 rows 轴两
 | P3 MySQL 5.7 live evidence / refusal evidence | accepted-refusal | 显式 `mysql5.7` cascade / large-domain transport 稳定 fail-closed；不声明 oracle parity。 |
 | P4 tree + cascade semantic review | deferred | 高风险语义项，先评审，不直接实现。 |
 | P5 outer Pivot cache feasibility | deferred | 等 telemetry/性能证据证明需要。 |
-| P6 production telemetry examples | proposed | 低风险文档/运维项，可与 P1/P2 并行。 |
+| P6 production telemetry examples | accepted-docs | 已补生产日志 marker、查询示例、拒绝分类和隐私规则。 |
 
 ## 文档清单
 
@@ -42,6 +42,10 @@ Python Pivot v1.9 已完成 Stage 5A DomainTransport 与 Stage 5B C2 rows 轴两
 | `acceptance/pivot-9.2-mysql57-refusal-acceptance.md` | P3 MySQL 5.7 拒绝签收记录 |
 | `coverage/pivot-9.2-mysql57-refusal-coverage-audit.md` | P3 拒绝路径覆盖审计 |
 | `quality/pivot-9.2-mysql57-refusal-quality.md` | P3 实现质量门 |
+| `operations/pivot-9.2-telemetry-log-query-examples.md` | P6 生产日志查询与排障示例 |
+| `acceptance/pivot-9.2-telemetry-docs-acceptance.md` | P6 文档签收记录 |
+| `coverage/pivot-9.2-telemetry-docs-coverage-audit.md` | P6 文档覆盖审计 |
+| `quality/pivot-9.2-telemetry-docs-quality.md` | P6 文档质量门 |
 
 ## 外部基线
 
