@@ -7,6 +7,7 @@ not add or exercise a public DSL path.
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from decimal import Decimal
 from typing import Any, Iterable
@@ -42,6 +43,12 @@ from foggy.dataset_model.engine.compose.schema.output_schema import (
 from foggy.dataset_model.semantic.service import SemanticQueryService
 from foggy.demo.models.ecommerce_models import create_fact_sales_model
 
+try:
+    from foggy.dataset.db.executor import SQLServerExecutor
+    _HAS_SQLSERVER_EXECUTOR = True
+except ImportError:
+    _HAS_SQLSERVER_EXECUTOR = False
+
 
 MYSQL8_CONFIG = {
     "host": "localhost",
@@ -57,6 +64,14 @@ POSTGRES_CONFIG = {
     "database": "foggy_test",
     "user": "foggy",
     "password": "foggy_test_123",
+}
+
+SQLSERVER_CONFIG = {
+    "host": os.environ.get("FOGGY_SQLSERVER_HOST", "localhost"),
+    "port": int(os.environ.get("FOGGY_SQLSERVER_PORT", "11433")),
+    "database": os.environ.get("FOGGY_SQLSERVER_DATABASE", "foggy_test"),
+    "user": os.environ.get("FOGGY_SQLSERVER_USER", "sa"),
+    "password": os.environ.get("FOGGY_SQLSERVER_PASSWORD", "Foggy_Test_123!"),
 }
 
 RELATION_BODY_SQL = """
@@ -116,7 +131,7 @@ def _probe_or_skip(service: SemanticQueryService) -> None:
     _execute(service, "SELECT COUNT(*) AS cnt FROM dim_date")
 
 
-@pytest.fixture(params=["sqlite", "mysql8", "postgres"])
+@pytest.fixture(params=["sqlite", "mysql8", "postgres", "sqlserver"])
 def real_db_service(request, tmp_path):
     if request.param == "sqlite":
         db_path = str(tmp_path / "stable_relation_outer.sqlite")
@@ -157,8 +172,12 @@ def real_db_service(request, tmp_path):
         executor = SQLiteExecutor(db_path)
     elif request.param == "mysql8":
         executor = MySQLExecutor(**MYSQL8_CONFIG)
-    else:
+    elif request.param == "postgres":
         executor = PostgreSQLExecutor(**POSTGRES_CONFIG)
+    else:
+        if not _HAS_SQLSERVER_EXECUTOR:
+            pytest.skip("SQLServerExecutor not available (pyodbc not installed)")
+        executor = SQLServerExecutor(**SQLSERVER_CONFIG)
 
     service = _service(executor)
     if request.param != "sqlite":
@@ -329,8 +348,13 @@ def test_outer_aggregate_cte_hoist_oracle(real_db_service):
           AND d.date_key IS NOT NULL
         GROUP BY p.category_name
     """
+    if dialect == "sqlserver":
+        oracle_sql = ";" + oracle_sql.lstrip()
 
-    assert compiled.sql.lstrip().upper().startswith("WITH ")
+    if dialect == "sqlserver":
+        assert compiled.sql.lstrip().upper().startswith(";WITH ")
+    else:
+        assert compiled.sql.lstrip().upper().startswith("WITH ")
     assert compiled.params == (0,)
     assert _norm_aggregate(_execute(service, compiled.sql, compiled.params)) == _norm_aggregate(
         _execute(service, oracle_sql, compiled.params)
