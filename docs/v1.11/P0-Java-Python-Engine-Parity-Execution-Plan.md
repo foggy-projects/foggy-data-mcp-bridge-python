@@ -57,6 +57,8 @@ Closeout:
 
 Priority: P1.
 
+Status: accepted.
+
 Scope:
 
 - rolling 7/30/90.
@@ -77,6 +79,11 @@ Deliverables:
 - `docs/v1.11/acceptance/timewindow-current-parity-acceptance.md`
 - `docs/v1.11/coverage/timewindow-current-parity-coverage-audit.md`
 - `docs/v1.11/quality/timewindow-current-parity-quality.md`
+
+Closeout:
+
+- Current main rerun passed: 111 timeWindow / Java alignment / real DB matrix tests.
+- `timeWindow + pivot` fail-closed confirmation passed.
 
 ## Phase P3 - Compose / Stable Relation Runtime Boundary
 
@@ -152,6 +159,6 @@ Deliverables:
 
 ## Current Recommendation
 
-Start with P2 timeWindow current evidence refresh.
+Start with P3 compose / stable relation runtime boundary.
 
 Do not implement tree+cascade, outer Pivot cache, or stable relation runtime expansion until this audit proves they are the next highest-value gaps.

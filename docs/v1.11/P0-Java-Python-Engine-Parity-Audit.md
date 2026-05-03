@@ -42,8 +42,8 @@
 | Base query_model lifecycle | mostly aligned | aligned-with-refresh-needed | Refresh evidence against current code and permissions. |
 | Join / field resolution / formulas | mostly aligned | aligned-with-refresh-needed | Re-run formula parity and governance tests. |
 | CALCULATE / REMOVE | accepted-with-profile-note | aligned-for-restricted-subset | Restricted public subset has SQLite/MySQL8/PostgreSQL oracle; default mysql profile remains fail-closed. |
-| timeWindow | implemented with historical evidence | aligned-with-evidence-refresh-needed | Promote v1.5 evidence into current v1.11 signoff matrix; verify no regression. |
-| timeWindow + calculatedFields | implemented with historical evidence | aligned-with-known-contract-note | Confirm Java/Python alias projection difference is still intentional or fixed. |
+| timeWindow | accepted-current | aligned | v1.11 P2 reran current evidence matrix across SQLite/MySQL8/PostgreSQL/SQL Server. |
+| timeWindow + calculatedFields | accepted-current | aligned-for-post-scalar-subset | Post scalar subset remains accepted; outer aggregate/window stays deferred to relation layer. |
 | Pivot 9.x | signed off v1.10 | aligned-with-accepted-risks | No immediate runtime work; keep deferred items gated. |
 | Compose CTE basic | implemented | likely aligned | Needs current version test/evidence refresh. |
 | Stable relation outer aggregate/window | contract mirror, not Python runtime | partial-by-design | Must not claim runtime parity unless implementation is approved. |
@@ -76,10 +76,10 @@
 
 | Capability | Python Evidence | Status | Gap |
 |---|---|---|---|
-| rolling / cumulative | v1.5 quality says implemented | aligned-with-refresh-needed | Re-run current tests and attach to v1.11. |
-| comparative yoy/mom/wow | v1.5 quality says implemented, MySQL8 2025 seed evidence | aligned-with-refresh-needed | Re-run SQLite/MySQL8/Postgres; decide SQL Server status. |
-| timeWindow + calculatedFields scalar post fields | v1.5 quality says implemented | aligned-with-known-risk | Need check Java/Python alias projection contract note. |
-| timeWindow + pivot | prompt says rejected | aligned | Include schema/runtime rejection test in current matrix. |
+| rolling / cumulative | current v1.11 evidence | accepted | `timewindow-current-parity-acceptance.md` |
+| comparative yoy/mom/wow | current v1.11 evidence | accepted | MySQL8/PostgreSQL/SQL Server real DB matrix passed. |
+| timeWindow + calculatedFields scalar post fields | current v1.11 evidence | accepted-for-post-scalar-subset | SQLite + real DB matrix passed; agg/window remains deferred. |
+| timeWindow + pivot | prompt says rejected | accepted-fail-closed | Runtime/schema rejection tests passed. |
 
 ### Pivot
 
@@ -127,13 +127,12 @@ These are audit estimates, not release claims. v1.11 must replace estimates with
 
 ## Highest-Value Next Work
 
-1. timeWindow current-version evidence refresh.
-2. compose/stable relation runtime boundary audit.
-3. governance cross-path matrix.
-4. v1.11 signoff with explicit runtime parity vs contract mirror labels.
+1. compose/stable relation runtime boundary audit.
+2. governance cross-path matrix.
+3. v1.11 signoff with explicit runtime parity vs contract mirror labels.
 
 ## Decision
 
 Python should not start new Pivot runtime features now.
 
-The next implementation work should be gated by v1.11 parity audit phases. CALCULATE P1 is now accepted for the restricted public subset; the remaining likely real gaps are timeWindow evidence refresh, compose stable relation runtime boundary, and governance consistency.
+The next implementation work should be gated by v1.11 parity audit phases. CALCULATE P1 and timeWindow P2 are now accepted for their signed-off subsets; the remaining likely real gaps are compose stable relation runtime boundary and governance consistency.
