@@ -24,11 +24,14 @@ from foggy.dataset_model.semantic.pivot.domain_transport import (
     DomainTransportPlan,
     DomainRelationFragment,
     SqliteCteDomainRenderer,
+    PostgresCteDomainRenderer,
+    Mysql8DomainRenderer,
     build_join_predicate,
     assemble_domain_transport_sql,
     resolve_renderer,
     PIVOT_DOMAIN_TRANSPORT_REFUSED,
     SQLITE_MAX_BIND_PARAMS,
+    MYSQL57_MAX_BIND_PARAMS,
 )
 from foggy.dataset.dialects.sqlite import SqliteDialect
 from foggy.dataset.dialects.mysql import MySqlDialect
@@ -146,6 +149,95 @@ class TestSqliteCteDomainRenderer:
         plan = DomainTransportPlan(columns=("c",), tuples=())
         ok, _ = self._rnd().can_render(plan)
         assert not ok
+
+
+class TestPostgresCteDomainRenderer:
+
+    def _rnd(self):
+        return PostgresCteDomainRenderer()
+
+    def test_single_column_cte_shape(self):
+        plan = DomainTransportPlan(
+            columns=("category_name",),
+            tuples=(("Electronics",), ("Clothing",)),
+        )
+        frag = self._rnd().render(plan)
+
+        assert frag.placement == "CTE"
+        assert '"category_name"' in frag.cte_sql
+        assert "VALUES (?), (?)" in frag.cte_sql
+        assert frag.columns == ("category_name",)
+        assert frag.domain_params == ("Electronics", "Clothing")
+        assert frag.relation_alias == "_d"
+
+    def test_null_safe_predicate_uses_is_not_distinct(self):
+        rnd = self._rnd()
+        pred = rnd.build_null_safe_predicate('p."cat"', '_d."cat"')
+        assert pred == 'p."cat" IS NOT DISTINCT FROM _d."cat"'
+
+    def test_params_limit_refuses(self):
+        n = 10001
+        plan = DomainTransportPlan(
+            columns=("c",),
+            tuples=tuple((i,) for i in range(n)),
+        )
+        rnd = self._rnd()
+        ok, reason = rnd.can_render(plan)
+        assert not ok
+        assert PIVOT_DOMAIN_TRANSPORT_REFUSED in reason
+
+
+class TestMysql8DomainRenderer:
+
+    def _rnd(self):
+        return Mysql8DomainRenderer()
+
+    def test_single_column_cte_shape(self):
+        plan = DomainTransportPlan(
+            columns=("category_name",),
+            tuples=(("Electronics",), ("Clothing",)),
+        )
+        frag = self._rnd().render(plan)
+
+        assert frag.placement == "CTE"
+        assert "`category_name`" in frag.cte_sql
+        assert '"category_name"' not in frag.cte_sql
+        # Check UNION ALL SELECT
+        assert "SELECT ?" in frag.cte_sql
+        assert "UNION ALL SELECT ?" in frag.cte_sql
+        assert frag.columns == ("category_name",)
+        assert frag.domain_params == ("Electronics", "Clothing")
+        assert frag.relation_alias == "_d"
+
+    def test_null_safe_predicate_uses_spaceship(self):
+        rnd = self._rnd()
+        pred = rnd.build_null_safe_predicate('p."cat"', '_d."cat"')
+        assert pred == 'p."cat" <=> _d."cat"'
+
+    def test_join_predicate_uses_mysql_domain_identifier_quote(self):
+        plan = DomainTransportPlan(
+            columns=("product$categoryName",),
+            tuples=(("Electronics",),),
+        )
+        rnd = self._rnd()
+        frag = rnd.render(plan)
+        join_sql = build_join_predicate(
+            frag,
+            {"product$categoryName": "p.`category_name`"},
+            rnd,
+        )
+        assert "p.`category_name` <=> _d.`product$categoryName`" in join_sql
+
+    def test_params_limit_refuses(self):
+        n = MYSQL57_MAX_BIND_PARAMS + 1
+        plan = DomainTransportPlan(
+            columns=("c",),
+            tuples=tuple((i,) for i in range(n)),
+        )
+        rnd = self._rnd()
+        ok, reason = rnd.can_render(plan)
+        assert not ok
+        assert PIVOT_DOMAIN_TRANSPORT_REFUSED in reason
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -287,9 +379,21 @@ class TestResolveRenderer:
         with pytest.raises(NotImplementedError, match=PIVOT_DOMAIN_TRANSPORT_REFUSED):
             resolve_renderer(None)
 
-    def test_mysql_refuses_in_p3b(self):
+    def test_mysql_resolves(self):
+        r = resolve_renderer(MySqlDialect())
+        assert isinstance(r, Mysql8DomainRenderer)
+
+    def test_postgres_resolves(self):
+        class PgDialect:
+            def name(self): return "postgres"
+        r = resolve_renderer(PgDialect())
+        assert isinstance(r, PostgresCteDomainRenderer)
+
+    def test_mysql57_refuses(self):
+        class MySql57Dialect:
+            def name(self): return "mysql5.7"
         with pytest.raises(NotImplementedError, match=PIVOT_DOMAIN_TRANSPORT_REFUSED):
-            resolve_renderer(MySqlDialect())
+            resolve_renderer(MySql57Dialect())
 
 
 # ─────────────────────────────────────────────────────────────────────────────

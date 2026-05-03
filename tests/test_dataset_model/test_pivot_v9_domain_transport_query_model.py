@@ -276,8 +276,11 @@ class TestPivotV9DomainTransportQueryModel:
 
     def test_unsupported_dialect_fail_closed(self, service_and_db):
         service, _ = service_and_db
-        # Mock dialect to MySQL
-        service._dialect = MySqlDialect()
+        # Mock dialect to unsupported one
+        class SqlServerDialect:
+            def name(self): return "sqlserver"
+            
+        service._dialect = SqlServerDialect()
 
         plan = DomainTransportPlan(
             columns=("product$categoryName",),

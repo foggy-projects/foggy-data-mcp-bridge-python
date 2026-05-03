@@ -133,6 +133,11 @@ class DomainRelationRenderer(ABC):
         """
         ...
 
+    def quote_domain_column(self, column: str) -> str:
+        """Quote a domain CTE column name for this dialect."""
+        escaped = column.replace('"', '""')
+        return f'"{escaped}"'
+
 
 # ── SQLite CTE renderer ─────────────────────────────────────────────
 
@@ -172,7 +177,7 @@ class SqliteCteDomainRenderer(DomainRelationRenderer):
 
         # ── CTE definition ──────────────────────────────────────────
         # Column names in the CTE are the QM field names, double-quoted.
-        col_defs = ", ".join(f'"{c}"' for c in plan.columns)
+        col_defs = ", ".join(self.quote_domain_column(c) for c in plan.columns)
         row_ph = ", ".join("?" for _ in range(n_cols))
         values_rows = ", ".join(f"({row_ph})" for _ in plan.tuples)
         cte_sql = (
@@ -203,6 +208,152 @@ class SqliteCteDomainRenderer(DomainRelationRenderer):
     def build_null_safe_predicate(self, left_expr: str, right_expr: str) -> str:
         """SQLite NULL-safe equality: ``left IS right``."""
         return f"{left_expr} IS {right_expr}"
+
+
+# ── PostgreSQL CTE renderer ─────────────────────────────────────────
+
+class PostgresCteDomainRenderer(DomainRelationRenderer):
+    """Render domain relation as a CTE using PostgreSQL ``VALUES`` syntax.
+
+    NULL-safe matching uses the ``IS NOT DISTINCT FROM`` operator.
+    """
+
+    _CTE_NAME = "_pivot_domain_transport"
+    _JOIN_ALIAS = "_d"
+
+    def can_render(self, plan: DomainTransportPlan) -> Tuple[bool, Optional[str]]:
+        if not plan.tuples:
+            return False, None
+        if not plan.columns:
+            return False, f"{PIVOT_DOMAIN_TRANSPORT_REFUSED}: empty columns"
+        # PostgreSQL max params is 32767, but we use 10000 to be safe
+        total_params = len(plan.tuples) * len(plan.columns)
+        if total_params > 10000:
+            return False, (
+                f"{PIVOT_DOMAIN_TRANSPORT_REFUSED}: PostgreSQL bind param limit "
+                f"exceeded ({total_params} > 10000). "
+                f"Reduce domain size or use a different dialect."
+            )
+        return True, None
+
+    def render(self, plan: DomainTransportPlan) -> DomainRelationFragment:
+        ok, reason = self.can_render(plan)
+        if not ok:
+            raise NotImplementedError(
+                reason or f"{PIVOT_DOMAIN_TRANSPORT_REFUSED}: cannot render plan"
+            )
+
+        n_cols = len(plan.columns)
+
+        # ── CTE definition ──────────────────────────────────────────
+        col_defs = ", ".join(f'"{c}"' for c in plan.columns)
+        row_ph = ", ".join("?" for _ in range(n_cols))
+        values_rows = ", ".join(f"({row_ph})" for _ in plan.tuples)
+        cte_sql = (
+            f"WITH {self._CTE_NAME}({col_defs}) AS (\n"
+            f"    VALUES {values_rows}\n"
+            f")"
+        )
+
+        domain_params: List[Any] = []
+        for t in plan.tuples:
+            domain_params.extend(t)
+
+        logger.info(
+            "PIVOT_DOMAIN_TRANSPORT: dialect=postgres, strategy=CTE, "
+            "domain_size=%d, columns=%s",
+            len(plan.tuples), plan.columns,
+        )
+
+        return DomainRelationFragment(
+            cte_sql=cte_sql,
+            relation_alias=self._JOIN_ALIAS,
+            columns=plan.columns,
+            domain_params=tuple(domain_params),
+            placement="CTE",
+        )
+
+    def build_null_safe_predicate(self, left_expr: str, right_expr: str) -> str:
+        """PostgreSQL NULL-safe equality: ``left IS NOT DISTINCT FROM right``."""
+        return f"{left_expr} IS NOT DISTINCT FROM {right_expr}"
+
+
+# ── MySQL 8 CTE renderer ────────────────────────────────────────────
+
+class Mysql8DomainRenderer(DomainRelationRenderer):
+    """Render domain relation as a CTE using MySQL ``UNION ALL SELECT``.
+
+    Avoids ``VALUES ROW(?)`` due to stability issues in older/mixed MySQL 8.x versions.
+    NULL-safe matching uses the ``<=>`` operator.
+    """
+
+    _CTE_NAME = "_pivot_domain_transport"
+    _JOIN_ALIAS = "_d"
+
+    def can_render(self, plan: DomainTransportPlan) -> Tuple[bool, Optional[str]]:
+        if not plan.tuples:
+            return False, None
+        if not plan.columns:
+            return False, f"{PIVOT_DOMAIN_TRANSPORT_REFUSED}: empty columns"
+        total_params = len(plan.tuples) * len(plan.columns)
+        if total_params > MYSQL57_MAX_BIND_PARAMS:
+            return False, (
+                f"{PIVOT_DOMAIN_TRANSPORT_REFUSED}: MySQL bind param limit "
+                f"exceeded ({total_params} > {MYSQL57_MAX_BIND_PARAMS}). "
+            )
+        return True, None
+
+    def render(self, plan: DomainTransportPlan) -> DomainRelationFragment:
+        ok, reason = self.can_render(plan)
+        if not ok:
+            raise NotImplementedError(
+                reason or f"{PIVOT_DOMAIN_TRANSPORT_REFUSED}: cannot render plan"
+            )
+
+        # ── CTE definition using UNION ALL SELECT ───────────────────
+        col_defs = ", ".join(self.quote_domain_column(c) for c in plan.columns)
+
+        selects = []
+        for i, t in enumerate(plan.tuples):
+            # First row must provide aliases for some strict SQL engines,
+            # though CTE columns already define names. We use standard ? params.
+            row_cols = ", ".join("?" for _ in plan.columns)
+            selects.append(f"SELECT {row_cols}")
+
+        union_all_sql = "\n    UNION ALL ".join(selects)
+
+        cte_sql = (
+            f"WITH {self._CTE_NAME}({col_defs}) AS (\n"
+            f"    {union_all_sql}\n"
+            f")"
+        )
+
+        domain_params: List[Any] = []
+        for t in plan.tuples:
+            domain_params.extend(t)
+
+        logger.info(
+            "PIVOT_DOMAIN_TRANSPORT: dialect=mysql8, strategy=CTE_UNION_ALL, "
+            "domain_size=%d, columns=%s",
+            len(plan.tuples), plan.columns,
+        )
+
+        return DomainRelationFragment(
+            cte_sql=cte_sql,
+            relation_alias=self._JOIN_ALIAS,
+            columns=plan.columns,
+            domain_params=tuple(domain_params),
+            placement="CTE",
+        )
+
+    def build_null_safe_predicate(self, left_expr: str, right_expr: str) -> str:
+        """MySQL NULL-safe equality: ``left <=> right``."""
+        return f"{left_expr} <=> {right_expr}"
+
+    def quote_domain_column(self, column: str) -> str:
+        """MySQL identifier quoting for domain CTE columns."""
+        escaped = column.replace("`", "``")
+        return f"`{escaped}`"
 
 
 # ── JOIN predicate builder ─────────────────────────────────────────
@@ -241,7 +392,7 @@ def build_join_predicate(
     predicates = []
     for col in fragment.columns:
         left_expr = field_sql_map[col]
-        right_expr = f'{fragment.relation_alias}."{col}"'
+        right_expr = f"{fragment.relation_alias}.{renderer.quote_domain_column(col)}"
         predicates.append(renderer.build_null_safe_predicate(left_expr, right_expr))
 
     join_predicate = " AND ".join(predicates)
@@ -279,12 +430,20 @@ def resolve_renderer(dialect) -> DomainRelationRenderer:
 
     if dialect_name == "sqlite":
         return SqliteCteDomainRenderer()
+    if dialect_name in ("postgres", "postgresql"):
+        return PostgresCteDomainRenderer()
+    if dialect_name in ("mysql", "mysql8"):
+        return Mysql8DomainRenderer()
 
-    # MySQL8 / PostgreSQL: stubbed as fail-closed for P3-B.
-    # Will be implemented in P3-C/D.
+    if dialect_name == "mysql5.7" or dialect_name.startswith("mysql5"):
+        raise NotImplementedError(
+            f"{PIVOT_DOMAIN_TRANSPORT_REFUSED}: dialect '{dialect_name}' "
+            f"domain transport not supported. MySQL 5.7 lacks robust CTE support."
+        )
+
     raise NotImplementedError(
         f"{PIVOT_DOMAIN_TRANSPORT_REFUSED}: dialect '{dialect_name}' "
-        f"domain transport not yet implemented (planned for P3-C/D)"
+        f"domain transport not yet implemented"
     )
 
 

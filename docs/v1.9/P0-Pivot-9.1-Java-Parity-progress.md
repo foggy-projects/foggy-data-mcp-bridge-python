@@ -41,8 +41,8 @@
 | P3-A | Stage 5A renderer design | **done** | `docs/v1.9/P2-Pivot-9.1-Stage5A-Renderer-Design.md` — design-only |
 | P3-B | Stage 5A renderer prototype | **done** | `domain_transport.py` — SQLiteCteDomainRenderer + `build_join_predicate` + `assemble_domain_transport_sql` + 21 tests all executing assembled SQL |
 | P3-C | Stage 5A SQLite production wiring + queryModel oracle parity | **done** | `domain_transport_plan` internal carrier + queryModel wiring + SQLite oracle parity |
-| P3-D | Stage 5A MySQL8/PostgreSQL oracle parity + signoff | blocked | Requires MySQL8/PostgreSQL renderers and three-DB oracle parity. |
-| P4 | C2 staged SQL cascade | blocked | Requires P3-D oracle parity first. |
+| P3-D | Stage 5A MySQL8/PostgreSQL oracle parity + signoff | **done** | `tests/integration/test_pivot_v9_domain_transport_real_db_matrix.py` — 3 DBs oracle parity verified. |
+| P4 | C2 staged SQL cascade | pending | P3-D oracle parity is unblocked, ready for CTE planner implementation. |
 | P5 | Quality / coverage / acceptance | pending | Per phase. |
 
 ## Implementation Self-Check
@@ -80,7 +80,11 @@ pytest -q
 
 ### External DB tests (MySQL8 / Postgres)
 
-External DB integration tests (`test_pivot_v9_flat_real_db_matrix.py`, `test_pivot_v9_grid_real_db_matrix.py`) were not re-run in P3-C. P3-C scope is SQLite production wiring + queryModel oracle parity. MySQL8/PostgreSQL domain transport renderers and real-DB oracle parity remain P3-D.
+External DB integration tests for Stage 5A domain transport are now fully implemented in `test_pivot_v9_domain_transport_real_db_matrix.py`.
+- **MySQL8**: Tested against `localhost:13308` (`foggy_test` db). Verified `UNION ALL SELECT` CTE syntax with `<=>` NULL-safe matching. 0 skipped.
+- **PostgreSQL**: Tested against `localhost:15432` (`foggy_test` db). Verified `VALUES` CTE syntax with `IS NOT DISTINCT FROM` NULL-safe matching. 0 skipped.
+- **Oracle Parity**: 100% parity achieved across SQLite, MySQL8, and PostgreSQL for Additive SUM, Non-additive COUNT_DISTINCT, NULL member handling, systemSlice isolation, deniedColumns rejection, and OR-of-AND fallback generation.
+- **Acceptance guard**: Real-DB transport tests force `threshold=0` for CTE cases and assert generated SQL contains `WITH _pivot_domain_transport` + `INNER JOIN _pivot_domain_transport`, preventing accidental fallback-only verification.
 
 ## P1 Fail-Closed Rules Implemented
 
@@ -96,8 +100,8 @@ External DB integration tests (`test_pivot_v9_flat_real_db_matrix.py`, `test_piv
 
 - **P3-B** Stage 5A renderer prototype — **complete (with executable closure)**. `SqliteCteDomainRenderer` generates CTE SQL + domain params only (no hardcoded alias). `build_join_predicate()` accepts `field_sql_map` from caller to produce correct left-side SQL expressions. `assemble_domain_transport_sql()` injects CTE prefix + INNER JOIN before WHERE/GROUP BY, producing directly executable SQL. 21 tests all execute assembled SQL on real SQLite.
 - **P3-C** Stage 5A SQLite production wiring — **complete**. Pivot production path restored; internal `domain_transport_plan` uses `PrivateAttr`; large domain uses SQLite CTE transport; small domain uses OR-of-AND fallback; queryModel oracle parity covers SUM, COUNT_DISTINCT, NULL member, systemSlice, deniedColumns, schema isolation, and domain-only join.
-- **P3-D** Stage 5A MySQL8/PostgreSQL oracle parity + signoff — blocked until MySQL8 (`Mysql8CteDomainRenderer`) and PostgreSQL (`PostgresCteDomainRenderer`) implementations pass three-DB oracle parity.
-- **P4** C2 rows two-level cascade staged SQL — remains blocked until P3-D oracle parity passes and staged CTE planner design is reviewed.
+- **P3-D** Stage 5A MySQL8/PostgreSQL oracle parity + signoff — **complete**. `Mysql8DomainRenderer` and `PostgresCteDomainRenderer` implementations are active. Three-DB (SQLite, MySQL8, Postgres) oracle parity validated on real `foggy_test` instances.
+- **P4** C2 rows two-level cascade staged SQL — conditionally unblocked. Requires staged CTE planner implementation design review next.
 - **Staged SQL / DomainTransport** — SQLite is wired into `query_model()` production path. MySQL8/PostgreSQL remain fail-closed until P3-D. No memory fallback permitted.
 
 ## Experience Progress
@@ -137,10 +141,12 @@ External DB integration tests (`test_pivot_v9_flat_real_db_matrix.py`, `test_piv
 | P3-C SQLite queryModel production parity | `test_pivot_v9_domain_transport_query_model.py` — 9 tests | **done** |
 | P3-C Pivot regression pack | 66 targeted tests | **done** |
 
+| P3-D MySQL8 and PostgreSQL renderer implementations | `domain_transport.py` — Mysql8DomainRenderer, PostgresCteDomainRenderer | **done** |
+| P3-D Real DB oracle parity (MySQL8, Postgres) | `test_pivot_v9_domain_transport_real_db_matrix.py` | **done** |
+
 ## Blockers
 
-- P3-D requires MySQL8 (`Mysql8CteDomainRenderer`) and PostgreSQL (`PostgresCteDomainRenderer`) implementations + three-DB oracle parity before Stage 5A can be marked fully implemented.
-- P4 C2 requires P3-D oracle parity to pass, plus staged CTE planner implementation.
+- P4 C2 requires staged CTE planner implementation and Java semantics alignment.
 - preAgg + Pivot interaction: **decided in P3-A design** — preAgg does NOT participate in Pivot auxiliary queries.
 
 ## 后续衔接
