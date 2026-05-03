@@ -64,6 +64,16 @@ When an implementation phase completes, fill this section before requesting revi
 | telemetry examples do not leak sensitive details | accepted-docs | P6 operations guide + quality docs |
 | schema/prompt match runtime | accepted-docs | P6 public contract update and `acceptance/pivot-9.2-telemetry-docs-acceptance.md` |
 
+## Acceptance Status
+
+- acceptance_status: signed-off
+- acceptance_decision: accepted-with-risks
+- signed_off_by: root-controller
+- signed_off_at: 2026-05-03
+- acceptance_record: `docs/v1.10/acceptance/version-signoff.md`
+- blocking_items: none
+- follow_up_required: yes
+
 ## Blockers
 
 | Blocker | Status | Owner | Notes |

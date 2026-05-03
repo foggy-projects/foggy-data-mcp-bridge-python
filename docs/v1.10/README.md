@@ -25,6 +25,16 @@ Python Pivot v1.9 已完成 Stage 5A DomainTransport 与 Stage 5B C2 rows 轴两
 | P5 outer Pivot cache feasibility | accepted-deferred | 已完成 feasibility；不新增 runtime cache，等待 telemetry 和权限安全 cache key 规格。 |
 | P6 production telemetry examples | accepted-docs | 已补生产日志 marker、查询示例、拒绝分类和隐私规则。 |
 
+## Acceptance Status
+
+- acceptance_status: signed-off
+- acceptance_decision: accepted-with-risks
+- signed_off_by: root-controller
+- signed_off_at: 2026-05-03
+- acceptance_record: `docs/v1.10/acceptance/version-signoff.md`
+- blocking_items: none
+- follow_up_required: yes
+
 ## 文档清单
 
 | 文件 | 用途 |
@@ -52,6 +62,7 @@ Python Pivot v1.9 已完成 Stage 5A DomainTransport 与 Stage 5B C2 rows 轴两
 | `acceptance/pivot-9.2-outer-cache-feasibility.md` | P5 outer Pivot cache 可行性结论 |
 | `coverage/pivot-9.2-outer-cache-feasibility-coverage-audit.md` | P5 可行性覆盖审计 |
 | `quality/pivot-9.2-outer-cache-feasibility-quality.md` | P5 可行性质量门 |
+| `acceptance/version-signoff.md` | v1.10 follow-up 版本级签收记录 |
 
 ## 外部基线
 
