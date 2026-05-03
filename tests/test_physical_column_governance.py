@@ -350,6 +350,40 @@ class TestValidateFieldAccessBlacklist:
         assert not result.valid
         assert "discountAmount" in result.blocked_fields
 
+    def test_denied_column_blocks_calculate_metric_dependency(self):
+        result = validate_field_access(
+            columns=["orderId$caption"],
+            slice_items=[],
+            order_by=[],
+            calculated_fields=[{
+                "name": "totalShare",
+                "expression": (
+                    "SUM(salesAmount) / NULLIF(CALCULATE(SUM(salesAmount), "
+                    "REMOVE(customer$customerType)), 0)"
+                ),
+            }],
+            denied_qm_fields={"salesAmount"},
+        )
+        assert not result.valid
+        assert "salesAmount" in result.blocked_fields
+
+    def test_denied_column_blocks_calculate_remove_dependency(self):
+        result = validate_field_access(
+            columns=["orderId$caption"],
+            slice_items=[],
+            order_by=[],
+            calculated_fields=[{
+                "name": "totalShare",
+                "expression": (
+                    "SUM(salesAmount) / NULLIF(CALCULATE(SUM(salesAmount), "
+                    "REMOVE(customer$customerType)), 0)"
+                ),
+            }],
+            denied_qm_fields={"customer$customerType"},
+        )
+        assert not result.valid
+        assert "customer$customerType" in result.blocked_fields
+
     def test_no_denied_passes(self):
         result = validate_field_access(
             columns=["orderId$caption", "salesAmount"],
@@ -430,6 +464,29 @@ class TestCombinedWhitelistBlacklist:
         assert not result.valid
         assert "taxAmount" in result.blocked_fields   # whitelist blocks
         assert "costAmount" in result.blocked_fields   # blacklist blocks
+
+    def test_whitelist_blocks_calculate_alias_chain_dependency(self):
+        result = validate_field_access(
+            columns=["customer$customerType", "totalShare"],
+            slice_items=[],
+            order_by=[],
+            calculated_fields=[
+                {"name": "baseSales", "expression": "salesAmount"},
+                {
+                    "name": "totalShare",
+                    "expression": (
+                        "SUM(baseSales) / NULLIF(CALCULATE(SUM(baseSales), "
+                        "REMOVE(customer$customerType)), 0)"
+                    ),
+                },
+            ],
+            field_access=FieldAccessDef(
+                visible=["customer$customerType", "baseSales", "totalShare"]
+            ),
+            denied_qm_fields=set(),
+        )
+        assert not result.valid
+        assert "salesAmount" in result.blocked_fields
 
 
 # ============================================================================
@@ -550,6 +607,47 @@ class TestServiceDeniedColumns:
         result = sales_service.query_model("FactSalesModel", req, mode="validate")
         assert result.error is not None
         assert "discountAmount" in result.error
+
+    def test_denied_column_blocks_calculate_dependency(self, sales_service):
+        req = SemanticQueryRequest(
+            columns=["customer$customerType", "totalShare"],
+            group_by=["customer$customerType"],
+            calculated_fields=[{
+                "name": "totalShare",
+                "expression": (
+                    "SUM(salesAmount) / NULLIF(CALCULATE(SUM(salesAmount), "
+                    "REMOVE(customer$customerType)), 0)"
+                ),
+            }],
+            denied_columns=[
+                DeniedColumn(table="fact_sales", column="sales_amount"),
+            ],
+        )
+        result = sales_service.query_model("FactSalesModel", req, mode="validate")
+        assert result.error is not None
+        assert "salesAmount" in result.error
+
+    def test_field_access_blocks_calculate_alias_chain_dependency(self, sales_service):
+        req = SemanticQueryRequest(
+            columns=["customer$customerType", "totalShare"],
+            group_by=["customer$customerType"],
+            calculated_fields=[
+                {"name": "baseSales", "expression": "salesAmount"},
+                {
+                    "name": "totalShare",
+                    "expression": (
+                        "SUM(baseSales) / NULLIF(CALCULATE(SUM(baseSales), "
+                        "REMOVE(customer$customerType)), 0)"
+                    ),
+                },
+            ],
+            field_access=FieldAccessDef(
+                visible=["customer$customerType", "baseSales", "totalShare"]
+            ),
+        )
+        result = sales_service.query_model("FactSalesModel", req, mode="validate")
+        assert result.error is not None
+        assert "salesAmount" in result.error
 
     def test_combined_whitelist_blacklist_service(self, sales_service):
         """Both field_access + denied_columns active on query_model."""

@@ -287,23 +287,62 @@ def _extract_fields_from_slice(slice_items: List[Any]) -> Set[str]:
 # ---------------------------------------------------------------------------
 
 def _extract_fields_from_calculated(calc_fields: List[Dict[str, Any]]) -> Set[str]:
-    """Extract source field references from calculatedFields definitions."""
-    fields: Set[str] = set()
+    """Extract source field references from calculatedFields definitions.
+
+    Calculated fields may reference earlier calculated-field aliases.  Field
+    governance must evaluate the underlying base fields, otherwise a hidden
+    field could be wrapped in an alias and then reused by another formula.
+    """
     if not calc_fields:
-        return fields
+        return set()
+
+    calc_exprs: Dict[str, str] = {}
+    explicit_sources: Dict[str, Set[str]] = {}
+    anonymous_deps: Set[str] = set()
+
     for cf in calc_fields:
+        name = cf.get("name")
         expr = cf.get("expression") or cf.get("formula") or ""
+        deps: Set[str] = set()
         if isinstance(expr, str):
-            fields.update(_extract_field_dependencies(expr))
-        # Also check explicit source fields
+            deps.update(_extract_field_dependencies(expr))
+
         for key in ("sourceField", "source_field", "field", "fields"):
             val = cf.get(key)
             if isinstance(val, str):
-                fields.add(val)
+                deps.add(val)
             elif isinstance(val, list):
                 for v in val:
                     if isinstance(v, str):
-                        fields.add(v)
+                        deps.add(v)
+
+        if isinstance(name, str) and name:
+            if isinstance(expr, str):
+                calc_exprs[name] = expr
+            explicit_sources[name] = deps
+        else:
+            anonymous_deps.update(deps)
+
+    def _resolve(dep: str, visiting: Set[str]) -> Set[str]:
+        if dep not in calc_exprs:
+            return {dep}
+        if dep in visiting:
+            return {dep}
+        next_visiting = set(visiting)
+        next_visiting.add(dep)
+        raw_deps = set(explicit_sources.get(dep, set()))
+        if not raw_deps:
+            raw_deps.update(_extract_field_dependencies(calc_exprs[dep]))
+        resolved: Set[str] = set()
+        for raw_dep in raw_deps:
+            resolved.update(_resolve(raw_dep, next_visiting))
+        return resolved
+
+    fields: Set[str] = set()
+    for name in calc_exprs:
+        fields.update(_resolve(name, set()))
+    for dep in anonymous_deps:
+        fields.update(_resolve(dep, set()))
     return fields
 
 
