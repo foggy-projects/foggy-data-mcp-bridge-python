@@ -16,6 +16,14 @@ from .models import (
     RelationCapabilities,
     RelationSql,
 )
+from .outer_query import (
+    OrderSpec,
+    OuterAggregateSpec,
+    OuterWindowSpec,
+    RelationOuterQuery,
+    compile_outer_aggregate,
+    compile_outer_window,
+)
 
 __all__ = [
     "SemanticKind",
@@ -26,4 +34,10 @@ __all__ = [
     "RelationSql",
     "RelationCapabilities",
     "CompiledRelation",
+    "OrderSpec",
+    "OuterAggregateSpec",
+    "OuterWindowSpec",
+    "RelationOuterQuery",
+    "compile_outer_aggregate",
+    "compile_outer_window",
 ]
