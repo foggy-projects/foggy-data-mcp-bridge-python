@@ -192,6 +192,21 @@ class TestCascadeRejected:
         assert err is not None
         assert PIVOT_CASCADE_NON_ADDITIVE_REJECTED in err
 
+    def test_column_subtotals_with_cascade_rejected(self, svc):
+        """columnSubtotals remains outside Python cascade totals scope."""
+        payload = {
+            "outputFormat": "grid",
+            "rows": [
+                {"field": "product$categoryName", "limit": 2, "orderBy": ["-salesAmount"]},
+                {"field": "salesDate$year", "limit": 1, "orderBy": ["-salesAmount"]},
+            ],
+            "metrics": ["salesAmount"],
+            "options": {"columnSubtotals": True},
+        }
+        err = _query(svc, payload)
+        assert err is not None
+        assert PIVOT_CASCADE_SCOPE_UNSUPPORTED in err
+
     def test_missing_order_by_on_cascade_limit_rejected(self, svc):
         """limit without orderBy → must reject PIVOT_CASCADE_ORDER_BY_REQUIRED."""
         payload = {

@@ -38,6 +38,7 @@ class GridShaper:
         # 1. Extract ordered unique Row Headers and Col Headers
         row_headers_list = []
         col_headers_list = []
+        row_meta_lookup = {}
 
         seen_rows = set()
         seen_cols = set()
@@ -49,6 +50,7 @@ class GridShaper:
             if r_tup not in seen_rows:
                 seen_rows.add(r_tup)
                 row_headers_list.append(r_tup)
+                row_meta_lookup[r_tup] = row.get("_sys_meta")
 
             if c_tup not in seen_cols:
                 seen_cols.add(c_tup)
@@ -64,7 +66,7 @@ class GridShaper:
                     h = {}
                     for j, f in enumerate(row_fields):
                         h[f] = r_tup[j]
-                    h["isSubtotal"] = False
+                    h["isSubtotal"] = bool(row_meta_lookup.get(r_tup))
                     h["metric"] = m
                     final_row_headers.append(h)
 
@@ -79,7 +81,7 @@ class GridShaper:
                 h = {}
                 for j, f in enumerate(row_fields):
                     h[f] = r_tup[j]
-                h["isSubtotal"] = False
+                h["isSubtotal"] = bool(row_meta_lookup.get(r_tup))
                 final_row_headers.append(h)
 
             for c_tup in col_headers_list:

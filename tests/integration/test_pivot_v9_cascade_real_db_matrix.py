@@ -145,6 +145,53 @@ def _norm_results(rows: Iterable[dict[str, Any]], row_key1: str, row_key2: str, 
     return sorted(normalized, key=lambda r: (r["cat1"] is None, r["cat1"], r["cat2"] is None, r["cat2"]))
 
 
+def _cascade_totals_oracle_sql() -> str:
+    return """
+WITH base AS (
+    SELECT p.category_name as cat, p.sub_category_id as sub, SUM(f.sales_amount) as val
+    FROM fact_sales f
+    LEFT JOIN dim_product p ON f.product_key = p.product_key
+    GROUP BY p.category_name, p.sub_category_id
+),
+parent_agg AS (
+    SELECT cat, SUM(val) as p_val
+    FROM base
+    GROUP BY cat
+),
+parent_rank AS (
+    SELECT cat, ROW_NUMBER() OVER (ORDER BY CASE WHEN p_val IS NULL THEN 1 ELSE 0 END, p_val DESC, cat ASC) as rn
+    FROM parent_agg
+),
+parent_domain AS (
+    SELECT cat
+    FROM parent_rank
+    WHERE rn <= 2
+),
+child_rank AS (
+    SELECT b.cat, b.sub, b.val,
+           ROW_NUMBER() OVER (
+             PARTITION BY b.cat
+             ORDER BY CASE WHEN b.val IS NULL THEN 1 ELSE 0 END, b.val DESC, b.cat ASC, b.sub ASC
+           ) as rn
+    FROM base b
+    INNER JOIN parent_domain p ON (b.cat = p.cat OR (b.cat IS NULL AND p.cat IS NULL))
+),
+final_cells AS (
+    SELECT cat, sub, val
+    FROM child_rank
+    WHERE rn <= 1
+)
+"""
+
+
+def _metric_map(rows: Iterable[dict[str, Any]], key: str, metric: str) -> dict[Any, Decimal | None]:
+    result = {}
+    for row in rows:
+        value = row.get(metric)
+        result[row.get(key)] = _number(value) if value is not None else None
+    return result
+
+
 def test_cascade_two_level_topn(real_db_service):
     payload = {
         "outputFormat": "flat",
@@ -240,3 +287,101 @@ WHERE rn <= 1
     oracle_norm = _norm_results(oracle_rows, "cat", "sub", "val")
     
     assert pivot_norm == oracle_norm
+
+
+def test_cascade_flat_row_subtotals_and_grand_total_surviving_domain(real_db_service):
+    payload = {
+        "outputFormat": "flat",
+        "rows": [
+            {"field": "product$categoryName", "limit": 2, "orderBy": ["-salesAmount"]},
+            {"field": "product$subCategoryId", "limit": 1, "orderBy": ["-salesAmount"]},
+        ],
+        "metrics": ["salesAmount"],
+        "options": {"rowSubtotals": True, "grandTotal": True},
+    }
+    req = SemanticQueryRequest(pivot=PivotRequest(**payload))
+    dialect, service = real_db_service
+    res = service.query_model("FactSalesModel", req, mode="execute")
+    assert not res.error, f"Failed: {res.error}"
+
+    oracle_base = _cascade_totals_oracle_sql()
+    oracle_sub = _oracle(
+        service,
+        oracle_base + "SELECT cat, SUM(val) AS val FROM final_cells GROUP BY cat",
+    )
+    oracle_grand = _oracle(
+        service,
+        oracle_base + "SELECT SUM(val) AS val FROM final_cells",
+    )
+
+    subtotals = [
+        row for row in res.items
+        if row.get("_sys_meta", {}).get("isRowSubtotal")
+    ]
+    assert all(row["product$subCategoryId"] == "ALL" for row in subtotals)
+    assert _metric_map(subtotals, "product$categoryName", "salesAmount") == _metric_map(oracle_sub, "cat", "val")
+
+    grand = [
+        row for row in res.items
+        if row.get("_sys_meta", {}).get("isGrandTotal")
+    ]
+    assert len(grand) == 1
+    assert grand[0]["product$categoryName"] == "ALL"
+    assert grand[0]["product$subCategoryId"] == "ALL"
+    expected_grand = oracle_grand[0]["val"] if oracle_grand else None
+    assert (
+        _number(grand[0]["salesAmount"]) if grand[0]["salesAmount"] is not None else None
+    ) == (
+        _number(expected_grand) if expected_grand is not None else None
+    )
+
+
+def test_cascade_grid_row_subtotals_and_grand_total_surviving_domain(real_db_service):
+    payload = {
+        "outputFormat": "grid",
+        "rows": [
+            {"field": "product$categoryName", "limit": 2, "orderBy": ["-salesAmount"]},
+            {"field": "product$subCategoryId", "limit": 1, "orderBy": ["-salesAmount"]},
+        ],
+        "metrics": ["salesAmount"],
+        "options": {"rowSubtotals": True, "grandTotal": True},
+    }
+    req = SemanticQueryRequest(pivot=PivotRequest(**payload))
+    dialect, service = real_db_service
+    res = service.query_model("FactSalesModel", req, mode="execute")
+    assert not res.error, f"Failed: {res.error}"
+    grid = res.items[0]
+
+    oracle_base = _cascade_totals_oracle_sql()
+    oracle_sub = _oracle(
+        service,
+        oracle_base + "SELECT cat, SUM(val) AS val FROM final_cells GROUP BY cat",
+    )
+    oracle_grand = _oracle(
+        service,
+        oracle_base + "SELECT SUM(val) AS val FROM final_cells",
+    )
+    expected_sub = _metric_map(oracle_sub, "cat", "val")
+    expected_grand = oracle_grand[0]["val"] if oracle_grand else None
+
+    headers = grid["rowHeaders"]
+    cells = grid["cells"]
+    metric_values = {
+        tuple((k, h.get(k)) for k in ("product$categoryName", "product$subCategoryId")): cells[i][0]
+        for i, h in enumerate(headers)
+    }
+
+    subtotal_headers = [h for h in headers if h.get("isSubtotal") and h.get("product$subCategoryId") == "ALL"
+                        and h.get("product$categoryName") != "ALL"]
+    assert {
+        h["product$categoryName"]: _number(metric_values[(("product$categoryName", h["product$categoryName"]), ("product$subCategoryId", "ALL"))])
+        for h in subtotal_headers
+    } == expected_sub
+
+    grand_key = (("product$categoryName", "ALL"), ("product$subCategoryId", "ALL"))
+    assert grand_key in metric_values
+    assert (
+        _number(metric_values[grand_key]) if metric_values[grand_key] is not None else None
+    ) == (
+        _number(expected_grand) if expected_grand is not None else None
+    )

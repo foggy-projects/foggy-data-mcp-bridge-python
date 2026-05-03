@@ -17,6 +17,10 @@ from foggy.dataset_model.semantic.pivot.cascade_detector import (
     PIVOT_CASCADE_NON_ADDITIVE_REJECTED,
 )
 from foggy.dataset_model.semantic.pivot.domain_transport import resolve_renderer
+from foggy.dataset_model.semantic.pivot.cascade_totals import (
+    append_cascade_totals,
+    validate_cascade_totals_supported,
+)
 
 
 def _get_field_name(item: Any) -> str:
@@ -41,6 +45,11 @@ def execute_cascade_staged_sql(
     table_model = service.get_model(model_name)
     if not table_model:
         return SemanticQueryResponse.from_error(f"Model not found: {model_name}")
+
+    try:
+        validate_cascade_totals_supported(service, model_name, pivot)
+    except NotImplementedError as e:
+        return SemanticQueryResponse.from_error(str(e))
 
     # Find the constrained fields (parent and child)
     rows = list(pivot.rows)
@@ -260,6 +269,7 @@ INNER JOIN _child_domain c ON {_null_safe_eq(f'b.{_quote(p_alias)}', f'c.{_quote
     try:
         processor = MemoryCubeProcessor(items, cloned_pivot, key_map)
         processed_items = processor.process()
+        processed_items = append_cascade_totals(processed_items, cloned_pivot, key_map)
         
         if getattr(cloned_pivot, "output_format", "flat") == "grid":
             shaper = GridShaper(processed_items, cloned_pivot, key_map)
