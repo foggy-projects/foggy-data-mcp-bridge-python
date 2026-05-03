@@ -59,15 +59,15 @@ Python v1.8 已完成 Pivot S1-S3：
 
 | Java 9.1 capability | Python current status | Python v1.9 decision |
 |---|---|---|
-| LLM routing matrix | 文档未对齐 9.1 | P0 对齐文档，不改工具 schema |
-| `query_model` lifecycle preservation | 基础 queryModel 有治理链路 | P2 需证明 managed relation 等价性 |
-| Stage 5A large-domain transport | missing | blocked by P2；未证明前保持 fail-closed |
+| LLM routing matrix | aligned in v1.9 docs | P0 complete; no tool schema change |
+| `query_model` lifecycle preservation | verified for scoped transport/cascade paths | P2 feasibility complete; scoped implementation preserves queryModel base-query lifecycle |
+| Stage 5A large-domain transport | implemented for SQLite/MySQL8/PostgreSQL | P3 signed off with real SQL oracle parity |
 | DomainTransport public DSL | Java 无公开 DSL | Python 不新增公开 DSL |
-| rows two-level cascade C2 | missing；当前内存 TopN 不是等价实现 | P1 先拒绝，P4 再 staged SQL 实现 |
-| cascade no memory fallback | missing | P1 必须补 |
-| deterministic NULL tie-breaking | missing for cascade | P4 需要 SQL oracle |
-| additive subtotal over surviving domain | missing for cascade | P4 需要 SQL oracle |
-| unsupported cascade error codes | missing | P1 必须补 |
+| rows two-level cascade C2 | implemented for scoped rows exactly two-level TopN | P4 signed off with risks; cascade totals deferred |
+| cascade no memory fallback | implemented | Unsupported shapes fail closed before memory processing |
+| deterministic NULL tie-breaking | implemented for scoped cascade | P4 covered by semantic and real DB oracle tests |
+| additive subtotal / grandTotal over surviving domain | missing for cascade | deferred to Python 9.2; not part of scoped P4 CTE generation signoff |
+| unsupported cascade error codes | implemented | Stable `PIVOT_CASCADE_*` prefixes are covered by tests |
 | SQL Server cascade | Java deferred/refused | Python deferred/refused |
 | MySQL 5.7 cascade | Java refused/deferred evidence | Python refused/deferred |
 
@@ -86,3 +86,4 @@ P2 之后的实现验收：
 - 任何 Stage 5A/C2 运行时能力必须有 SQLite/MySQL8/Postgres 真实 SQL oracle parity。
 - 权限、`systemSlice`、`deniedColumns`、params order、preAgg/sanitizer/logging 不能绕过。
 - quality gate、coverage audit、acceptance signoff 必须独立落文档。
+- Cascade subtotal / grandTotal parity is excluded from the scoped Python P4 signoff and must remain deferred until Python has explicit subtotal-row oracle coverage.

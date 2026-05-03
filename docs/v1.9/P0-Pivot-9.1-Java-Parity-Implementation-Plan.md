@@ -35,7 +35,7 @@
 
 ## Phase P1 - Validation / Fail-Closed Parity
 
-状态：ready-to-start-after-review。
+状态：done。
 
 目标：
 
@@ -95,7 +95,7 @@
 
 ## Phase P3 - Stage 5A Large-Domain Transport Parity
 
-状态：blocked-by-P2。
+状态：done。
 
 目标：
 
@@ -116,7 +116,7 @@
 
 ## Phase P4 - C2 Rows Two-Level Cascade SQL Parity
 
-状态：blocked-by-P2。
+状态：signed-off-with-risks。
 
 目标：
 
@@ -128,7 +128,7 @@
 - child level: constrained by surviving parent domain -> aggregate -> having -> rank -> limit。
 - child having/limit 不影响 parent survival。
 - deterministic ordering: metric NULL bucket + dimension NULL buckets + prefix/current key ASC。
-- additive subtotal/grandTotal over surviving domain。
+- additive subtotal/grandTotal over surviving domain is deferred from scoped Python P4 signoff unless explicit subtotal-row oracle coverage is added.
 - no memory fallback。
 
 拒绝：
@@ -164,7 +164,7 @@
 | Child having does not affect parent | child filter only removes child members | SQLite/MySQL8/Postgres real SQL parity |
 | Missing `orderBy` | reject | unit |
 | Deterministic NULL tie-breaking | stable cross-dialect ordering | SQLite/MySQL8/Postgres real SQL parity |
-| Additive subtotal/grandTotal surviving domain | totals over surviving domain only | SQLite/MySQL8/Postgres real SQL parity |
+| Additive subtotal/grandTotal surviving domain | deferred to Python 9.2; do not claim P4 parity | N/A for scoped P4 |
 | Unsupported dialect | reject, no memory fallback | unit / simulated MySQL5.7 |
 | Non-additive cascade | reject | unit |
 | Tree + cascade | reject | unit |
@@ -174,6 +174,7 @@
 Move these out of Python v1.9 unless separately accepted:
 
 - tree + cascade / advanced tree subtotal semantics。
+- cascade subtotal/grandTotal oracle parity。
 - SQL Server cascade oracle / CI。
 - MySQL 5.7 live evidence。
 - outer Pivot cache。

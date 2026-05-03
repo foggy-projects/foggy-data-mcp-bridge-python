@@ -123,8 +123,6 @@ def execute_cascade_staged_sql(
         for col_name in base_request.columns:
             alias_map[col_name] = col_name
 
-    print("DEBUG ALIAS MAP:", alias_map)
-
     def _quote(f: str) -> str:
         # Simple dialect quoting wrapper
         if dialect.name in ("mysql", "mysql8"):
@@ -174,6 +172,14 @@ def execute_cascade_staged_sql(
         params.append(val)
         return f"HAVING {metric_q} {op} ?"
 
+    def _null_safe_eq(left: str, right: str) -> str:
+        if dialect.name in ("mysql", "mysql8"):
+            return f"{left} <=> {right}"
+        elif dialect.name in ("postgres", "postgresql"):
+            return f"{left} IS NOT DISTINCT FROM {right}"
+        else:
+            return f"{left} IS {right}"
+
     p_having = _build_having(parent_field)
     p_order = _build_order_by(parent_field)
     p_limit = parent_field.limit
@@ -208,7 +214,7 @@ _parent_domain AS (
 _child_agg AS (
     SELECT b.{_quote(p_alias)}, b.{_quote(c_alias)}, {", ".join(f"SUM(b.{_quote(m)}) AS {_quote(m)}" for m in m_aliases)}
     FROM _base_query b
-    INNER JOIN _parent_domain p ON b.{_quote(p_alias)} = p.{_quote(p_alias)}
+    INNER JOIN _parent_domain p ON {_null_safe_eq(f'b.{_quote(p_alias)}', f'p.{_quote(p_alias)}')}
     GROUP BY b.{_quote(p_alias)}, b.{_quote(c_alias)}
     {c_having}
 ),
@@ -223,12 +229,11 @@ _child_domain AS (
 )
 SELECT b.*
 FROM _base_query b
-INNER JOIN _child_domain c ON b.{_quote(p_alias)} = c.{_quote(p_alias)} AND b.{_quote(c_alias)} = c.{_quote(c_alias)}
+INNER JOIN _child_domain c ON {_null_safe_eq(f'b.{_quote(p_alias)}', f'c.{_quote(p_alias)}')} AND {_null_safe_eq(f'b.{_quote(c_alias)}', f'c.{_quote(c_alias)}')}
 """
     
     # Execute the final query
     try:
-        print("\n--- STAGED SQL ---\n", staged_sql, "\n------------------\n")
         executor = service._resolve_executor(table_model)
         exec_res = service._run_async_in_sync(executor.execute(staged_sql, params=params))
         if getattr(exec_res, "error", None):
@@ -239,17 +244,13 @@ INNER JOIN _child_domain c ON b.{_quote(p_alias)} = c.{_quote(p_alias)} AND b.{_
 
     # Construct the final SemanticQueryResponse
     schema_info = base_resp.schema_info  # inherit schema from base query
-    response = SemanticQueryResponse(items=items, schema_info=schema_info)
-    
-    # Pass to GridShaper/MemoryCubeProcessor via the normal lifecycle if needed.
-    # Wait, query_model usually returns the response, and Pivot pipeline in SemanticQueryService intercept it.
-    # But since we're replacing the pivot pipeline for this request, we must do the shaping ourselves.
     
     from foggy.dataset_model.semantic.pivot.memory_cube import MemoryCubeProcessor
     from foggy.dataset_model.semantic.pivot.grid_shaper import GridShaper
     
-    # Clear limits and havings on the pivot request since we already applied them in SQL
-    for item in pivot.rows:
+    # Clone pivot request to clear limits and havings without mutating the original request
+    cloned_pivot = pivot.model_copy(deep=True)
+    for item in cloned_pivot.rows:
         if isinstance(item, PivotAxisField):
             item.limit = None
             item.having = None
@@ -257,11 +258,11 @@ INNER JOIN _child_domain c ON b.{_quote(p_alias)} = c.{_quote(p_alias)} AND b.{_
     key_map = alias_map
 
     try:
-        processor = MemoryCubeProcessor(items, pivot, key_map)
+        processor = MemoryCubeProcessor(items, cloned_pivot, key_map)
         processed_items = processor.process()
         
-        if getattr(pivot, "output_format", "flat") == "grid":
-            shaper = GridShaper(processed_items, pivot, key_map)
+        if getattr(cloned_pivot, "output_format", "flat") == "grid":
+            shaper = GridShaper(processed_items, cloned_pivot, key_map)
             result = [shaper.shape()]
         else:
             # Reverse map for flat format

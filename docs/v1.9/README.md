@@ -20,12 +20,12 @@ Python 当前已完成 v1.8 S1-S3：Pivot 合同层、flat/grid runtime、axis h
 
 | 功能 | 状态 | 备注 |
 |---|---|---|
-| P0 文档与边界对齐 | planning-ready | 本目录定义 Python 9.1 parity 的目标、非目标、测试矩阵和执行门。 |
-| P1 validation / fail-closed parity | ready-to-start-after-review | 先补 cascade 检测与拒绝边界，禁止当前内存路径误执行 cascade。 |
-| P2 managed relation lifecycle feasibility | gated | 需要确认 Python 是否有等价 queryModel managed relation 生命周期。 |
-| P3 Stage 5A large-domain transport parity | blocked-by-P2 | 未证明 managed relation 前不实现。 |
-| P4 C2 rows two-level cascade SQL parity | blocked-by-P2 | 未证明 staged SQL planner 与 oracle 前不实现。 |
-| P5 quality / coverage / acceptance | pending | 每个实现阶段完成后再执行。 |
+| P0 文档与边界对齐 | done | 本目录定义 Python 9.1 parity 的目标、非目标、测试矩阵和执行门。 |
+| P1 validation / fail-closed parity | done | Cascade 检测与拒绝边界已实现，禁止当前内存路径误执行 unsupported cascade。 |
+| P2 managed relation lifecycle feasibility | done | Feasibility 结论为 conditional-pass。 |
+| P3 Stage 5A large-domain transport parity | done | SQLite/MySQL8/PostgreSQL real SQL oracle parity 已签收。 |
+| P4 C2 rows two-level cascade SQL parity | signed-off-with-risks | Scoped rows two-level cascade staged SQL 已签收；cascade totals defer 到 9.2。 |
+| P5 quality / coverage / acceptance | signed-off | P4 quality gate, coverage audit, and feature acceptance are complete. |
 
 ## 文档清单
 
@@ -35,6 +35,9 @@ Python 当前已完成 v1.8 S1-S3：Pivot 合同层、flat/grid runtime、axis h
 | `P0-Pivot-9.1-Java-Parity-Implementation-Plan.md` | 分期实施计划、测试矩阵、9.2.0 延后项 |
 | `P0-Pivot-9.1-Java-Parity-Code-Inventory.md` | Python/Java 参考代码与预期改动范围 |
 | `P0-Pivot-9.1-Java-Parity-progress.md` | 后续执行 agent 的进度回写模板 |
+| `quality/pivot-stage5b-c2-cascade-implementation-quality.md` | P4 implementation quality gate |
+| `coverage/pivot-stage5b-c2-cascade-coverage-audit.md` | P4 test coverage audit |
+| `acceptance/pivot-stage5b-c2-cascade-acceptance.md` | P4 feature acceptance signoff |
 
 ## 外部基线
 

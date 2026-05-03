@@ -9,7 +9,7 @@
 ## 基本信息
 
 - version: v1.9
-- status: p3c-sqlite-production-wiring-complete
+- status: p5-stage5b-cascade-signed-off
 - java_reference_commit: `10e863e9`
 - python_baseline: `docs/v1.8/P0-Pivot-V9-Python-Parity-Gap-Report.md`
 - owner: TBD
@@ -42,8 +42,8 @@
 | P3-B | Stage 5A renderer prototype | **done** | `domain_transport.py` — SQLiteCteDomainRenderer + `build_join_predicate` + `assemble_domain_transport_sql` + 21 tests all executing assembled SQL |
 | P3-C | Stage 5A SQLite production wiring + queryModel oracle parity | **done** | `domain_transport_plan` internal carrier + queryModel wiring + SQLite oracle parity |
 | P3-D | Stage 5A MySQL8/PostgreSQL oracle parity + signoff | **done** | `tests/integration/test_pivot_v9_domain_transport_real_db_matrix.py` — 3 DBs oracle parity verified. |
-| P4 | C2 staged SQL cascade | pending | P3-D oracle parity is unblocked, ready for CTE planner implementation. |
-| P5 | Quality / coverage / acceptance | pending | Per phase. |
+| P4 | C2 staged SQL cascade | **done** | P4 oracle parity and semantic boundaries verified. |
+| P5 | Quality / coverage / acceptance | **done** | Quality gate, coverage audit, acceptance record completed. |
 
 ## Implementation Self-Check
 
@@ -60,7 +60,7 @@ Current P1 self-check:
 - [x] No memory fallback for cascade (detector raises before translation).
 - [x] No public DSL was changed.
 - [x] Stage 5A SQLite production wiring is isolated to internal `domain_transport_plan`; no public DSL change.
-- [x] No C2 cascade runtime code was added.
+- [x] C2 cascade staged SQL generator added and verified.
 
 ## Testing Progress
 
@@ -71,12 +71,12 @@ Current P1 self-check:
 ```powershell
 pytest tests/test_dataset_model/test_pivot_v9_contract_shell.py tests/test_dataset_model/test_pivot_v9_flat.py tests/test_dataset_model/test_pivot_v9_grid.py tests/test_dataset_model/test_pivot_v9_cascade_validation.py -q
 ```
-**Result: included in 66-test Pivot regression pack**
+**Result: included in 105-test Pivot regression pack**
 
 ```powershell
 pytest -q
 ```
-**Result: 3880 passed in 12.75s (0 failed)** — 3859 baseline + 21 new domain transport tests
+**Result: 3928 passed in 12.47s (0 failed)** — full repository regression clean on 2026-05-03.
 
 ### External DB tests (MySQL8 / Postgres)
 
@@ -85,6 +85,18 @@ External DB integration tests for Stage 5A domain transport are now fully implem
 - **PostgreSQL**: Tested against `localhost:15432` (`foggy_test` db). Verified `VALUES` CTE syntax with `IS NOT DISTINCT FROM` NULL-safe matching. 0 skipped.
 - **Oracle Parity**: 100% parity achieved across SQLite, MySQL8, and PostgreSQL for Additive SUM, Non-additive COUNT_DISTINCT, NULL member handling, systemSlice isolation, deniedColumns rejection, and OR-of-AND fallback generation.
 - **Acceptance guard**: Real-DB transport tests force `threshold=0` for CTE cases and assert generated SQL contains `WITH _pivot_domain_transport` + `INNER JOIN _pivot_domain_transport`, preventing accidental fallback-only verification.
+
+### Stage 5B C2 Cascade tests
+
+```powershell
+pytest tests/test_dataset_model/test_pivot_v9_cascade_semantics.py tests/integration/test_pivot_v9_cascade_real_db_matrix.py -q -rs
+```
+**Result: 12 passed, 0 skipped**
+
+```powershell
+pytest tests/test_dataset_model/test_pivot_v9_contract_shell.py tests/test_dataset_model/test_pivot_v9_flat.py tests/test_dataset_model/test_pivot_v9_grid.py tests/test_dataset_model/test_pivot_v9_cascade_validation.py tests/test_dataset_model/test_pivot_v9_domain_transport.py tests/test_dataset_model/test_pivot_v9_domain_transport_query_model.py tests/test_dataset_model/test_pivot_v9_cascade_semantics.py tests/integration/test_pivot_v9_domain_transport_real_db_matrix.py tests/integration/test_pivot_v9_cascade_real_db_matrix.py -q -rs
+```
+**Result: 105 passed, 0 skipped**
 
 ## P1 Fail-Closed Rules Implemented
 
@@ -96,13 +108,14 @@ External DB integration tests for Stage 5A domain transport are now fully implem
 | columns axis with limit or having | `PIVOT_CASCADE_CROSS_AXIS_REJECTED` | Only rows-axis single-level is supported. |
 | parentShare / baselineRatio + constrained field | `PIVOT_CASCADE_NON_ADDITIVE_REJECTED` | Derived metrics cannot participate in cascade. |
 
-## Still Blocked / Conditional
+## Completed / Deferred
 
 - **P3-B** Stage 5A renderer prototype — **complete (with executable closure)**. `SqliteCteDomainRenderer` generates CTE SQL + domain params only (no hardcoded alias). `build_join_predicate()` accepts `field_sql_map` from caller to produce correct left-side SQL expressions. `assemble_domain_transport_sql()` injects CTE prefix + INNER JOIN before WHERE/GROUP BY, producing directly executable SQL. 21 tests all execute assembled SQL on real SQLite.
 - **P3-C** Stage 5A SQLite production wiring — **complete**. Pivot production path restored; internal `domain_transport_plan` uses `PrivateAttr`; large domain uses SQLite CTE transport; small domain uses OR-of-AND fallback; queryModel oracle parity covers SUM, COUNT_DISTINCT, NULL member, systemSlice, deniedColumns, schema isolation, and domain-only join.
 - **P3-D** Stage 5A MySQL8/PostgreSQL oracle parity + signoff — **complete**. `Mysql8DomainRenderer` and `PostgresCteDomainRenderer` implementations are active. Three-DB (SQLite, MySQL8, Postgres) oracle parity validated on real `foggy_test` instances.
-- **P4** C2 rows two-level cascade staged SQL — conditionally unblocked. Requires staged CTE planner implementation design review next.
-- **Staged SQL / DomainTransport** — SQLite is wired into `query_model()` production path. MySQL8/PostgreSQL remain fail-closed until P3-D. No memory fallback permitted.
+- **P4** C2 rows two-level cascade staged SQL — **complete**. `cascade_staged_sql.py` fully implemented and verified with NULL-safe CTE transport and cross-database oracle parity.
+- **Staged SQL / DomainTransport** — SQLite, MySQL8, and PostgreSQL are wired and covered by real SQL oracle parity. No memory fallback is permitted for cascade.
+- **Cascade subtotal/grandTotal** — deferred outside P4 CTE generation scope. Python's current `MemoryCubeProcessor` does not provide cascade subtotal rows equivalent to Java C2 totals; this remains a Python 9.2 follow-up unless separately prioritized.
 
 ## Experience Progress
 
@@ -134,7 +147,7 @@ External DB integration tests for Stage 5A domain transport are now fully implem
 | P3-B SQLite param limit fail-closed | `test_params_limit_refuses` | **done** |
 | P3-B unsupported dialect fail-closed | `test_none_dialect_refuses` + `test_mysql_refuses_in_p3b` | **done** |
 | P3-B build_join_predicate (field_sql_map) | `TestBuildJoinPredicate` — 3 tests | **done** |
-| P3-B full regression | 3880 passed (3859 base + 21 new) | **done** |
+| P3-B full regression | Historical P3-B result: 3880 passed; superseded by final P5 full regression: 3928 passed | **done** |
 | P3-C `domain_transport_plan` public schema isolation | `test_domain_transport_plan_schema_isolation` | **done** |
 | P3-C domain-only join injection | `test_domain_join_without_explicit_selection` | **done** |
 | P3-C small-domain OR-of-AND fallback | `test_size_fallback` | **done** |
@@ -144,15 +157,23 @@ External DB integration tests for Stage 5A domain transport are now fully implem
 | P3-D MySQL8 and PostgreSQL renderer implementations | `domain_transport.py` — Mysql8DomainRenderer, PostgresCteDomainRenderer | **done** |
 | P3-D Real DB oracle parity (MySQL8, Postgres) | `test_pivot_v9_domain_transport_real_db_matrix.py` | **done** |
 
+
+| P4 Engine cleanup (no prints, deep copies) | cascade_staged_sql.py cleanup | **done** |
+| P4 Real DB Oracle Parity (Cascade) | `test_pivot_v9_cascade_real_db_matrix.py` | **done** |
+| P4 Semantic Boundary Coverage | `test_pivot_v9_cascade_semantics.py` | **done** |
+| P5 Implementation quality gate | `docs/v1.9/quality/pivot-stage5b-c2-cascade-implementation-quality.md` | **done** |
+| P5 Test coverage audit | `docs/v1.9/coverage/pivot-stage5b-c2-cascade-coverage-audit.md` | **done** |
+| P5 Feature acceptance | `docs/v1.9/acceptance/pivot-stage5b-c2-cascade-acceptance.md` | **done** |
+
 ## Blockers
 
-- P4 C2 requires staged CTE planner implementation and Java semantics alignment.
+- No blocking items for the scoped P4 Stage 5B C2 cascade staged SQL signoff.
 - preAgg + Pivot interaction: **decided in P3-A design** — preAgg does NOT participate in Pivot auxiliary queries.
+- Cascade subtotal/grandTotal parity is explicitly deferred to Python 9.2 follow-up.
 
-## 后续衔接
+## 建议
 
 Recommended next step:
 
-1. Review this P0 package.
-2. If accepted, generate a P1 execution prompt for cascade validation/fail-closed parity only.
-3. After P1 implementation, run implementation self-check, quality gate, coverage audit, and feature acceptance.
+1. Commit the scoped P4/P5 signoff files separately from unrelated dirty worktree changes.
+2. Plan Python 9.2 follow-ups: cascade subtotal/grandTotal, SQL Server oracle, MySQL 5.7 live evidence, tree + cascade, telemetry.

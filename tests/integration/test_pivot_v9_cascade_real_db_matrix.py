@@ -11,6 +11,8 @@ import pytest
 from foggy.dataset.db.executor import DatabaseExecutor, MySQLExecutor, PostgreSQLExecutor, SQLiteExecutor
 from foggy.dataset_model.semantic.service import SemanticQueryService
 from foggy.demo.models.ecommerce_models import create_fact_sales_model
+from typing import Any, Iterable
+from decimal import Decimal
 from foggy.mcp_spi import SemanticQueryRequest, PivotRequest
 from foggy.mcp_spi.semantic import DeniedColumn
 
@@ -124,34 +126,23 @@ def _oracle(service: SemanticQueryService, sql: str, params: list[Any] | None = 
     return result.rows
 
 
-def _pick(row: dict[str, Any], *keys: str) -> Any:
-    for key in keys:
-        if key in row:
-            return row[key]
-            
-    for k, v in row.items():
-        if k not in ["一级品类名称", "product$categoryName", "category_name", "category"]:
-            return v
-            
-    raise AssertionError(f"missing any of {keys} in row {row}")
-
-
 def _number(value: Any) -> Decimal:
     if isinstance(value, Decimal):
         return value
     return Decimal(str(value))
 
-
-def _norm_results(rows: Iterable[dict[str, Any]], row_key: str, metric_key: str, *extra_metric_keys: str) -> list[dict[str, Any]]:
+def _norm_results(rows: Iterable[dict[str, Any]], row_key1: str, row_key2: str, metric_key: str) -> list[dict[str, Any]]:
     normalized = []
     for row in rows:
-        cat = _pick(row, "一级品类名称", "product$categoryName", "category_name", row_key)
-        val = _pick(row, "销售金额", "salesAmount", "metric", metric_key, *extra_metric_keys)
+        cat1 = row.get(row_key1)
+        cat2 = row.get(row_key2)
+        val = row.get(metric_key)
         normalized.append({
-            "category": str(cat) if cat is not None else None,
+            "cat1": str(cat1) if cat1 is not None else None,
+            "cat2": str(cat2) if cat2 is not None else None,
             "metric": _number(val) if val is not None else None,
         })
-    return sorted(normalized, key=lambda r: (r["category"] is None, r["category"]))
+    return sorted(normalized, key=lambda r: (r["cat1"] is None, r["cat1"], r["cat2"] is None, r["cat2"]))
 
 
 def test_cascade_two_level_topn(real_db_service):
@@ -166,14 +157,86 @@ def test_cascade_two_level_topn(real_db_service):
     req = SemanticQueryRequest(pivot=PivotRequest(**payload))
     dialect, service = real_db_service
     res = service.query_model("FactSalesModel", req, mode="execute")
-    if getattr(res, "error", None):
-        print("ERROR_TEXT_START\n", res.error, "\nERROR_TEXT_END")
     assert not res.error, f"Failed: {res.error}"
+
+    oracle_sql = """
+WITH base AS (
+    SELECT p.category_name as cat, p.sub_category_id as sub, SUM(f.sales_amount) as val
+    FROM fact_sales f
+    LEFT JOIN dim_product p ON f.product_key = p.product_key
+    GROUP BY p.category_name, p.sub_category_id
+),
+parent_agg AS (
+    SELECT cat, SUM(val) as p_val
+    FROM base
+    GROUP BY cat
+),
+parent_rank AS (
+    SELECT cat, ROW_NUMBER() OVER (ORDER BY CASE WHEN p_val IS NULL THEN 1 ELSE 0 END, p_val DESC, cat ASC) as rn
+    FROM parent_agg
+),
+child_rank AS (
+    SELECT b.cat, b.sub, b.val, ROW_NUMBER() OVER (PARTITION BY b.cat ORDER BY CASE WHEN b.val IS NULL THEN 1 ELSE 0 END, b.val DESC, b.cat ASC, b.sub ASC) as rn
+    FROM base b
+    INNER JOIN parent_rank p ON (b.cat = p.cat OR (b.cat IS NULL AND p.cat IS NULL))
+    WHERE p.rn <= 2
+)
+SELECT cat, sub, val
+FROM child_rank
+WHERE rn <= 1
+"""
+    oracle_rows = _oracle(service, oracle_sql)
+
+    # Use _norm_results to compare them consistently
+    pivot_norm = _norm_results(res.items, "product$categoryName", "product$subCategoryId", "salesAmount")
+    oracle_norm = _norm_results(oracle_rows, "cat", "sub", "val")
+
+    assert pivot_norm == oracle_norm
+
+def test_cascade_null_parent_dimension(real_db_service):
+    payload = {
+        "outputFormat": "flat",
+        "rows": [
+            {"field": "product$categoryName", "limit": 2, "orderBy": ["salesAmount"]},
+            {"field": "product$subCategoryId", "limit": 1, "orderBy": ["salesAmount"]},
+        ],
+        "metrics": ["salesAmount"]
+    }
+    req = SemanticQueryRequest(pivot=PivotRequest(**payload))
+    dialect, service = real_db_service
+    res = service.query_model("FactSalesModel", req, mode="execute")
+    assert not res.error, f"Failed: {res.error}"
+
+    oracle_sql = """
+WITH base AS (
+    SELECT p.category_name as cat, p.sub_category_id as sub, SUM(f.sales_amount) as val
+    FROM fact_sales f
+    LEFT JOIN dim_product p ON f.product_key = p.product_key
+    GROUP BY p.category_name, p.sub_category_id
+),
+parent_agg AS (
+    SELECT cat, SUM(val) as p_val
+    FROM base
+    GROUP BY cat
+),
+parent_rank AS (
+    SELECT cat, ROW_NUMBER() OVER (ORDER BY CASE WHEN p_val IS NULL THEN 1 ELSE 0 END, p_val ASC, cat ASC) as rn
+    FROM parent_agg
+),
+child_rank AS (
+    SELECT b.cat, b.sub, b.val, ROW_NUMBER() OVER (PARTITION BY b.cat ORDER BY CASE WHEN b.val IS NULL THEN 1 ELSE 0 END, b.val ASC, b.cat ASC, b.sub ASC) as rn
+    FROM base b
+    INNER JOIN parent_rank p ON (b.cat = p.cat OR (b.cat IS NULL AND p.cat IS NULL))
+    WHERE p.rn <= 2
+)
+SELECT cat, sub, val
+FROM child_rank
+WHERE rn <= 1
+"""
+    oracle_rows = _oracle(service, oracle_sql)
+
+    # Use _norm_results to compare them consistently
+    pivot_norm = _norm_results(res.items, "product$categoryName", "product$subCategoryId", "salesAmount")
+    oracle_norm = _norm_results(oracle_rows, "cat", "sub", "val")
     
-    print("RES_ITEMS:", res.items)
-    if dialect == "sqlite":
-        assert len(res.items) == 2
-        categories = {item["product$categoryName"] for item in res.items}
-        assert len(categories) == 2
-    else:
-        assert len(res.items) > 0
+    assert pivot_norm == oracle_norm
