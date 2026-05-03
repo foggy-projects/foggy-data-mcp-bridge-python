@@ -574,6 +574,12 @@ class SemanticQueryService(SemanticServiceResolver):
         pivot_request = getattr(request, "pivot", None)
         if pivot_request:
             is_pivot = True
+            
+            from foggy.dataset_model.semantic.pivot.cascade_detector import is_rows_two_level_cascade
+            if is_rows_two_level_cascade(pivot_request):
+                from foggy.dataset_model.semantic.pivot.cascade_staged_sql import execute_cascade_staged_sql
+                return execute_cascade_staged_sql(self, model, request, context)
+                
             from foggy.dataset_model.semantic.pivot.executor import validate_and_translate_pivot
             try:
                 request = validate_and_translate_pivot(request)

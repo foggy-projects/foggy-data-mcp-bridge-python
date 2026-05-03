@@ -90,6 +90,22 @@ def _has_derived_metrics(pivot: PivotRequest) -> bool:
     return False
 
 
+def is_rows_two_level_cascade(pivot: PivotRequest) -> bool:
+    """Return True if this is a rows exactly two-level cascade."""
+    rows = list(pivot.rows)
+    columns = list(pivot.columns)
+    if _count_constrained(columns) > 0:
+        return False
+    if any(_has_tree(item) for item in rows + columns):
+        return False
+    if _has_derived_metrics(pivot):
+        return False
+    rows_constrained = _count_constrained(rows)
+    if rows_constrained == 2:
+        limits_count = sum(1 for item in rows if _has_limit(item))
+        return limits_count == 2
+    return False
+
 def detect_cascade_and_raise(pivot: PivotRequest) -> None:
     """Inspect a PivotRequest and raise NotImplementedError for cascade shapes.
 
@@ -130,14 +146,22 @@ def detect_cascade_and_raise(pivot: PivotRequest) -> None:
     # ─── Rule 3: mixed cross-axis cascade (rows constrained + columns constrained) ───
     # Already covered by Rule 2 above (cols_constrained > 0 rejects).
 
-    # ─── Rule 4: rows cascade (two or more constrained levels) ───
-    if rows_constrained >= 2:
+    # ─── Rule 4: rows cascade ───
+    if rows_constrained >= 3:
         raise NotImplementedError(
-            f"{PIVOT_CASCADE_SQL_REQUIRED}: "
+            f"{PIVOT_CASCADE_SCOPE_UNSUPPORTED}: "
             f"Detected {rows_constrained} axis levels with limit/having on the rows axis. "
-            "Multi-level cascade requires staged SQL (Java 9.1 C2) which is not "
-            "implemented in Python P1.  Use the Java engine."
+            "Python P4 only supports exactly two-level cascade."
         )
+    elif rows_constrained == 2:
+        # Both must have limit for C2 v1. having-only cascade or mixed is rejected.
+        limits_count = sum(1 for item in rows if _has_limit(item))
+        if limits_count < 2:
+            raise NotImplementedError(
+                f"{PIVOT_CASCADE_SCOPE_UNSUPPORTED}: "
+                "Both constrained levels must have a limit in a two-level cascade. "
+                "having-only cascade is not supported."
+            )
 
     # ─── Rule 5: limit without orderBy on the single constrained level ───
     for item in rows:
