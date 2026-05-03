@@ -17,7 +17,7 @@ from foggy.dataset_model.semantic.formula_errors import FormulaSyntaxError
 
 
 CATALOG_PATH = (
-    Path(__file__).resolve().parents[3]
+    Path(__file__).resolve().parents[2]
     / "docs"
     / "v1.5.1"
     / "P1-CALCULATE-restricted-mvp-parity-catalog.json"

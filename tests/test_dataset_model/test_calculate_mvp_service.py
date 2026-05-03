@@ -1,6 +1,6 @@
 """v1.5.1 restricted CALCULATE MVP service-path tests."""
 
-from foggy.dataset.dialects.mysql import MySqlDialect
+from foggy.dataset.dialects.mysql import MySql8Dialect, MySqlDialect
 from foggy.dataset.dialects.sqlite import SqliteDialect
 from foggy.dataset_model.semantic import SemanticQueryService
 from foggy.demo.models.ecommerce_models import create_fact_sales_model
@@ -11,12 +11,6 @@ def _service(dialect):
     svc = SemanticQueryService(dialect=dialect)
     svc.register_model(create_fact_sales_model())
     return svc
-
-
-class MySql8Dialect(MySqlDialect):
-    @property
-    def supports_grouped_aggregate_window(self) -> bool:
-        return True
 
 
 def test_service_calculate_context_lowers_remove_to_grouped_window() -> None:

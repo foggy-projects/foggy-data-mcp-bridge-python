@@ -41,7 +41,7 @@
 |---|---|---|---|
 | Base query_model lifecycle | mostly aligned | aligned-with-refresh-needed | Refresh evidence against current code and permissions. |
 | Join / field resolution / formulas | mostly aligned | aligned-with-refresh-needed | Re-run formula parity and governance tests. |
-| CALCULATE / REMOVE | partial-current | needs-audit | Highest-priority audit because prompt exposes it and recent dirty work touched this path. |
+| CALCULATE / REMOVE | accepted-with-profile-note | aligned-for-restricted-subset | Restricted public subset has SQLite/MySQL8/PostgreSQL oracle; default mysql profile remains fail-closed. |
 | timeWindow | implemented with historical evidence | aligned-with-evidence-refresh-needed | Promote v1.5 evidence into current v1.11 signoff matrix; verify no regression. |
 | timeWindow + calculatedFields | implemented with historical evidence | aligned-with-known-contract-note | Confirm Java/Python alias projection difference is still intentional or fixed. |
 | Pivot 9.x | signed off v1.10 | aligned-with-accepted-risks | No immediate runtime work; keep deferred items gated. |
@@ -67,10 +67,10 @@
 
 | Capability | Python Prompt Contract | Status | Gap |
 |---|---|---|---|
-| `CALCULATE(SUM(metric), REMOVE(groupByDim))` | public prompt documents restricted usage | partial-current | Must verify runtime supports only documented subset and fails closed outside it. |
-| grouped aggregate window support | recent fix respected dialect feature flag | needs-audit | Need formal evidence across MySQL8/Postgres/SQLite and refusal for unsupported dialects. |
-| `REMOVE` only removes current `groupBy` dim | prompt says restricted | needs-audit | Need tests proving non-grouped remove is rejected. |
-| formula alias / orderBy interaction | historical timeWindow fix exists | needs-refresh | Need current formula compiler and field validator matrix. |
+| `CALCULATE(SUM(metric), REMOVE(groupByDim))` | public prompt documents restricted usage | accepted | `calculate-formula-parity-acceptance.md` |
+| grouped aggregate window support | explicit dialect capability flag | accepted-with-profile-note | SQLite/MySQL8/Postgres oracle; conservative mysql profile refused. |
+| `REMOVE` only removes current `groupBy` dim | prompt says restricted | accepted | catalog rejects non-grouped remove and system-slice override. |
+| formula alias / orderBy interaction | historical timeWindow fix exists | needs-refresh | Broader formula/orderBy matrix remains outside P1. |
 
 ### timeWindow
 
@@ -127,14 +127,13 @@ These are audit estimates, not release claims. v1.11 must replace estimates with
 
 ## Highest-Value Next Work
 
-1. CALCULATE / formula parity audit and cleanup.
-2. timeWindow current-version evidence refresh.
-3. compose/stable relation runtime boundary audit.
-4. governance cross-path matrix.
-5. v1.11 signoff with explicit runtime parity vs contract mirror labels.
+1. timeWindow current-version evidence refresh.
+2. compose/stable relation runtime boundary audit.
+3. governance cross-path matrix.
+4. v1.11 signoff with explicit runtime parity vs contract mirror labels.
 
 ## Decision
 
 Python should not start new Pivot runtime features now.
 
-The next implementation work should be gated by v1.11 parity audit phases. The most likely real gaps are non-Pivot: CALCULATE, timeWindow evidence refresh, compose stable relation runtime boundary, and governance consistency.
+The next implementation work should be gated by v1.11 parity audit phases. CALCULATE P1 is now accepted for the restricted public subset; the remaining likely real gaps are timeWindow evidence refresh, compose stable relation runtime boundary, and governance consistency.

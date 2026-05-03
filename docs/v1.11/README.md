@@ -18,7 +18,7 @@ v1.11 的目标不是继续扩 Pivot，而是把注意力扩大到整个 Python 
 | Area | Status | Notes |
 |---|---|---|
 | P0 parity audit | draft-audit | 已建立首版差距矩阵和执行建议。 |
-| P1 CALCULATE / formula parity | proposed | 需要清理当前活跃脏分支并补三库 oracle/refusal。 |
+| P1 CALCULATE / formula parity | accepted-with-profile-note | 受限 CALCULATE 已补 SQLite/MySQL8/PostgreSQL oracle；默认 mysql profile 继续 fail-closed。 |
 | P2 timeWindow evidence refresh | proposed | 旧证据存在，需要升级到当前版本总签收口径。 |
 | P3 compose / stable relation runtime boundary | proposed | 需要确认 Python 是 runtime parity 还是 contract mirror。 |
 | P4 governance cross-path matrix | proposed | 需要覆盖普通 query_model、timeWindow、pivot、compose。 |
@@ -30,6 +30,9 @@ v1.11 的目标不是继续扩 Pivot，而是把注意力扩大到整个 Python 
 |---|---|
 | `P0-Java-Python-Engine-Parity-Audit.md` | 全引擎对齐审计、差距矩阵和优先级建议 |
 | `P0-Java-Python-Engine-Parity-Execution-Plan.md` | 后续执行阶段、测试矩阵和质量门 |
+| `acceptance/calculate-formula-parity-acceptance.md` | P1 CALCULATE / formula parity 签收 |
+| `coverage/calculate-formula-parity-coverage-audit.md` | P1 测试覆盖审计 |
+| `quality/calculate-formula-parity-quality.md` | P1 实现质量记录 |
 
 ## 外部基线
 
@@ -40,4 +43,4 @@ v1.11 的目标不是继续扩 Pivot，而是把注意力扩大到整个 Python 
 
 ## 当前结论
 
-Pivot 维度已达到可签收对齐；全引擎维度还不能直接声明完全对齐。真正需要下一步投入的是 CALCULATE / timeWindow / compose stable relation / governance 的当前版本证据刷新，而不是继续扩展 Pivot runtime。
+Pivot 维度已达到可签收对齐；P1 CALCULATE / formula 已完成当前版本三库 oracle 签收。全引擎维度下一步投入点是 timeWindow / compose stable relation / governance 的当前版本证据刷新，而不是继续扩展 Pivot runtime。

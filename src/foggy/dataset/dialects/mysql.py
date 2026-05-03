@@ -142,3 +142,17 @@ class MySqlDialect(FDialect):
         )
 
         return f"{insert_sql} ON DUPLICATE KEY UPDATE {update_clause}"
+
+
+class MySql8Dialect(MySqlDialect):
+    """MySQL 8 dialect capability profile.
+
+    The historical ``mysql`` dialect remains conservative for MySQL 5.7 style
+    deployments. MySQL 8 supports grouped aggregate windows used by restricted
+    CALCULATE lowering, so callers that know they are on MySQL 8 can opt in
+    explicitly.
+    """
+
+    @property
+    def supports_grouped_aggregate_window(self) -> bool:
+        return True

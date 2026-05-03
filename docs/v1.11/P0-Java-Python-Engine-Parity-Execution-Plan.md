@@ -19,6 +19,8 @@
 
 Priority: P0.
 
+Status: accepted-with-profile-note.
+
 Why:
 
 - `query_model_v3.md` 已公开受限 `CALCULATE` 用法。
@@ -45,6 +47,11 @@ Deliverables:
 - `docs/v1.11/acceptance/calculate-formula-parity-acceptance.md`
 - `docs/v1.11/coverage/calculate-formula-parity-coverage-audit.md`
 - `docs/v1.11/quality/calculate-formula-parity-quality.md`
+
+Closeout:
+
+- SQLite/MySQL8/PostgreSQL oracle parity passed with 0 skips.
+- Conservative base `mysql` dialect remains fail-closed; MySQL 8 uses explicit `MySql8Dialect`.
 
 ## Phase P2 - timeWindow Current Evidence Refresh
 
@@ -145,6 +152,6 @@ Deliverables:
 
 ## Current Recommendation
 
-Start with P1 CALCULATE / Formula Parity.
+Start with P2 timeWindow current evidence refresh.
 
 Do not implement tree+cascade, outer Pivot cache, or stable relation runtime expansion until this audit proves they are the next highest-value gaps.
