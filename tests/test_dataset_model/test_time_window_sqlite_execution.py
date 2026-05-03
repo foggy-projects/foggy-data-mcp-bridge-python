@@ -10,6 +10,7 @@ from foggy.dataset.db.executor import SQLiteExecutor
 from foggy.dataset_model.semantic.service import SemanticQueryService
 from foggy.demo.models.ecommerce_models import create_fact_sales_model
 from foggy.mcp_spi import SemanticQueryRequest
+from foggy.mcp_spi.semantic import DeniedColumn, FieldAccessDef
 
 
 @pytest.fixture()
@@ -221,6 +222,86 @@ def test_time_window_post_calculated_field_alias_is_orderable(sqlite_time_window
     assert response.error is None
     assert 'ORDER BY "growth_pct" DESC' in response.sql
     assert response.items[0]["growth_pct"] == 100.0
+
+
+def test_time_window_system_slice_applies_to_base_cte(sqlite_time_window_service):
+    response = sqlite_time_window_service.query_model(
+        "FactSalesModel",
+        SemanticQueryRequest(
+            columns=["salesDate$id", "salesAmount", "salesAmount__rolling_7d"],
+            group_by=["salesDate$id"],
+            time_window={
+                "field": "salesDate$id",
+                "grain": "day",
+                "comparison": "rolling_7d",
+                "range": "[)",
+                "value": ["20240101", "20240104"],
+                "targetMetrics": ["salesAmount"],
+            },
+            system_slice=[
+                {"field": "salesDate$id", "op": "=", "value": 20240102}
+            ],
+            order_by=[{"field": "salesDate$id", "dir": "asc"}],
+        ),
+        mode="execute",
+    )
+
+    assert response.error is None
+    assert [row["salesDate$id"] for row in response.items] == [20240102]
+    assert response.items[0]["salesAmount"] == 20.0
+    assert response.items[0]["salesAmount__rolling_7d"] == 20.0
+
+
+def test_time_window_denied_columns_fail_closed(sqlite_time_window_service):
+    response = sqlite_time_window_service.query_model(
+        "FactSalesModel",
+        SemanticQueryRequest(
+            columns=["salesDate$id", "salesAmount", "salesAmount__rolling_7d"],
+            group_by=["salesDate$id"],
+            time_window={
+                "field": "salesDate$id",
+                "grain": "day",
+                "comparison": "rolling_7d",
+                "range": "[)",
+                "value": ["20240101", "20240104"],
+                "targetMetrics": ["salesAmount"],
+            },
+            denied_columns=[
+                DeniedColumn(table="fact_sales", column="sales_amount")
+            ],
+        ),
+        mode="execute",
+    )
+
+    assert response.error is not None
+    assert "not accessible" in response.error.lower()
+
+
+def test_time_window_masking_applies_after_execution(sqlite_time_window_service):
+    response = sqlite_time_window_service.query_model(
+        "FactSalesModel",
+        SemanticQueryRequest(
+            columns=["salesDate$id", "salesAmount", "salesAmount__rolling_7d"],
+            group_by=["salesDate$id"],
+            time_window={
+                "field": "salesDate$id",
+                "grain": "day",
+                "comparison": "rolling_7d",
+                "range": "[)",
+                "value": ["20240101", "20240104"],
+                "targetMetrics": ["salesAmount"],
+            },
+            field_access=FieldAccessDef(
+                masking={"salesAmount": "full_mask"}
+            ),
+            order_by=[{"field": "salesDate$id", "dir": "asc"}],
+        ),
+        mode="execute",
+    )
+
+    assert response.error is None
+    assert response.items[0]["salesAmount"] == "***"
+    assert response.items[0]["salesAmount__rolling_7d"] == 150.0
 
 
 def _seed_time_window_db(db_path) -> None:

@@ -123,6 +123,8 @@ Closeout:
 
 Priority: P1.
 
+Status: accepted.
+
 Scope:
 
 - `systemSlice`
@@ -146,6 +148,12 @@ Deliverables:
 - `docs/v1.11/coverage/governance-cross-path-coverage-audit.md`
 - `docs/v1.11/quality/governance-cross-path-quality.md`
 
+Closeout:
+
+- Base/timeWindow/pivot/compose governance target matrix passed with 215 tests.
+- MCP router plus compose authority/security matrix passed with 120 tests.
+- P4 added direct timeWindow systemSlice, deniedColumns, and masking tests.
+
 ## Phase P5 - Version Signoff
 
 Priority: P2.
@@ -168,6 +176,6 @@ Deliverables:
 
 ## Current Recommendation
 
-Start with P4 governance cross-path matrix.
+Start with P5 version signoff.
 
-Do not implement tree+cascade, outer Pivot cache, or stable relation runtime expansion until governance consistency is signed off and a separate product requirement approves runtime expansion.
+Do not implement tree+cascade, outer Pivot cache, or stable relation runtime expansion until v1.11 signoff is recorded and a separate product requirement approves runtime expansion.

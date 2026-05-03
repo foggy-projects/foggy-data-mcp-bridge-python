@@ -21,8 +21,8 @@ v1.11 的目标不是继续扩 Pivot，而是把注意力扩大到整个 Python 
 | P1 CALCULATE / formula parity | accepted-with-profile-note | 受限 CALCULATE 已补 SQLite/MySQL8/PostgreSQL oracle；默认 mysql profile 继续 fail-closed。 |
 | P2 timeWindow evidence refresh | accepted | 当前 main 已重跑 timeWindow + SQLite/MySQL8/PostgreSQL/SQL Server 证据矩阵。 |
 | P3 compose / stable relation runtime boundary | accepted-with-runtime-boundary | compose runtime 与 MCP path 已验收；stable relation S7e/S7f 为 contract mirror，不宣称 Python runtime parity。 |
-| P4 governance cross-path matrix | proposed | 需要覆盖普通 query_model、timeWindow、pivot、compose。 |
-| P5 version signoff | pending | 等 P1-P4 完成后签收。 |
+| P4 governance cross-path matrix | accepted | 已覆盖 base query_model、timeWindow、pivot、compose 与 MCP router governance 透传。 |
+| P5 version signoff | pending | P1-P4 已完成，下一步生成版本级签收。 |
 
 ## 文档清单
 
@@ -39,6 +39,9 @@ v1.11 的目标不是继续扩 Pivot，而是把注意力扩大到整个 Python 
 | `acceptance/compose-stable-relation-boundary-acceptance.md` | P3 compose/stable relation 边界签收 |
 | `coverage/compose-stable-relation-boundary-coverage-audit.md` | P3 测试覆盖审计 |
 | `quality/compose-stable-relation-boundary-quality.md` | P3 质量记录 |
+| `acceptance/governance-cross-path-acceptance.md` | P4 governance 横向矩阵签收 |
+| `coverage/governance-cross-path-coverage-audit.md` | P4 测试覆盖审计 |
+| `quality/governance-cross-path-quality.md` | P4 质量记录 |
 
 ## 外部基线
 
@@ -49,4 +52,4 @@ v1.11 的目标不是继续扩 Pivot，而是把注意力扩大到整个 Python 
 
 ## 当前结论
 
-Pivot 维度已达到可签收对齐；P1 CALCULATE / formula、P2 timeWindow、P3 compose/stable relation boundary 已完成当前版本证据签收。全引擎维度下一步投入点是 P4 governance cross-path matrix，而不是继续扩展 Pivot runtime。
+Pivot 维度已达到可签收对齐；P1 CALCULATE / formula、P2 timeWindow、P3 compose/stable relation boundary、P4 governance cross-path matrix 已完成当前版本证据签收。下一步是 v1.11 version signoff，而不是继续扩展 Pivot runtime。

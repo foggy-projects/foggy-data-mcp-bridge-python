@@ -47,7 +47,7 @@
 | Pivot 9.x | signed off v1.10 | aligned-with-accepted-risks | No immediate runtime work; keep deferred items gated. |
 | Compose CTE basic | accepted | aligned | Current compose runtime tests passed. |
 | Stable relation outer aggregate/window | accepted-contract | partial-by-design | Contract mirror only; do not claim Python runtime parity. |
-| Governance in query_model | implemented | needs-cross-path-matrix | Verify same behavior across base/timeWindow/pivot/compose. |
+| Governance in query_model | accepted | aligned | Cross-path matrix passed for base/timeWindow/pivot/compose/MCP router. |
 | SQL Server dialect evidence | mixed | accepted-refusal in Pivot; unknown for other paths | Build per-feature matrix. |
 | MySQL 5.7 dialect evidence | mixed | accepted-refusal in Pivot; fallback in compose CTE | Build per-feature matrix. |
 
@@ -108,11 +108,11 @@
 
 | Path | Current Confidence | Required Evidence |
 |---|---|---|
-| base query_model | high | deniedColumns, systemSlice, masking, visible fields before SQL and after response. |
-| timeWindow | medium | same permission tests after timeWindow lowering. |
-| pivot | high | v1.9/v1.10 covered Pivot-specific paths. |
-| compose | medium-low | verify compose does not bypass queryModel lifecycle or permission checks. |
-| DomainTransport / cascade | high for supported dialects | existing v1.10 evidence plus one consolidated matrix. |
+| base query_model | accepted | deniedColumns, systemSlice, masking, visible fields before SQL and after response. |
+| timeWindow | accepted | systemSlice, deniedColumns, masking tests added in P4. |
+| pivot | accepted | flat Pivot and DomainTransport governance evidence passed. |
+| compose | accepted | remote authority envelope, denied columns, malformed binding, fieldAccess security tests passed. |
+| DomainTransport / cascade | accepted | DomainTransport deniedColumns and existing Pivot evidence retained. |
 
 ## Alignment Estimate
 
@@ -120,19 +120,18 @@
 |---|---:|---|
 | Pivot-only alignment | 90%+ | Remaining items are explicit accepted-refusal/deferred, not unplanned gaps. |
 | Core query_model alignment | 85-90% | Historical migration says mostly complete, but current evidence needs refresh. |
-| Full engine runtime parity | 80-88% | Compose runtime is now evidenced; stable relation outer aggregate/window remains mirror-only; governance cross-path proof remains. |
-| Full engine contract parity | 88-92% | P1/P2/P3 contracts are refreshed; P4 governance matrix remains before version signoff. |
+| Full engine runtime parity | 85-90% | P1-P4 current evidence is signed off; stable relation outer aggregate/window remains mirror-only. |
+| Full engine contract parity | 90-93% | P1-P4 contracts are refreshed; remaining work is version-level signoff and future optional stable relation runtime expansion. |
 
 These are audit estimates, not release claims. v1.11 must replace estimates with test-backed acceptance records.
 
 ## Highest-Value Next Work
 
-1. governance cross-path matrix.
-2. v1.11 signoff with explicit runtime parity vs contract mirror labels.
-3. Optional future stable relation runtime parity plan if product requires it.
+1. v1.11 signoff with explicit runtime parity vs contract mirror labels.
+2. Optional future stable relation runtime parity plan if product requires it.
 
 ## Decision
 
 Python should not start new Pivot runtime features now.
 
-The next implementation work should be gated by v1.11 parity audit phases. CALCULATE P1, timeWindow P2, and compose/stable relation P3 are now accepted for their signed-off subsets. The remaining v1.11 evidence gap is governance consistency across base query_model, timeWindow, pivot, and compose.
+The next implementation work should be gated by v1.11 parity audit phases. CALCULATE P1, timeWindow P2, compose/stable relation P3, and governance P4 are now accepted for their signed-off subsets. The remaining v1.11 task is version-level signoff.
