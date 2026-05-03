@@ -65,4 +65,4 @@ Result:
 
 P2 timeWindow current parity is accepted.
 
-Remaining v1.11 work moves to P3 compose / stable relation runtime boundary.
+Remaining v1.11 work moves to P4 governance cross-path matrix.

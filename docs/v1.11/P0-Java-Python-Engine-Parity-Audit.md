@@ -45,8 +45,8 @@
 | timeWindow | accepted-current | aligned | v1.11 P2 reran current evidence matrix across SQLite/MySQL8/PostgreSQL/SQL Server. |
 | timeWindow + calculatedFields | accepted-current | aligned-for-post-scalar-subset | Post scalar subset remains accepted; outer aggregate/window stays deferred to relation layer. |
 | Pivot 9.x | signed off v1.10 | aligned-with-accepted-risks | No immediate runtime work; keep deferred items gated. |
-| Compose CTE basic | implemented | likely aligned | Needs current version test/evidence refresh. |
-| Stable relation outer aggregate/window | contract mirror, not Python runtime | partial-by-design | Must not claim runtime parity unless implementation is approved. |
+| Compose CTE basic | accepted | aligned | Current compose runtime tests passed. |
+| Stable relation outer aggregate/window | accepted-contract | partial-by-design | Contract mirror only; do not claim Python runtime parity. |
 | Governance in query_model | implemented | needs-cross-path-matrix | Verify same behavior across base/timeWindow/pivot/compose. |
 | SQL Server dialect evidence | mixed | accepted-refusal in Pivot; unknown for other paths | Build per-feature matrix. |
 | MySQL 5.7 dialect evidence | mixed | accepted-refusal in Pivot; fallback in compose CTE | Build per-feature matrix. |
@@ -98,11 +98,11 @@
 
 | Capability | Python Evidence | Status | Gap |
 |---|---|---|---|
-| CTE composition | migration report says complete | aligned-likely | Needs current regression and MCP exposure check. |
-| `compose_script` tool prompt | present | aligned-likely | Need runtime MCP e2e check. |
-| Stable relation model / snapshots | v1.5 quality says mirror | contract-mirror | Not runtime parity. |
-| outer aggregate / outer window over relation | Python intentionally no runtime | partial-by-design | Must decide whether to implement or keep mirror-only. |
-| SQL Server CTE hoisting | documented risk | needs-audit | Confirm current fail-closed/fallback path. |
+| CTE composition | current tests passed | accepted | `tests/compose` passed. |
+| `compose_script` tool prompt | current MCP tests passed | accepted | Remote authority envelope and denied columns covered. |
+| Stable relation model / snapshots | current snapshot tests passed | accepted-contract | Java S7a/S7e/S7f snapshots consumed. |
+| outer aggregate / outer window over relation | contract mirror only | partial-by-design | Runtime parity not claimed. |
+| SQL Server CTE hoisting | snapshot contract covered | accepted-contract | S7e/S7f hoisted CTE markers covered; runtime not claimed. |
 
 ### Governance
 
@@ -120,19 +120,19 @@
 |---|---:|---|
 | Pivot-only alignment | 90%+ | Remaining items are explicit accepted-refusal/deferred, not unplanned gaps. |
 | Core query_model alignment | 85-90% | Historical migration says mostly complete, but current evidence needs refresh. |
-| Full engine runtime parity | 75-85% | Stable relation outer aggregate/window appears mirror-only in Python; compose/governance needs current proof. |
-| Full engine contract parity | 85-90% | Most public contracts exist, but runtime-vs-mirror must be made explicit. |
+| Full engine runtime parity | 80-88% | Compose runtime is now evidenced; stable relation outer aggregate/window remains mirror-only; governance cross-path proof remains. |
+| Full engine contract parity | 88-92% | P1/P2/P3 contracts are refreshed; P4 governance matrix remains before version signoff. |
 
 These are audit estimates, not release claims. v1.11 must replace estimates with test-backed acceptance records.
 
 ## Highest-Value Next Work
 
-1. compose/stable relation runtime boundary audit.
-2. governance cross-path matrix.
-3. v1.11 signoff with explicit runtime parity vs contract mirror labels.
+1. governance cross-path matrix.
+2. v1.11 signoff with explicit runtime parity vs contract mirror labels.
+3. Optional future stable relation runtime parity plan if product requires it.
 
 ## Decision
 
 Python should not start new Pivot runtime features now.
 
-The next implementation work should be gated by v1.11 parity audit phases. CALCULATE P1 and timeWindow P2 are now accepted for their signed-off subsets; the remaining likely real gaps are compose stable relation runtime boundary and governance consistency.
+The next implementation work should be gated by v1.11 parity audit phases. CALCULATE P1, timeWindow P2, and compose/stable relation P3 are now accepted for their signed-off subsets. The remaining v1.11 evidence gap is governance consistency across base query_model, timeWindow, pivot, and compose.

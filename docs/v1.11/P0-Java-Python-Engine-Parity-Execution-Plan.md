@@ -89,6 +89,8 @@ Closeout:
 
 Priority: P1.
 
+Status: accepted-with-runtime-boundary.
+
 Scope:
 
 - basic CTE compose runtime.
@@ -109,6 +111,13 @@ Deliverables:
 - `docs/v1.11/acceptance/compose-stable-relation-boundary-acceptance.md`
 - `docs/v1.11/coverage/compose-stable-relation-boundary-coverage-audit.md`
 - `docs/v1.11/quality/compose-stable-relation-boundary-quality.md`
+
+Closeout:
+
+- `tests/compose` passed with 1146 tests.
+- MCP `compose_script` binding passed with 10 tests.
+- Stable relation S7a/S7e/S7f snapshot consumer tests passed with 70 tests.
+- Basic compose runtime is accepted; stable relation outer aggregate/window stays `contract-mirror-only`.
 
 ## Phase P4 - Governance Cross-Path Matrix
 
@@ -159,6 +168,6 @@ Deliverables:
 
 ## Current Recommendation
 
-Start with P3 compose / stable relation runtime boundary.
+Start with P4 governance cross-path matrix.
 
-Do not implement tree+cascade, outer Pivot cache, or stable relation runtime expansion until this audit proves they are the next highest-value gaps.
+Do not implement tree+cascade, outer Pivot cache, or stable relation runtime expansion until governance consistency is signed off and a separate product requirement approves runtime expansion.

@@ -20,7 +20,7 @@ v1.11 的目标不是继续扩 Pivot，而是把注意力扩大到整个 Python 
 | P0 parity audit | draft-audit | 已建立首版差距矩阵和执行建议。 |
 | P1 CALCULATE / formula parity | accepted-with-profile-note | 受限 CALCULATE 已补 SQLite/MySQL8/PostgreSQL oracle；默认 mysql profile 继续 fail-closed。 |
 | P2 timeWindow evidence refresh | accepted | 当前 main 已重跑 timeWindow + SQLite/MySQL8/PostgreSQL/SQL Server 证据矩阵。 |
-| P3 compose / stable relation runtime boundary | proposed | 需要确认 Python 是 runtime parity 还是 contract mirror。 |
+| P3 compose / stable relation runtime boundary | accepted-with-runtime-boundary | compose runtime 与 MCP path 已验收；stable relation S7e/S7f 为 contract mirror，不宣称 Python runtime parity。 |
 | P4 governance cross-path matrix | proposed | 需要覆盖普通 query_model、timeWindow、pivot、compose。 |
 | P5 version signoff | pending | 等 P1-P4 完成后签收。 |
 
@@ -36,6 +36,9 @@ v1.11 的目标不是继续扩 Pivot，而是把注意力扩大到整个 Python 
 | `acceptance/timewindow-current-parity-acceptance.md` | P2 timeWindow 当前证据签收 |
 | `coverage/timewindow-current-parity-coverage-audit.md` | P2 测试覆盖审计 |
 | `quality/timewindow-current-parity-quality.md` | P2 质量记录 |
+| `acceptance/compose-stable-relation-boundary-acceptance.md` | P3 compose/stable relation 边界签收 |
+| `coverage/compose-stable-relation-boundary-coverage-audit.md` | P3 测试覆盖审计 |
+| `quality/compose-stable-relation-boundary-quality.md` | P3 质量记录 |
 
 ## 外部基线
 
@@ -46,4 +49,4 @@ v1.11 的目标不是继续扩 Pivot，而是把注意力扩大到整个 Python 
 
 ## 当前结论
 
-Pivot 维度已达到可签收对齐；P1 CALCULATE / formula 和 P2 timeWindow 已完成当前版本证据签收。全引擎维度下一步投入点是 compose stable relation / governance 的当前版本证据刷新，而不是继续扩展 Pivot runtime。
+Pivot 维度已达到可签收对齐；P1 CALCULATE / formula、P2 timeWindow、P3 compose/stable relation boundary 已完成当前版本证据签收。全引擎维度下一步投入点是 P4 governance cross-path matrix，而不是继续扩展 Pivot runtime。
