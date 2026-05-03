@@ -13,7 +13,7 @@
 - target: Python Pivot 9.2 Follow-Up
 - upstream_requirement: `docs/v1.10/P0-Pivot-9.2-Followup-Requirement.md`
 - implementation_plan: `docs/v1.10/P0-Pivot-9.2-Followup-Implementation-Plan.md`
-- current_status: p2-sqlserver-cascade-refusal-accepted
+- current_status: p3-mysql57-refusal-accepted
 - last_updated: 2026-05-03
 
 ## Phase Progress
@@ -23,7 +23,7 @@
 | P0 | planning docs | accepted | `docs/v1.10` planning package reviewed |
 | P1 | cascade subtotal/grandTotal | accepted | `acceptance/pivot-9.2-cascade-totals-acceptance.md` |
 | P2 | SQL Server cascade evidence | accepted-refusal | `acceptance/pivot-9.2-sqlserver-cascade-refusal-acceptance.md` |
-| P3 | MySQL 5.7 evidence | not-started | N/A |
+| P3 | MySQL 5.7 evidence | accepted-refusal | `acceptance/pivot-9.2-mysql57-refusal-acceptance.md` |
 | P4 | tree + cascade semantic review | deferred | N/A |
 | P5 | outer Pivot cache feasibility | deferred | N/A |
 | P6 | production telemetry examples | not-started | N/A |
@@ -39,19 +39,19 @@ When an implementation phase completes, fill this section before requesting revi
 - [x] QueryModel lifecycle, permissions, systemSlice, deniedColumns, sanitizer preserved.
 - [x] No temporary scripts, scratch files, or unrelated changes included.
 - [x] Tests and docs updated.
-- self_check_conclusion: P2 keeps SQL Server C2 cascade fail-closed with stable `PIVOT_CASCADE_SQL_REQUIRED` and proves the SQL Server executor path is refused before DB execution.
+- self_check_conclusion: P3 keeps explicit `mysql5.7` C2 cascade and large-domain transport fail-closed before executor SQL execution; no MySQL 5.7 oracle parity is claimed.
 
 ## Testing Progress Template
 
 | Command | Status | Result / Notes |
 |---|---|---|
-| `pytest -q` | passed | `3940 passed in 11.51s` |
+| `pytest -q` | passed | `3942 passed in 16.18s` |
 | targeted unit tests | passed | `39 passed in 1.59s` |
 | SQLite oracle | passed | included in `test_pivot_v9_cascade_real_db_matrix.py` |
 | MySQL8 oracle | passed | included in `test_pivot_v9_cascade_real_db_matrix.py`, 0 skipped in targeted run |
 | PostgreSQL oracle | passed | included in `test_pivot_v9_cascade_real_db_matrix.py`, 0 skipped in targeted run |
 | SQL Server oracle/refusal | passed | targeted `8 passed in 0.48s`; cascade regression `32 passed in 1.38s`; accepted-refusal, no oracle parity claimed |
-| MySQL 5.7 oracle/refusal | not-run | TBD |
+| MySQL 5.7 oracle/refusal | passed | targeted `2 passed in 0.25s`; regression `34 passed in 0.28s`; accepted-refusal, no oracle parity claimed |
 
 ## Acceptance Criteria Mapping
 
@@ -59,7 +59,7 @@ When an implementation phase completes, fill this section before requesting revi
 |---|---|---|
 | cascade totals have oracle or remain rejected | accepted | P1 acceptance + coverage docs |
 | SQL Server has parity/refusal evidence | accepted-refusal | P2 acceptance + coverage docs |
-| MySQL 5.7 has live/refusal evidence | pending | TBD |
+| MySQL 5.7 has live/refusal evidence | accepted-refusal | P3 acceptance + coverage docs |
 | tree+cascade remains rejected until semantic signoff | pending | TBD |
 | telemetry examples do not leak sensitive details | pending | TBD |
 | schema/prompt match runtime | pending | TBD |
@@ -68,13 +68,13 @@ When an implementation phase completes, fill this section before requesting revi
 
 | Blocker | Status | Owner | Notes |
 |---|---|---|---|
-| P3 MySQL 5.7 evidence not started | open | python-engine-agent | Next follow-up candidate. |
+| P6 production telemetry examples not started | open | python-engine-agent | Next low-risk follow-up candidate. |
 
 ## Follow-Up
 
-Next recommended action after P2 acceptance:
+Next recommended action after P3 acceptance:
 
 1. Run final full `pytest -q`.
-2. Review and sign off P2 docs.
-3. Choose P3 MySQL 5.7 evidence or P6 telemetry examples as the next task.
+2. Review and sign off P3 docs.
+3. Choose P6 telemetry examples as the next low-risk task, or start P4 semantic review without runtime changes.
 4. Do not start P4 tree+cascade runtime implementation before a separate semantic decision record exists.
