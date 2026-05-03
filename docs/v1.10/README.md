@@ -19,7 +19,7 @@ Python Pivot v1.9 已完成 Stage 5A DomainTransport 与 Stage 5B C2 rows 轴两
 |---|---|---|
 | P0 文档与边界对齐 | reviewed | 文档包已通过评审，可进入 P1 execution prompt。 |
 | P1 cascade subtotal/grandTotal 语义与 oracle | accepted | additive rowSubtotals / grandTotal over surviving rows cascade domain 已签收。 |
-| P2 SQL Server cascade oracle / refusal evidence | proposed | 不改变 DSL，先补方言证据。 |
+| P2 SQL Server cascade oracle / refusal evidence | accepted-refusal | SQL Server C2 cascade 稳定 fail-closed；不声明 oracle parity。 |
 | P3 MySQL 5.7 live evidence / refusal evidence | proposed | 不默认启用 cascade；先确认环境与能力。 |
 | P4 tree + cascade semantic review | deferred | 高风险语义项，先评审，不直接实现。 |
 | P5 outer Pivot cache feasibility | deferred | 等 telemetry/性能证据证明需要。 |
@@ -36,6 +36,9 @@ Python Pivot v1.9 已完成 Stage 5A DomainTransport 与 Stage 5B C2 rows 轴两
 | `acceptance/pivot-9.2-cascade-totals-acceptance.md` | P1 cascade totals 签收记录 |
 | `coverage/pivot-9.2-cascade-totals-coverage-audit.md` | P1 测试覆盖审计 |
 | `quality/pivot-9.2-cascade-totals-quality.md` | P1 实现质量门 |
+| `acceptance/pivot-9.2-sqlserver-cascade-refusal-acceptance.md` | P2 SQL Server cascade 拒绝签收记录 |
+| `coverage/pivot-9.2-sqlserver-cascade-refusal-coverage-audit.md` | P2 拒绝路径覆盖审计 |
+| `quality/pivot-9.2-sqlserver-cascade-refusal-quality.md` | P2 实现质量门 |
 
 ## 外部基线
 

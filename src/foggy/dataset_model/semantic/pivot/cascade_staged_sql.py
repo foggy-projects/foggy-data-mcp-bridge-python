@@ -29,6 +29,14 @@ def _get_field_name(item: Any) -> str:
     return item.field
 
 
+def _dialect_name(dialect: Any) -> str:
+    if dialect is None or not hasattr(dialect, "name"):
+        return "unknown"
+    name_attr = getattr(dialect, "name")
+    value = name_attr() if callable(name_attr) else name_attr
+    return str(value).lower() if value else "unknown"
+
+
 def execute_cascade_staged_sql(
     service: Any,
     model_name: str,
@@ -70,7 +78,7 @@ def execute_cascade_staged_sql(
         resolve_renderer(dialect)
     except NotImplementedError:
         return SemanticQueryResponse.from_error(
-            f"{PIVOT_CASCADE_SQL_REQUIRED}: Dialect {dialect.name()} is not supported for Cascade Staged SQL."
+            f"{PIVOT_CASCADE_SQL_REQUIRED}: Dialect {_dialect_name(dialect)} is not supported for Cascade Staged SQL."
         )
 
     # Build base request
@@ -134,7 +142,7 @@ def execute_cascade_staged_sql(
 
     def _quote(f: str) -> str:
         # Simple dialect quoting wrapper
-        if dialect.name in ("mysql", "mysql8"):
+        if _dialect_name(dialect) in ("mysql", "mysql8"):
             return f"`{f}`"
         return f'"{f}"'
         
@@ -182,9 +190,10 @@ def execute_cascade_staged_sql(
         return f"HAVING {metric_q} {op} ?"
 
     def _null_safe_eq(left: str, right: str) -> str:
-        if dialect.name in ("mysql", "mysql8"):
+        dialect_name = _dialect_name(dialect)
+        if dialect_name in ("mysql", "mysql8"):
             return f"{left} <=> {right}"
-        elif dialect.name in ("postgres", "postgresql"):
+        elif dialect_name in ("postgres", "postgresql"):
             return f"{left} IS NOT DISTINCT FROM {right}"
         else:
             return f"{left} IS {right}"

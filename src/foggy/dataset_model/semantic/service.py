@@ -193,6 +193,10 @@ class SemanticQueryService(SemanticServiceResolver):
             from foggy.dataset.dialects.sqlite import SqliteDialect
 
             return SqliteDialect()
+        if executor_name == "SQLServerExecutor":
+            from foggy.dataset.dialects.sqlserver import SqlServerDialect
+
+            return SqlServerDialect()
         return None
 
     # v1.4 M4 Step 4.1 helpers ------------------------------------------------
