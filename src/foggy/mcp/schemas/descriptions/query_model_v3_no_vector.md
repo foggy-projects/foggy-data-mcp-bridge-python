@@ -1,8 +1,19 @@
 # dataset.query_model
 
-执行数据模型查询，支持过滤、排序、分组聚合、计算字段。
+执行数据模型查询，支持过滤、排序、分组聚合、计算字段、时间窗口和 Python 当前运行时已验收的 pivot 子集。
 
 > **Note**: 本工具适用于单模型查询。如果遇到单模型 DSL 无法解决的复杂查询（如跨模型 Join、Union、派生查询、或者需要返回多个 Plan 的场景），请使用 `dataset.compose_script` 工具。
+
+## AI 能力选择
+
+| 场景 | 使用 | 边界与退化 |
+|---|---|---|
+| 明细、过滤、排序、简单聚合 | `columns` / `slice` / `orderBy` | 字段不确定先用 `dataset.describe_model_internal` |
+| 条件聚合 | `sum/avg/count(if(...)) as alias` | 不要生成 `sum_if`、`count_if`、SQL `case when` |
+| 复杂表达式、窗口排名、显式 agg | `calculatedFields` | 简单 `sum(field)` 留在 `columns` |
+| 同比、环比、YTD、MTD、rolling | `timeWindow` | 不要用 `CALCULATE`；不能和 `pivot` 同用，必要时拆成两个查询 |
+| 交叉表、普通行列透视、受控 rows 两级 cascade TopN | `pivot` | 仅生成 Python 当前运行时已验收子集；普通分组退回 `columns`；跨模型退回 `dataset.compose_script` |
+| 跨模型 Join / Union / 派生查询 | `dataset.compose_script` | 单个 `query_model` 不表达这些计划图 |
 
 ## 字段规则
 
@@ -24,7 +35,7 @@
 
 ## 参数
 
-### columns (必填)
+### columns (普通查询必填；pivot 查询不要传)
 声明要查询的列，支持普通字段或简单的内联聚合表达式（系统自动处理 groupBy）：
 ```json
 ["product$categoryName", "sum(salesAmount) as totalSales", "count(orderId) as orderCount"]
@@ -56,6 +67,8 @@
 - 全局占比：`SUM(salesAmount) / NULLIF(CALCULATE(SUM(salesAmount), REMOVE(customer$customerType)), 0)`
 - 组内占比：`ROUND(SUM(salesAmount) / NULLIF(CALCULATE(SUM(salesAmount), REMOVE(product$categoryName)), 0), 4)`
 - 同比、环比、累计、滚动不要用 `CALCULATE`，继续使用 `timeWindow`。
+- 父级占比不要用 `ROLLUP_TO` 或 `REMOVE(childDim)`；Python 运行时当前不执行 `parentShare`，应说明当前不支持或拆到上层编排。
+- 跨列首/末基准比较不要用 `CELL_AT` 或 `AXIS_MEMBER`；Python 运行时当前不执行 `baselineRatio`，应说明当前不支持或拆到上层编排。
 
 限制：`CALCULATE` 只支持 `CALCULATE(SUM(metric), REMOVE(groupByDim...))`；`REMOVE` 只能移除当前 `groupBy` 中的维度；占比分母必须使用 `NULLIF(CALCULATE(...), 0)`。
 
@@ -96,6 +109,33 @@
 ```
 
 限制：`targetMetrics` 不可引用 calculatedFields；后置 calculatedFields 不能设置 `agg` 或窗口字段。
+
+### pivot (可选，Python 当前运行时子集)
+
+`pivot` 用于 Pivot V9 透视查询。Python 当前运行时支持 `flat` / `grid` 输出、原生度量、普通行列轴、单层 `having` / `TopN` / `crossjoin`，以及受控的 rows 轴 exactly two-level cascade TopN staged SQL。
+
+当前只生成 Python 已验收子集：
+- 度量优先使用字符串原生度量，例如 `"salesAmount"`；不要生成 `parentShare` / `baselineRatio`，Python 运行时目前会 fail-closed。
+- cascade 仅支持 rows 轴 exactly two-level `limit + orderBy`；不要在 columns 轴上生成 `limit` / `having`。
+- cascade 仅在 SQLite / MySQL8 / PostgreSQL 路径签收；SQL Server cascade 与 MySQL 5.7 cascade 均稳定 fail-closed。
+- `rowSubtotals` / `grandTotal` 只允许用于 rows exactly two-level cascade 的可加原生度量 surviving domain；`columnSubtotals`、非 cascade 小计/总计、不可加 cascade totals 仍会 fail-closed。
+- 不要生成 `outputFormat: "tree"`、`properties`；这些在 Python 运行时仍会 fail-closed。
+
+```json
+{
+  "pivot": {
+    "rows": [
+      "product$categoryName",
+      {"field": "product$subCategoryName", "limit": 2, "orderBy": [{"field": "salesAmount", "dir": "desc"}]}
+    ],
+    "columns": ["salesDate$year"],
+    "metrics": ["salesAmount"],
+    "outputFormat": "grid"
+  }
+}
+```
+
+限制：`pivot` 与顶层 `columns`、`timeWindow` 互斥；公开 DSL 不开放 `CELL_AT`、`AXIS_MEMBER`、`AXIS_REF`、`ROLLUP_TO` 或 metric `expr`。超出 Python 已验收子集时必须 fail-closed，不要降级为不等价的普通 `groupBy` 查询。
 
 
 ### slice (可选)
@@ -180,3 +220,4 @@
 2. **函数未定义**：如果是 `count_if` / `sum_if` 报错，请改为 `sum/avg/count(if(...))`。
 3. **不支持在 columns 中使用复杂表达式**：将该带有计算逻辑的表达式（比如加减乘除、窗口函数等）移到 `calculatedFields` 中定义别名，再放入 `columns`。
 4. **语法错误**：检查 JSON 结构是否闭合，特别是 `slice` 中的 `$or` 是否正确嵌套。
+5. **Pivot 互斥或边界错误**：移除顶层 `columns` 或 `timeWindow`；tree、properties、派生指标、columns 轴 cascade、SQL Server cascade、MySQL 5.7 cascade 等超出 Python 当前运行时子集的请求不要改写成近似查询。

@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -8,6 +10,16 @@ from foggy.dataset_model.semantic.pivot.flat_executor import PIVOT_FEATURE_NOT_I
 from foggy.mcp_spi import SemanticQueryRequest
 from foggy.mcp_spi.accessor import build_query_request
 from foggy.mcp_spi.semantic import PivotMetricItem
+
+
+_SCHEMA_DESC_DIR = (
+    Path(__file__).resolve().parents[2]
+    / "src"
+    / "foggy"
+    / "mcp"
+    / "schemas"
+    / "descriptions"
+)
 
 
 def _pivot_payload() -> dict:
@@ -143,3 +155,27 @@ def test_query_model_v3_schema_exposes_pivot_contract_and_guards() -> None:
     ]
     assert ("pivot", "columns") in not_required_sets
     assert ("pivot", "timeWindow") in not_required_sets
+
+
+def test_query_model_description_variants_keep_python_pivot_boundaries() -> None:
+    for file_name in [
+        "query_model_v3.md",
+        "query_model_v3_basic.md",
+        "query_model_v3_no_vector.md",
+    ]:
+        text = (_SCHEMA_DESC_DIR / file_name).read_text(encoding="utf-8")
+
+        assert "Python 当前运行时" in text
+        assert "flat" in text
+        assert "grid" in text
+        assert "exactly two-level cascade" in text
+        assert "SQLite" in text
+        assert "MySQL8" in text
+        assert "PostgreSQL" in text
+        assert "SQL Server cascade" in text
+        assert "MySQL 5.7 cascade" in text
+        assert "parentShare" in text
+        assert "baselineRatio" in text
+        assert "CELL_AT" in text
+        assert "AXIS_MEMBER" in text
+        assert "不要降级为不等价的普通 `groupBy` 查询" in text
