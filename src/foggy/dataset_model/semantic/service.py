@@ -569,6 +569,17 @@ class SemanticQueryService(SemanticServiceResolver):
         if not table_model:
             return SemanticQueryResponse.from_error(f"Model not found: {model}")
 
+        # --- v1.4 Pivot: Validate and Translate Pivot Request ---
+        is_pivot = False
+        pivot_request = getattr(request, "pivot", None)
+        if pivot_request:
+            is_pivot = True
+            from foggy.dataset_model.semantic.pivot.executor import validate_and_translate_pivot
+            try:
+                request = validate_and_translate_pivot(request)
+            except NotImplementedError as e:
+                return SemanticQueryResponse.from_error(str(e))
+
         # --- v1.2/v1.3: governance check + system_slice merge ---
         governance_error, request = self._apply_query_governance(model, request)
         if governance_error is not None:
@@ -629,6 +640,27 @@ class SemanticQueryService(SemanticServiceResolver):
         # Sanitize any executor-surfaced error (e.g. PostgreSQL column
         # not-exist + physical HINT) before the response leaves the engine.
         self._sanitize_response_error(model, response)
+
+        # --- v1.4 Pivot: Process Pivot Result in Memory ---
+        if is_pivot:
+            from foggy.dataset_model.semantic.pivot.memory_cube import MemoryCubeProcessor
+            from foggy.dataset_model.semantic.pivot.grid_shaper import GridShaper
+
+            key_map = {}
+            for col in build_result.columns:
+                field_name = col.get("fieldName")
+                name = col.get("name")
+                if field_name:
+                    key_map[field_name] = name or field_name
+                if name:
+                    key_map[name] = name
+
+            processor = MemoryCubeProcessor(response.items, pivot_request, key_map)
+            response.items = processor.process()
+
+            if getattr(pivot_request, "output_format", "flat") == "grid":
+                shaper = GridShaper(response.items, pivot_request, key_map)
+                response.items = [shaper.shape()]
 
         # --- v1.2 column governance: post-execution filtering + masking ---
         field_access = request.field_access
@@ -723,6 +755,13 @@ class SemanticQueryService(SemanticServiceResolver):
         table_model = self.get_model(model_name)
         if table_model is None:
             raise ValueError(f"Model not found: {model_name}")
+
+        is_pivot = False
+        pivot_request = getattr(request, "pivot", None)
+        if pivot_request:
+            is_pivot = True
+            from foggy.dataset_model.semantic.pivot.executor import validate_and_translate_pivot
+            request = validate_and_translate_pivot(request)
 
         governance_error, request = self._apply_query_governance(model_name, request)
         if governance_error is not None:
@@ -1060,7 +1099,61 @@ class SemanticQueryService(SemanticServiceResolver):
         if request.start:
             builder.offset(request.start)
 
+        plan = getattr(request, "domain_transport_plan", None)
+        if plan and plan.tuples:
+            from foggy.dataset_model.semantic.pivot.domain_transport import PIVOT_DOMAIN_TRANSPORT_REFUSED
+            for col in plan.columns:
+                ensure_runtime_joins(col)
+
+            if len(plan.tuples) <= plan.threshold:
+                # Small domain fallback: inject OR-of-AND into builder.where
+                or_conditions = []
+                or_params = []
+                for tup in plan.tuples:
+                    and_conditions = []
+                    for i, col in enumerate(plan.columns):
+                        resolved = model.resolve_field_strict(col)
+                        if not resolved:
+                            raise ValueError(f"{PIVOT_DOMAIN_TRANSPORT_REFUSED}: cannot resolve domain column {col!r}")
+                        sql_expr = resolved["sql_expr"]
+                        val = tup[i]
+                        if val is None:
+                            and_conditions.append(f"{sql_expr} IS NULL")
+                        else:
+                            and_conditions.append(f"{sql_expr} = ?")
+                            or_params.append(val)
+                    if and_conditions:
+                        or_conditions.append("(" + " AND ".join(and_conditions) + ")")
+
+                if or_conditions:
+                    builder.where("(" + " OR ".join(or_conditions) + ")", params=or_params)
+
         sql, params = builder.build()
+
+        # 8. P3-C: Inject domain transport relation if requested and threshold exceeded
+        if plan and plan.tuples and len(plan.tuples) > plan.threshold:
+            from foggy.dataset_model.semantic.pivot.domain_transport import (
+                resolve_renderer, assemble_domain_transport_sql, PIVOT_DOMAIN_TRANSPORT_REFUSED
+            )
+            renderer = resolve_renderer(self._dialect)
+            fragment = renderer.render(plan)
+
+            field_sql_map = {}
+            for col in plan.columns:
+                resolved = model.resolve_field_strict(col)
+                if not resolved:
+                    raise ValueError(
+                        f"{PIVOT_DOMAIN_TRANSPORT_REFUSED}: cannot resolve domain column {col!r}"
+                    )
+                field_sql_map[col] = resolved["sql_expr"]
+
+            sql, params = assemble_domain_transport_sql(
+                base_sql=sql,
+                base_params=params,
+                fragment=fragment,
+                field_sql_map=field_sql_map,
+                renderer=renderer,
+            )
 
         return QueryBuildResult(
             sql=sql, params=params, warnings=warnings, columns=columns_info,

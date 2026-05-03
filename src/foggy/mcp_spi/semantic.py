@@ -9,9 +9,9 @@ Use ``model_dump(by_alias=True, exclude_none=True)`` for Java-compatible output.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
 from foggy.mcp_spi.enums import AccessMode
 
@@ -369,6 +369,125 @@ class SystemSlice(BaseModel):
 
 
 # ============================================================================
+# Pivot V9 DTOs — contract shell for Java parity
+# ============================================================================
+
+class PivotMetricFilter(BaseModel):
+    """Post-aggregate filter on a pivot metric."""
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    metric: str
+    op: str
+    value: Any
+
+
+class PivotAxisField(BaseModel):
+    """Axis field object form used by Pivot V9 rows/columns."""
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    field: str
+    order_by: List[Any] = Field(default_factory=list, alias="orderBy")
+    limit: Optional[int] = None
+    having: Optional[PivotMetricFilter] = None
+    hierarchy_mode: Optional[str] = Field(None, alias="hierarchyMode")
+    expand_depth: Optional[int] = Field(None, alias="expandDepth")
+
+    @field_validator("hierarchy_mode")
+    @classmethod
+    def _validate_hierarchy_mode(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and value != "tree":
+            raise ValueError("pivot hierarchyMode only supports 'tree'")
+        return value
+
+
+class PivotMetricItem(BaseModel):
+    """Unified Pivot V9 metric item.
+
+    Runtime support is fail-closed in Python S1. The DTO exists so MCP and
+    parity tests can accept the same contract shape as the Java engine.
+    """
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    name: str
+    type: str
+    of: str
+    axis: Optional[str] = None
+    level: Optional[str] = None
+    parent_level: Optional[str] = Field(None, alias="parentLevel")
+    baseline: Optional[str] = None
+    order_by: List[Any] = Field(default_factory=list, alias="orderBy")
+
+    @field_validator("type")
+    @classmethod
+    def _validate_metric_type(cls, value: str) -> str:
+        if value not in {"native", "parentShare", "baselineRatio"}:
+            raise ValueError("pivot metric type must be native, parentShare, or baselineRatio")
+        return value
+
+    @field_validator("axis")
+    @classmethod
+    def _validate_axis(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and value != "rows":
+            raise ValueError("pivot derived metrics only support rows axis")
+        return value
+
+    @field_validator("baseline")
+    @classmethod
+    def _validate_baseline(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and value not in {"first", "last"}:
+            raise ValueError("baselineRatio baseline must be first or last")
+        return value
+
+
+class PivotOptions(BaseModel):
+    """Pivot V9 shaping options."""
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    crossjoin: bool = False
+    row_subtotals: bool = Field(False, alias="rowSubtotals")
+    column_subtotals: bool = Field(False, alias="columnSubtotals")
+    grand_total: bool = Field(False, alias="grandTotal")
+
+
+class PivotLayout(BaseModel):
+    """Pivot V9 result layout hints."""
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    metric_placement: str = Field("columns", alias="metricPlacement")
+
+    @field_validator("metric_placement")
+    @classmethod
+    def _validate_metric_placement(cls, value: str) -> str:
+        if value not in {"columns", "rows"}:
+            raise ValueError("pivot layout.metricPlacement must be columns or rows")
+        return value
+
+
+class PivotRequest(BaseModel):
+    """Pivot V9 request contract.
+
+    Python currently exposes this only as a typed contract shell and rejects
+    execution before SQL generation.
+    """
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    rows: List[Union[str, PivotAxisField]] = Field(default_factory=list)
+    columns: List[Union[str, PivotAxisField]] = Field(default_factory=list)
+    metrics: List[Union[str, PivotMetricItem]] = Field(default_factory=list)
+    properties: List[str] = Field(default_factory=list)
+    options: PivotOptions = Field(default_factory=PivotOptions)
+    output_format: str = Field("tree", alias="outputFormat")
+    layout: PivotLayout = Field(default_factory=PivotLayout)
+
+    @field_validator("output_format")
+    @classmethod
+    def _validate_output_format(cls, value: str) -> str:
+        if value not in {"flat", "grid", "tree"}:
+            raise ValueError("pivot outputFormat must be flat, grid, or tree")
+        return value
+
+
+# ============================================================================
 # SemanticMetadataRequest
 # ============================================================================
 
@@ -415,6 +534,7 @@ class SemanticQueryRequest(BaseModel):
             "distinct": false,
             "withSubtotals": false,
             "timeWindow": {...},
+            "pivot": {...},
             "captionMatchMode": "EXACT",
             "mismatchHandleStrategy": "ABORT"
         }
@@ -441,6 +561,12 @@ class SemanticQueryRequest(BaseModel):
         alias="timeWindow",
         description="SemanticDSL timeWindow intent. Kept as structured payload for Java parity.",
     )
+    pivot: Optional[PivotRequest] = Field(
+        None,
+        description="Pivot V9 DSL contract. Python S1 parses this shape but "
+                    "runtime execution is fail-closed until the Pivot pipeline "
+                    "is implemented.",
+    )
 
     # --- v1.2 column governance ---
     field_access: Optional[FieldAccessDef] = Field(
@@ -461,6 +587,18 @@ class SemanticQueryRequest(BaseModel):
         description="Physical column blacklist. Converted to denied QM fields "
                     "via mapping cache before field validation.",
     )
+
+    # --- Pivot Stage 5A Internal ---
+    _domain_transport_plan: Optional[Any] = PrivateAttr(default=None)
+
+    @property
+    def domain_transport_plan(self) -> Optional[Any]:
+        """Internal carrier for Pivot Stage 5A domain transport plan. Excluded from JSON/Schema."""
+        return self._domain_transport_plan
+
+    @domain_transport_plan.setter
+    def domain_transport_plan(self, value: Any) -> None:
+        self._domain_transport_plan = value
 
 
 # ============================================================================
