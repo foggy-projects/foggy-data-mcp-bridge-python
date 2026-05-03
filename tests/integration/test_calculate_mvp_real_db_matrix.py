@@ -12,6 +12,7 @@ MySQL 8 path opts into the explicit MySql8Dialect capability profile.
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from decimal import Decimal
 from typing import Any, Iterable
@@ -24,7 +25,14 @@ from foggy.dataset.db.executor import (
     PostgreSQLExecutor,
     SQLiteExecutor,
 )
+try:
+    from foggy.dataset.db.executor import SQLServerExecutor
+    _HAS_SQLSERVER_EXECUTOR = True
+except ImportError:
+    _HAS_SQLSERVER_EXECUTOR = False
+
 from foggy.dataset.dialects.mysql import MySql8Dialect
+from foggy.dataset.dialects.sqlserver import SqlServerDialect
 from foggy.dataset_model.semantic.service import SemanticQueryService
 from foggy.demo.models.ecommerce_models import create_fact_sales_model
 from foggy.mcp_spi import SemanticQueryRequest
@@ -44,6 +52,14 @@ POSTGRES_CONFIG = {
     "database": "foggy_test",
     "user": "foggy",
     "password": "foggy_test_123",
+}
+
+SQLSERVER_CONFIG = {
+    "host": os.environ.get("FOGGY_SQLSERVER_HOST", "localhost"),
+    "port": int(os.environ.get("FOGGY_SQLSERVER_PORT", "11433")),
+    "database": os.environ.get("FOGGY_SQLSERVER_DATABASE", "foggy_test"),
+    "user": os.environ.get("FOGGY_SQLSERVER_USER", "sa"),
+    "password": os.environ.get("FOGGY_SQLSERVER_PASSWORD", "Foggy_Test_123!"),
 }
 
 
@@ -110,7 +126,7 @@ def _probe_or_skip(service: SemanticQueryService) -> None:
         pytest.skip("demo database has no fact_sales seed rows")
 
 
-@pytest.fixture(params=["sqlite", "mysql8", "postgres"])
+@pytest.fixture(params=["sqlite", "mysql8", "postgres", "sqlserver"])
 def real_db_service(request, tmp_path):
     if request.param == "sqlite":
         db_path = str(tmp_path / "calculate_mvp.sqlite")
@@ -121,9 +137,15 @@ def real_db_service(request, tmp_path):
         executor = MySQLExecutor(**MYSQL8_CONFIG)
         service = _service(executor, dialect=MySql8Dialect())
         _probe_or_skip(service)
-    else:
+    elif request.param == "postgres":
         executor = PostgreSQLExecutor(**POSTGRES_CONFIG)
         service = _service(executor)
+        _probe_or_skip(service)
+    else:
+        if not _HAS_SQLSERVER_EXECUTOR:
+            pytest.skip("SQLServerExecutor not available (pyodbc not installed)")
+        executor = SQLServerExecutor(**SQLSERVER_CONFIG)
+        service = _service(executor, dialect=SqlServerDialect())
         _probe_or_skip(service)
 
     yield request.param, service

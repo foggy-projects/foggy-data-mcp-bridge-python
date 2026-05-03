@@ -167,7 +167,7 @@
         "withSubtotals": { "type": "boolean", "default": false, "description": "是否追加小计/总计行。对 groupBy 聚合结果追加分组小计和总计行，通过 _rowType 字段标记（data/subtotal/grandTotal）" },
         "pivot": {
           "type": "object",
-          "description": "Pivot V9 透视查询合同。Python 9.1 运行时支持 flat/grid 输出、原生度量、普通行列轴、单层 having/TopN/crossjoin，以及受控的 rows 轴两级 cascade TopN staged SQL。公开 DSL 仅允许 rows/columns/metrics/properties/options/layout，严禁 CELL_AT、AXIS_MEMBER、ROLLUP_TO 或 expr。tree 输出、subtotals/grandTotal、properties、columns 轴 cascade、tree+cascade 及派生度量 cascade 在 Python 9.1 均会 fail-closed 拒绝。",
+          "description": "Pivot V9 透视查询合同。Python 当前运行时支持 flat/grid 输出、原生度量、普通行列轴、单层 having/TopN/crossjoin，以及受控的 rows 轴 exactly two-level cascade TopN staged SQL。cascade 路径已在 SQLite/MySQL8/PostgreSQL 签收；SQL Server cascade 与 MySQL 5.7 cascade 稳定 fail-closed。公开 DSL 仅允许 rows/columns/metrics/properties/options/layout，严禁 CELL_AT、AXIS_MEMBER、ROLLUP_TO 或 expr。tree 输出、properties、columns 轴 cascade、tree+cascade 及派生度量在 Python 当前运行时均会 fail-closed；rowSubtotals/grandTotal 仅允许用于 rows exactly two-level cascade 的可加原生度量 surviving domain，columnSubtotals、非 cascade 小计/总计和不可加 cascade totals 仍会 fail-closed。",
           "additionalProperties": false,
           "properties": {
             "rows": {
@@ -177,12 +177,12 @@
             },
             "columns": {
               "type": "array",
-              "description": "列轴字段。Python 9.1 支持普通列轴；columns 轴 limit/having/cascade 会 fail-closed。",
+              "description": "列轴字段。Python 当前运行时支持普通列轴；columns 轴 limit/having/cascade 会 fail-closed。",
               "items": { "$ref": "#/definitions/pivotAxisItem" }
             },
             "metrics": {
               "type": "array",
-              "description": "透视度量。Python 9.1 运行时支持字符串原生度量或 type=native 且 name=of 的对象；parentShare/baselineRatio 为合同兼容形状，在 Python cascade 场景会 fail-closed。禁止 expr/CELL_AT/AXIS_MEMBER。",
+              "description": "透视度量。Python 当前运行时支持字符串原生度量或 type=native 且 name=of 的对象；parentShare/baselineRatio 为合同兼容形状，但 Python 运行时当前会 fail-closed。禁止 expr/CELL_AT/AXIS_MEMBER。",
               "items": {
                 "oneOf": [
                   { "type": "string" },
@@ -192,7 +192,7 @@
             },
             "properties": {
               "type": "array",
-              "description": "维度属性带出。Python 9.1 暂不执行 properties，会 fail-closed。",
+              "description": "维度属性带出。Python 当前运行时暂不执行 pivot properties，会 fail-closed。",
               "items": { "type": "string" }
             },
             "options": {
@@ -200,15 +200,15 @@
               "additionalProperties": false,
               "properties": {
                 "crossjoin": { "type": "boolean", "default": false },
-                "rowSubtotals": { "type": "boolean", "default": false, "description": "Python 9.1 暂不支持，true 会 fail-closed。" },
-                "columnSubtotals": { "type": "boolean", "default": false, "description": "Python 9.1 暂不支持，true 会 fail-closed。" },
-                "grandTotal": { "type": "boolean", "default": false, "description": "Python 9.1 暂不支持，true 会 fail-closed。" }
+                "rowSubtotals": { "type": "boolean", "default": false, "description": "仅 rows exactly two-level cascade 的可加原生度量 surviving domain 已签收；其他场景 true 会 fail-closed。" },
+                "columnSubtotals": { "type": "boolean", "default": false, "description": "Python 当前运行时暂不支持，true 会 fail-closed。" },
+                "grandTotal": { "type": "boolean", "default": false, "description": "仅 rows exactly two-level cascade 的可加原生度量 surviving domain 已签收；其他场景 true 会 fail-closed。" }
               }
             },
             "outputFormat": {
               "type": "string",
               "enum": ["flat", "grid", "tree"],
-              "description": "Python 9.1 运行时仅支持 flat/grid；tree 为合同兼容形状，执行时会 fail-closed。",
+              "description": "Python 当前运行时仅支持 flat/grid；tree 为合同兼容形状，执行时会 fail-closed。",
               "default": "tree"
             },
             "layout": {

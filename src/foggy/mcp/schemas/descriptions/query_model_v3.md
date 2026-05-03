@@ -127,13 +127,15 @@ SUM(metric) / NULLIF(CALCULATE(SUM(metric), REMOVE(groupByDim)), 0)
 限制：`targetMetrics` 不可引用 calculatedFields；后置 calculatedFields 不能设置 `agg` 或窗口字段。
 
 
-### pivot (可选，Python 9.1 运行时子集)
-`pivot` 用于 Pivot V9 透视查询。Python 9.1 已支持 `flat` / `grid` 输出、原生度量、普通行列轴、单层 `having` / `TopN` / `crossjoin`，以及受控的 rows 轴两级 cascade TopN staged SQL。
+### pivot (可选，Python 当前运行时子集)
+`pivot` 用于 Pivot V9 透视查询。Python 当前运行时支持 `flat` / `grid` 输出、原生度量、普通行列轴、单层 `having` / `TopN` / `crossjoin`，以及受控的 rows 轴 exactly two-level cascade TopN staged SQL。
 
 当前只生成 Python 已验收子集：
-- 度量优先使用字符串原生度量，例如 `"salesAmount"`；不要生成 `parentShare` / `baselineRatio`，Python 9.1 在 cascade 场景会 fail-closed。
+- 度量优先使用字符串原生度量，例如 `"salesAmount"`；不要生成 `parentShare` / `baselineRatio`，Python 运行时目前会 fail-closed。
 - cascade 仅支持 rows 轴 exactly two-level `limit + orderBy`；不要在 columns 轴上生成 `limit` / `having`。
-- 不要生成 `outputFormat: "tree"`、`rowSubtotals`、`columnSubtotals`、`grandTotal`、`properties`；这些在 Python 9.1 仍会 fail-closed。
+- cascade 仅在 SQLite / MySQL8 / PostgreSQL 路径签收；SQL Server cascade 与 MySQL 5.7 cascade 均稳定 fail-closed。
+- `rowSubtotals` / `grandTotal` 只允许用于 rows exactly two-level cascade 的可加原生度量 surviving domain；`columnSubtotals`、非 cascade 小计/总计、不可加 cascade totals 仍会 fail-closed。
+- 不要生成 `outputFormat: "tree"`、`properties`；这些在 Python 运行时仍会 fail-closed。
 
 ```json
 {
@@ -145,7 +147,7 @@ SUM(metric) / NULLIF(CALCULATE(SUM(metric), REMOVE(groupByDim)), 0)
 }
 ```
 
-限制：`pivot` 与顶层 `columns`、`timeWindow` 互斥；公开 DSL 不开放 `CELL_AT`、`AXIS_MEMBER`、`AXIS_REF`、`ROLLUP_TO` 或 metric `expr`。超出 Python 9.1 子集时必须 fail-closed，不要降级为不等价的普通 `groupBy` 查询。
+限制：`pivot` 与顶层 `columns`、`timeWindow` 互斥；公开 DSL 不开放 `CELL_AT`、`AXIS_MEMBER`、`AXIS_REF`、`ROLLUP_TO` 或 metric `expr`。超出 Python 已验收子集时必须 fail-closed，不要降级为不等价的普通 `groupBy` 查询。
 
 
 ### slice (可选)

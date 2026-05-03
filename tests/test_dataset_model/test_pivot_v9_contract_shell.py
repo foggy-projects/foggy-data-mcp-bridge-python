@@ -117,9 +117,15 @@ def test_query_model_v3_schema_exposes_pivot_contract_and_guards() -> None:
     payload_schema = schema["properties"]["payload"]
     pivot_schema = payload_schema["properties"]["pivot"]
     metric_schema = schema["definitions"]["pivotMetricItem"]
+    pivot_desc = pivot_schema["description"]
 
     assert pivot_schema["additionalProperties"] is False
     assert "metrics" in pivot_schema["required"]
+    assert "Python 当前运行时" in pivot_desc
+    assert "SQLite/MySQL8/PostgreSQL" in pivot_desc
+    assert "SQL Server cascade" in pivot_desc
+    assert "MySQL 5.7 cascade" in pivot_desc
+    assert "rowSubtotals/grandTotal 仅允许" in pivot_desc
     assert metric_schema["additionalProperties"] is False
     assert metric_schema["required"] == ["name", "type", "of"]
     assert metric_schema["properties"]["type"]["enum"] == [

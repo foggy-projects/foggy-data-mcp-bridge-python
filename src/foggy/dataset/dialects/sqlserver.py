@@ -33,6 +33,10 @@ class SqlServerDialect(FDialect):
         return True
 
     @property
+    def supports_grouped_aggregate_window(self) -> bool:
+        return True
+
+    @property
     def quote_char(self) -> str:
         return "[]"
 
