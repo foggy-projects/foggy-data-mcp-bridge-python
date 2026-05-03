@@ -21,7 +21,7 @@ Python Pivot v1.9 已完成 Stage 5A DomainTransport 与 Stage 5B C2 rows 轴两
 | P1 cascade subtotal/grandTotal 语义与 oracle | accepted | additive rowSubtotals / grandTotal over surviving rows cascade domain 已签收。 |
 | P2 SQL Server cascade oracle / refusal evidence | accepted-refusal | SQL Server C2 cascade 稳定 fail-closed；不声明 oracle parity。 |
 | P3 MySQL 5.7 live evidence / refusal evidence | accepted-refusal | 显式 `mysql5.7` cascade / large-domain transport 稳定 fail-closed；不声明 oracle parity。 |
-| P4 tree + cascade semantic review | deferred | 高风险语义项，先评审，不直接实现。 |
+| P4 tree + cascade semantic review | accepted-deferred | 已完成语义评审；runtime 继续 `PIVOT_CASCADE_TREE_REJECTED`。 |
 | P5 outer Pivot cache feasibility | deferred | 等 telemetry/性能证据证明需要。 |
 | P6 production telemetry examples | accepted-docs | 已补生产日志 marker、查询示例、拒绝分类和隐私规则。 |
 
@@ -46,6 +46,9 @@ Python Pivot v1.9 已完成 Stage 5A DomainTransport 与 Stage 5B C2 rows 轴两
 | `acceptance/pivot-9.2-telemetry-docs-acceptance.md` | P6 文档签收记录 |
 | `coverage/pivot-9.2-telemetry-docs-coverage-audit.md` | P6 文档覆盖审计 |
 | `quality/pivot-9.2-telemetry-docs-quality.md` | P6 文档质量门 |
+| `acceptance/pivot-9.2-tree-cascade-semantic-review.md` | P4 tree+cascade 语义评审结论 |
+| `coverage/pivot-9.2-tree-cascade-semantic-coverage-audit.md` | P4 语义评审覆盖审计 |
+| `quality/pivot-9.2-tree-cascade-semantic-quality.md` | P4 语义评审质量门 |
 
 ## 外部基线
 

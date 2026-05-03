@@ -178,6 +178,20 @@ class TestCascadeRejected:
             f"Expected {PIVOT_CASCADE_TREE_REJECTED!r} in error, got: {err!r}"
         )
 
+    def test_tree_sibling_limit_rejected(self, svc):
+        """tree on one row field + limit on a sibling row field remains tree+cascade and must reject."""
+        payload = {
+            "outputFormat": "grid",
+            "rows": [
+                {"field": "product$categoryName", "hierarchyMode": "tree"},
+                {"field": "salesDate$year", "limit": 1, "orderBy": ["-salesAmount"]},
+            ],
+            "metrics": ["salesAmount"],
+        }
+        err = _query(svc, payload)
+        assert err is not None, "Expected tree+cascade rejection but got success"
+        assert PIVOT_CASCADE_TREE_REJECTED in err
+
     def test_non_additive_cascade_rejected(self, svc):
         """non-additive metric with cascade is rejected."""
         payload = {
