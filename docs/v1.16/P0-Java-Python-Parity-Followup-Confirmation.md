@@ -1,23 +1,23 @@
-# P0 Java/Python Parity Follow-Up Confirmation
+# P0 Java/Python 对齐后续项确认
 
 ## 文档作用
 
-- doc_type: workitem
-- status: proposed
-- intended_for: product-owner / root-controller / python-engine-agent / java-engine-agent / reviewer
-- purpose: 将 v1.15 parity baseline 中剩余的测试和功能缺口分配到合适迭代，供逐项确认。
+- 文档类型：工作项
+- 状态：待确认
+- 面向对象：产品负责人 / 总控 Agent / Python 引擎执行 Agent / Java 引擎执行 Agent / 评审人
+- 用途：将 v1.15 对齐基线中剩余的测试和功能缺口分配到合适迭代，供后续逐项确认。
 
-## Version
+## 版本信息
 
-- version: v1.16
-- priority: P0 planning / confirmation
-- source type: acceptance follow-up
-- owning repo: `foggy-data-mcp-bridge-python`
-- Java reference repo: `foggy-data-mcp-bridge-wt-dev-compose`
+- 版本：v1.16
+- 优先级：P0 规划 / 确认
+- 来源类型：验收后续项
+- 归属仓库：`foggy-data-mcp-bridge-python`
+- Java 参考仓库：`foggy-data-mcp-bridge-wt-dev-compose`
 
-## Background
+## 背景
 
-v1.15 已确认 Python engine 与 Java engine 在当前已签收 public/runtime 范围内对齐。剩余项不是当前缺陷，而是后续是否扩展支持范围的确认问题。
+v1.15 已确认：Python 引擎与 Java 引擎在当前已签收的公开能力和运行时能力范围内对齐。剩余项不是当前缺陷，而是后续是否扩大支持范围的确认问题。
 
 本文件的目标是避免后续执行时混淆三类事情：
 
@@ -25,244 +25,244 @@ v1.15 已确认 Python engine 与 Java engine 在当前已签收 public/runtime 
 - 需要先做语义设计的项。
 - 当前应继续拒绝或延期的项。
 
-## Follow-Up Matrix
+## 后续项总表
 
-| ID | Problem | Suggested Iteration | Current Boundary | Confirmation Needed |
+| ID | 问题 | 建议迭代 | 当前边界 | 需要确认的问题 |
 |---|---|---|---|---|
-| JP-FU-01 | CALCULATE SQL Server oracle | v1.16 P1 | Python CALCULATE 已签 SQLite/MySQL8/PostgreSQL；SQL Server 未作为显式 claim | 是否要把 SQL Server CALCULATE 升级为公开 parity claim？ |
-| JP-FU-02 | Stable relation join / union as source | v1.16 P2 | 当前只签 outer aggregate/window | 是否有真实业务需要把 join/union relation 作为后续 relation source？ |
+| JP-FU-01 | CALCULATE 的 SQL Server oracle | v1.16 P1 | Python CALCULATE 已签 SQLite/MySQL8/PostgreSQL；SQL Server 尚未作为显式支持声明 | 是否要把 SQL Server CALCULATE 升级为公开对齐能力？ |
+| JP-FU-02 | stable relation 的 join / union 作为后续 source | v1.16 P2 | 当前只签收 outer aggregate/window | 是否有真实业务需要把 join/union relation 作为后续 relation source？ |
 | JP-FU-03 | Pivot SQL Server cascade oracle | v1.17 P1 | Java/Python 均拒绝或延期 | 是否要实现 SQL Server staged cascade renderer，还是继续拒绝？ |
 | JP-FU-04 | Pivot MySQL 5.7 live evidence | v1.17 P2 | Java/Python 均不继承 MySQL8 证据 | 是否仍支持 MySQL 5.7，还是明确从 cascade/domain transport 支持范围移除？ |
-| JP-FU-05 | tree+cascade semantic spec | v1.18 P1 | Java/Python 均拒绝或延期 | 是否要投入语义设计，定义可证明的 tree ranking / subtotal / visible domain 规则？ |
-| JP-FU-06 | outer Pivot cache | v1.19 P1 | feasibility only, no runtime cache | 是否有生产 telemetry 证明缓存收益足以覆盖权限安全和失效复杂度？ |
+| JP-FU-05 | tree+cascade 语义规格 | v1.18 P1 | Java/Python 均拒绝或延期 | 是否要投入语义设计，定义可证明的 tree ranking / subtotal / visible domain 规则？ |
+| JP-FU-06 | outer Pivot cache | v1.19 P1 | 仅完成可行性评估，无 runtime cache | 是否有生产 telemetry 证明缓存收益足以覆盖权限安全和失效复杂度？ |
 
-## Item Details
+## 分项说明
 
-### JP-FU-01 CALCULATE SQL Server Oracle
+### JP-FU-01 CALCULATE 的 SQL Server Oracle
 
-Suggested iteration: v1.16 P1.
+建议迭代：v1.16 P1。
 
-Current state:
+当前状态：
 
-- Python v1.11 signs restricted `CALCULATE(SUM(metric), REMOVE(dim))`.
-- Existing oracle matrix covers SQLite, MySQL8, and PostgreSQL.
-- SQL Server timeWindow and stable relation outer evidence exists, but CALCULATE SQL Server is not a signed claim.
+- Python v1.11 已签收受限形态：`CALCULATE(SUM(metric), REMOVE(dim))`。
+- 现有 oracle 矩阵覆盖 SQLite、MySQL8、PostgreSQL。
+- SQL Server 的 timeWindow 和 stable relation outer 已有证据，但 CALCULATE SQL Server 尚未签收为支持声明。
 
-Decision options:
+可选决策：
 
-- `accept-evidence-work`: add SQL Server real DB oracle tests for restricted CALCULATE.
-- `defer`: keep current claim unchanged.
-- `reject`: state that SQL Server CALCULATE is not in public parity scope.
+- `accept-evidence-work`：为受限 CALCULATE 增加 SQL Server 真实数据库 oracle 测试。
+- `defer`：保持当前支持声明不变。
+- `reject`：明确 SQL Server CALCULATE 不属于公开对齐范围。
 
-Required tests if accepted:
+如果确认推进，需要补的测试：
 
-- SQL Server grouped aggregate window oracle for global share.
-- SQL Server grouped aggregate window oracle for partitioned share.
-- SQL Server refusal for unsupported nested / non-grouped REMOVE cases.
-- Full regression after adding tests.
+- SQL Server 全局占比场景的 grouped aggregate window oracle。
+- SQL Server 分区占比场景的 grouped aggregate window oracle。
+- SQL Server 对嵌套 CALCULATE、移除非 groupBy 字段等不支持场景的拒绝测试。
+- 新增测试后的全量回归。
 
-Non-goals:
+非目标：
 
-- No expansion beyond restricted CALCULATE.
-- No nested CALCULATE or arbitrary MDX coordinate behavior.
+- 不扩展到受限 CALCULATE 之外。
+- 不支持嵌套 CALCULATE 或任意 MDX 坐标漫游。
 
-### JP-FU-02 Stable Relation Join / Union As Source
+### JP-FU-02 stable relation 的 join / union 作为后续 source
 
-Suggested iteration: v1.16 P2.
+建议迭代：v1.16 P2。
 
-Current state:
+当前状态：
 
-- Python v1.12-v1.14 signs stable relation outer aggregate/window runtime.
-- The signed scope does not include stable relation join/union as a downstream source.
+- Python v1.12-v1.14 已签收 stable relation outer aggregate/window runtime。
+- 已签收范围不包含 stable relation join/union 作为后续 source。
 
-Decision options:
+可选决策：
 
-- `require-design`: write a dedicated stable relation source design before implementation.
-- `defer`: keep outer aggregate/window as the only signed runtime path.
-- `reject`: explicitly state join/union relation source is out of scope.
+- `require-design`：实现前先编写 dedicated stable relation source 设计文档。
+- `defer`：保持 outer aggregate/window 为唯一签收 runtime path。
+- `reject`：明确 join/union relation source 不在范围内。
 
-Required tests if accepted:
+如果确认推进，需要补的测试：
 
-- SQLite/MySQL8/PostgreSQL/SQL Server oracle for join source.
-- SQLite/MySQL8/PostgreSQL/SQL Server oracle for union source.
-- Governance propagation tests for systemSlice, deniedColumns, fieldAccess, and masking.
-- SQL sanitizer and parameter order tests across nested relation layers.
+- SQLite/MySQL8/PostgreSQL/SQL Server 的 join source oracle。
+- SQLite/MySQL8/PostgreSQL/SQL Server 的 union source oracle。
+- `systemSlice`、`deniedColumns`、`fieldAccess`、masking 的权限传递测试。
+- 嵌套 relation 层级下的 SQL sanitizer 和参数顺序测试。
 
-Non-goals:
+非目标：
 
-- No raw SQL escape hatch.
-- No bypass of compose/queryModel authority envelope.
+- 不提供 raw SQL escape hatch。
+- 不绕过 compose/queryModel authority envelope。
 
 ### JP-FU-03 Pivot SQL Server Cascade Oracle
 
-Suggested iteration: v1.17 P1.
+建议迭代：v1.17 P1。
 
-Current state:
+当前状态：
 
-- Java 9.1 / 9.2 lists SQL Server cascade as refused/deferred.
-- Python v1.10 signs SQL Server cascade refusal.
+- Java 9.1 / 9.2 将 SQL Server cascade 标记为拒绝或延期。
+- Python v1.10 已签收 SQL Server cascade 拒绝路径。
 
-Decision options:
+可选决策：
 
-- `align-with-java-implementation`: only start after Java accepts SQL Server oracle.
-- `python-prototype`: Python prototypes renderer but does not claim parity until Java/product accepts.
-- `continue-refusal`: keep stable `PIVOT_CASCADE_SQL_REQUIRED` refusal.
+- `align-with-java-implementation`：仅在 Java 接受 SQL Server oracle 后再开始 Python 镜像。
+- `python-prototype`：Python 可先做 renderer 原型，但在 Java/产品签收前不声明 parity。
+- `continue-refusal`：继续保持稳定的 `PIVOT_CASCADE_SQL_REQUIRED` 拒绝。
 
-Required tests if accepted:
+如果确认推进，需要补的测试：
 
-- SQL Server two-level rows cascade oracle.
-- Parent ranking ignores child limit.
-- Parent having before child rank.
-- Child having does not affect parent.
-- Deterministic NULL tie-breaking.
-- Additive subtotal/grandTotal over surviving domain.
-- Unsupported tree/cross-axis/three-level/non-additive cases continue to fail closed.
+- SQL Server 两级 rows cascade oracle。
+- 父级排序不受子级 limit 影响。
+- 父级 having 先于子级 ranking。
+- 子级 having 不影响父级 ranking。
+- 确定性的 NULL tie-breaking。
+- surviving domain 上的 additive subtotal/grandTotal。
+- tree、cross-axis、three-level、non-additive 等不支持场景继续 fail-closed。
 
-Non-goals:
+非目标：
 
-- No memory fallback for cascade.
-- No general MDX Generate support.
+- 不允许 cascade 退回内存 fallback。
+- 不支持通用 MDX Generate。
 
 ### JP-FU-04 Pivot MySQL 5.7 Live Evidence
 
-Suggested iteration: v1.17 P2.
+建议迭代：v1.17 P2。
 
-Current state:
+当前状态：
 
-- Java documents MySQL 5.7 as guarded/fail-closed or live-evidence gap.
-- Python v1.10 signs explicit MySQL5.7 refusal tests.
+- Java 将 MySQL 5.7 记录为受保护的 fail-closed 路径或 live evidence 缺口。
+- Python v1.10 已签收显式 MySQL5.7 拒绝测试。
 
-Decision options:
+可选决策：
 
-- `live-refusal-evidence`: add real MySQL5.7 fixture proving stable refusal.
-- `support-limited-transport`: design non-window fallback only where semantics allow.
-- `drop-support`: document MySQL5.7 as unsupported for cascade/domain transport.
+- `live-refusal-evidence`：增加真实 MySQL5.7 fixture，证明稳定拒绝。
+- `support-limited-transport`：仅在语义允许时设计非 window fallback。
+- `drop-support`：将 MySQL5.7 明确记录为不支持 cascade/domain transport。
 
-Required tests if accepted:
+如果确认推进，需要补的测试：
 
-- Live MySQL5.7 refusal before SQL execution for cascade.
-- Live MySQL5.7 large-domain transport refusal or limited transport oracle.
-- MySQL8 tests proving no profile regression.
+- 真实 MySQL5.7 下 cascade 在 SQL 执行前拒绝。
+- 真实 MySQL5.7 下 large-domain transport 拒绝或 limited transport oracle。
+- MySQL8 回归测试，证明不会被 MySQL5.7 策略误伤。
 
-Non-goals:
+非目标：
 
-- Do not emulate MySQL8 window semantics on MySQL5.7 without a signed algorithm.
-- Do not relabel MySQL5.7 as MySQL8 based on executor class.
+- 没有签收算法前，不模拟 MySQL8 window 语义。
+- 不基于 executor class 把 MySQL5.7 误标为 MySQL8。
 
-### JP-FU-05 tree+cascade Semantic Spec
+### JP-FU-05 tree+cascade 语义规格
 
-Suggested iteration: v1.18 P1.
+建议迭代：v1.18 P1。
 
-Current state:
+当前状态：
 
-- Java and Python both reject tree+cascade.
-- Python v1.10 has semantic review and runtime refusal, but no implementation.
+- Java 和 Python 当前都拒绝 tree+cascade。
+- Python v1.10 已完成语义评审和 runtime 拒绝，但没有实现。
 
-Decision options:
+可选决策：
 
-- `semantic-design`: define tree ranking, visible nodes, descendant aggregation, subtotal behavior, and oracle matrix.
-- `defer`: keep fail-closed.
-- `reject`: state tree+cascade is outside Pivot DSL design.
+- `semantic-design`：定义 tree ranking、visible nodes、descendant aggregation、subtotal behavior 和 oracle matrix。
+- `defer`：继续保持 fail-closed。
+- `reject`：明确 tree+cascade 不属于 Pivot DSL 设计范围。
 
-Required tests if accepted:
+如果确认推进，需要补的测试：
 
-- Parent/child visible-domain oracle.
-- Ranking with hidden descendants.
-- Tree subtotal over visible vs full descendant domain decision tests.
-- Cross-dialect SQL oracle or explicit unsupported dialect refusals.
-- Backward compatibility tests for non-cascade tree behavior.
+- 父子可见域 oracle。
+- 隐藏 descendants 下的 ranking。
+- tree subtotal 是基于 visible domain 还是 full descendant domain 的决策测试。
+- 跨方言 SQL oracle，或明确的不支持方言拒绝测试。
+- 非 cascade tree 行为的兼容性测试。
 
-Non-goals:
+非目标：
 
-- No implementation before semantic signoff.
-- No best-effort tree flattening as substitute.
+- 语义签收前不实现。
+- 不用 best-effort tree flattening 代替真实语义。
 
 ### JP-FU-06 outer Pivot Cache
 
-Suggested iteration: v1.19 P1.
+建议迭代：v1.19 P1。
 
-Current state:
+当前状态：
 
-- Java 9.2 tracks outer Pivot cache as deferred.
-- Python v1.10 feasibility concludes no runtime cache until telemetry and permission-safe key are signed.
+- Java 9.2 将 outer Pivot cache 标记为延期项。
+- Python v1.10 可行性结论是：在 telemetry 和权限安全 cache key 签收前，不增加 runtime cache。
 
-Decision options:
+可选决策：
 
-- `telemetry-first`: collect query cost/repetition evidence before implementation.
-- `design-cache-key`: define permission-aware cache key and invalidation model.
-- `defer`: keep no outer cache.
+- `telemetry-first`：先收集查询耗时和重复请求证据，再决定是否实现。
+- `design-cache-key`：先定义权限安全 cache key 和失效模型。
+- `defer`：继续不做 outer cache。
 
-Required tests if accepted:
+如果确认推进，需要补的测试：
 
-- Cache key includes model, pivot request, user-visible permissions, systemSlice, deniedColumns, dialect, and relevant model version.
-- Cache does not leak data across authority envelopes.
-- Invalidation tests for model/schema changes.
-- Hit/miss telemetry tests.
-- Performance baseline before/after.
+- cache key 必须包含 model、pivot request、用户可见权限、`systemSlice`、`deniedColumns`、dialect 和相关模型版本。
+- cache 不得跨 authority envelope 泄漏数据。
+- 模型或 schema 变化后的失效测试。
+- hit/miss telemetry 测试。
+- 实现前后的性能基线。
 
-Non-goals:
+非目标：
 
-- No cache keyed only by raw request JSON.
-- No cache that ignores permissions or system slices.
+- 不允许只按原始 request JSON 做 cache key。
+- 不允许忽略权限或 system slice。
 
-## Ownership
+## 责任归属
 
-| Area | Primary Owner | Secondary Owner |
+| 领域 | 主负责人 | 协同负责人 |
 |---|---|---|
-| CALCULATE SQL Server oracle | Python engine | Java alignment reviewer |
-| Stable relation join/union source | Python engine / compose owner | governance reviewer |
-| Pivot SQL Server cascade | Java Pivot first, then Python mirror | dialect owner |
-| Pivot MySQL5.7 evidence | dialect owner | Python/Java engine owners |
-| tree+cascade semantic spec | product / semantic owner | Java/Python Pivot owners |
-| outer Pivot cache | performance/cache owner | governance reviewer |
+| CALCULATE SQL Server oracle | Python 引擎 | Java 对齐评审 |
+| stable relation join/union source | Python 引擎 / compose owner | governance 评审 |
+| Pivot SQL Server cascade | Java Pivot 优先，随后 Python 镜像 | dialect owner |
+| Pivot MySQL5.7 evidence | dialect owner | Python/Java 引擎负责人 |
+| tree+cascade 语义规格 | 产品 / 语义 owner | Java/Python Pivot owner |
+| outer Pivot cache | 性能 / cache owner | governance 评审 |
 
-## Acceptance Criteria
+## 验收标准
 
-- Each item has an explicit decision: `accepted-for-implementation`, `evidence-only`, `deferred`, or `rejected`.
-- Any item accepted for implementation has a dedicated requirement, implementation plan, progress tracker, quality gate, coverage audit, and acceptance record.
-- Any item deferred or rejected keeps stable fail-closed behavior and public docs do not claim support.
-- No item changes public DSL without separate product approval.
+- 每个条目都有明确决策：`accepted-for-implementation`、`evidence-only`、`deferred` 或 `rejected`。
+- 任何进入实现的条目，都必须有独立 requirement、implementation plan、progress tracker、quality gate、coverage audit 和 acceptance record。
+- 任何延期或拒绝的条目，都必须保持稳定 fail-closed 行为，公开文档不能声明支持。
+- 任何条目都不能在没有单独产品批准的情况下改变 public DSL。
 
-## Progress Tracking
+## 进度跟踪
 
-Development progress:
+开发进度：
 
-| Step | Status | Notes |
+| 步骤 | 状态 | 说明 |
 |---|---|---|
-| Create follow-up intake docs | done | v1.16 docs created. |
-| Confirm JP-FU-01 | pending | Await product/engineering decision. |
-| Confirm JP-FU-02 | pending | Await product/engineering decision. |
-| Confirm JP-FU-03 | pending | Depends on Java/Product SQL Server cascade decision. |
-| Confirm JP-FU-04 | pending | Depends on MySQL5.7 support policy. |
-| Confirm JP-FU-05 | pending | Needs semantic review. |
-| Confirm JP-FU-06 | pending | Needs telemetry/performance signal. |
+| 创建后续项 intake 文档 | 已完成 | v1.16 docs created. |
+| 确认 JP-FU-01 | 待确认 | 等待产品/工程决策。 |
+| 确认 JP-FU-02 | 待确认 | 等待产品/工程决策。 |
+| 确认 JP-FU-03 | 待确认 | 依赖 Java/Product 对 SQL Server cascade 的决策。 |
+| 确认 JP-FU-04 | 待确认 | 依赖 MySQL5.7 支持策略。 |
+| 确认 JP-FU-05 | 待确认 | 需要语义评审。 |
+| 确认 JP-FU-06 | 待确认 | 需要 telemetry / performance 信号。 |
 
-Testing progress:
+测试进度：
 
-| Scope | Status | Notes |
+| 范围 | 状态 | 说明 |
 |---|---|---|
-| Current v1.15 regression | passed | `pytest -q` -> `3977 passed`. |
-| New runtime tests | N/A | This is planning-only; no runtime code added. |
-| Future per-item oracle tests | pending | Listed under each item. |
+| 当前 v1.15 回归 | 已通过 | `pytest -q` -> `3977 passed`。 |
+| 新 runtime 测试 | 不适用 | 本文档仅规划确认，不新增 runtime 代码。 |
+| 后续逐项 oracle 测试 | 待确认 | 已在各条目下列出。 |
 
-Experience progress:
+体验进度：
 
-- N/A. These are backend/query-engine planning items with no UI workflow.
+- 不适用。这些都是后端/query-engine 规划项，没有 UI 流程。
 
-## Constraints / Non-Goals
+## 约束 / 非目标
 
-- Do not implement these items from this intake document alone.
-- Do not change MCP schema or public prompt claims until an item is accepted and tested.
-- Do not convert refusal/deferred items into silent fallback behavior.
-- Do not claim Java/Python parity for a dialect without executable oracle or explicit refusal evidence.
+- 不能仅凭本文档直接开始实现。
+- 在条目被接受并完成测试前，不改变 MCP schema 或公开 prompt 声明。
+- 不把拒绝/延期项改成静默 fallback。
+- 没有可执行 oracle 或明确拒绝证据时，不声明某个方言具备 Java/Python parity。
 
-## Required Review Workflow
+## 必要评审流程
 
-For each item that moves beyond confirmation:
+每个条目如果要从确认阶段进入后续阶段，必须按以下顺序推进：
 
-1. Generate a dedicated requirement / plan package.
-2. Review with `plan-evaluator`.
-3. Execute implementation if approved.
-4. Run `foggy-implementation-quality-gate`.
-5. Run `foggy-test-coverage-audit`.
-6. Run `foggy-acceptance-signoff`.
+1. 生成独立 requirement / plan 文档包。
+2. 使用 `plan-evaluator` 评审。
+3. 评审通过后再执行实现。
+4. 执行 `foggy-implementation-quality-gate`。
+5. 执行 `foggy-test-coverage-audit`。
+6. 执行 `foggy-acceptance-signoff`。
