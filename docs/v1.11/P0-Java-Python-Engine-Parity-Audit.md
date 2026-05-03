@@ -121,9 +121,9 @@
 | Pivot-only alignment | 90%+ | Remaining items are explicit accepted-refusal/deferred, not unplanned gaps. |
 | Core query_model alignment | 85-90% | Historical migration says mostly complete, but current evidence needs refresh. |
 | Full engine runtime parity | 85-90% | P1-P4 current evidence is signed off; stable relation outer aggregate/window remains mirror-only. |
-| Full engine contract parity | 90-93% | P1-P4 contracts are refreshed; remaining work is version-level signoff and future optional stable relation runtime expansion. |
+| Full engine contract parity | 90-93% | P1-P4 contracts are refreshed and version-level signoff is complete; future stable relation runtime expansion remains optional. |
 
-These are audit estimates, not release claims. v1.11 must replace estimates with test-backed acceptance records.
+These are audit estimates, not MDX or full Java runtime parity claims. v1.11 replaces the original estimates with test-backed acceptance records and explicit runtime-vs-contract boundaries.
 
 ## Highest-Value Next Work
 
@@ -134,4 +134,14 @@ These are audit estimates, not release claims. v1.11 must replace estimates with
 
 Python should not start new Pivot runtime features now.
 
-The next implementation work should be gated by v1.11 parity audit phases. CALCULATE P1, timeWindow P2, compose/stable relation P3, and governance P4 are now accepted for their signed-off subsets. The remaining v1.11 task is version-level signoff.
+CALCULATE P1, timeWindow P2, compose/stable relation P3, and governance P4 are accepted for their signed-off subsets. v1.11 version-level signoff is complete. Further runtime expansion, especially stable relation outer aggregate/window execution parity, requires a separate product requirement and test plan.
+
+## Acceptance Status
+
+- acceptance_status: signed-off
+- acceptance_decision: accepted-with-risks
+- signed_off_by: root-controller
+- signed_off_at: 2026-05-03
+- acceptance_record: docs/v1.11/acceptance/version-signoff.md
+- blocking_items: none
+- follow_up_required: yes

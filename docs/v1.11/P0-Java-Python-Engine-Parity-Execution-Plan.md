@@ -158,6 +158,8 @@ Closeout:
 
 Priority: P2.
 
+Status: signed-off.
+
 Scope:
 
 - Consolidate P1-P4.
@@ -174,8 +176,14 @@ Deliverables:
 
 - `docs/v1.11/acceptance/version-signoff.md`
 
+Closeout:
+
+- P1-P4 all signed off.
+- Version decision: `accepted-with-risks`.
+- No blocking items remain.
+
 ## Current Recommendation
 
-Start with P5 version signoff.
+v1.11 is signed off. Do not start runtime expansion without a separate product requirement.
 
-Do not implement tree+cascade, outer Pivot cache, or stable relation runtime expansion until v1.11 signoff is recorded and a separate product requirement approves runtime expansion.
+Do not implement tree+cascade, outer Pivot cache, or stable relation runtime expansion until a separate product requirement approves runtime expansion.
