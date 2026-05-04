@@ -20,10 +20,12 @@ Covered cases:
 from __future__ import annotations
 
 import os
+import sqlite3
 
 import pytest
 from pydantic import ValidationError
 
+from foggy.dataset.db.executor import SQLiteExecutor
 from foggy.dataset_model.definitions.base import AggregationType
 from foggy.dataset_model.impl.model import (
     DbModelDimensionImpl,
@@ -163,6 +165,84 @@ class TestProductionFormulas:
         assert 'AS "totalQualifiedAmount"' in r.sql
         assert "amount_total" in r.sql
         assert "qualifiedAmount" not in r.sql.replace('"totalQualifiedAmount"', "")
+
+    def test_predefined_formula_empty_default_wraps_empty_aggregate(self, svc, model):
+        model.predefined_calculated_fields = [{
+            "name": "qualifiedAmount",
+            "expression": "sum(if(status == 'done', amountTotal, 0))",
+            "emptyDefault": 0,
+        }]
+
+        req = SemanticQueryRequest(columns=["qualifiedAmount"])
+        r = svc.query_model("OrderFact", req, mode="validate")
+
+        assert r.error is None, r.error
+        assert "COALESCE(" in r.sql
+        assert 'AS "qualifiedAmount"' in r.sql
+        assert (r.params or [])[-1] == 0
+
+    def test_predefined_formula_without_empty_default_preserves_native_null(self, svc, model):
+        model.predefined_calculated_fields = [{
+            "name": "qualifiedAmount",
+            "expression": "sum(if(status == 'done', amountTotal, 0))",
+        }]
+
+        req = SemanticQueryRequest(columns=["qualifiedAmount"])
+        r = svc.query_model("OrderFact", req, mode="validate")
+
+        assert r.error is None, r.error
+        assert "COALESCE(" not in r.sql
+
+    def test_predefined_formula_empty_default_executes_empty_slice_as_zero(self, tmp_path, model):
+        db_path = tmp_path / "empty_default.sqlite"
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(
+                """
+                CREATE TABLE t_order (
+                    name TEXT,
+                    status TEXT,
+                    due_date TEXT,
+                    amount_total NUMERIC,
+                    order_count NUMERIC,
+                    debit NUMERIC,
+                    credit NUMERIC,
+                    amount_residual NUMERIC
+                )
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO t_order (
+                    name, status, due_date, amount_total, order_count,
+                    debit, credit, amount_residual
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("existing", "done", "2026-05-01", 10, 1, 0, 0, 0),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        model.predefined_calculated_fields = [{
+            "name": "qualifiedAmount",
+            "expression": "sum(if(status == 'done', amountTotal, 0))",
+            "emptyDefault": 0,
+        }]
+        executor = SQLiteExecutor(str(db_path))
+        service = SemanticQueryService(executor=executor, enable_cache=False)
+        service.register_model(model)
+        try:
+            req = SemanticQueryRequest(
+                columns=["qualifiedAmount"],
+                slice=[{"field": "name", "op": "=", "value": "missing"}],
+            )
+            r = service.query_model("OrderFact", req, mode="execute")
+        finally:
+            service._run_async_in_sync(executor.close())
+
+        assert r.error is None, r.error
+        assert r.items == [{"qualifiedAmount": 0}]
 
     def test_order_by_string_is_normalized(self, svc):
         req = SemanticQueryRequest(

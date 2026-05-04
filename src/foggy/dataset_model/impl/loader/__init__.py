@@ -808,6 +808,7 @@ def load_models_from_directory(model_dir: str, namespace: Optional[str] = None) 
                                     "expression": item.get("formula"),
                                     "type": item.get("type"),
                                     "description": item.get("description"),
+                                    "emptyDefault": item.get("emptyDefault"),
                                     "partitionBy": item.get("partitionBy"),
                                     "windowOrderBy": item.get("windowOrderBy"),
                                     "windowFrame": item.get("windowFrame"),

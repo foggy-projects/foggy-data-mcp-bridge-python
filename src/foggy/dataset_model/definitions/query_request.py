@@ -107,6 +107,11 @@ class CalculatedFieldDef(BaseModel):
 
     # Return type
     return_type: str = Field(default="string", description="Return data type")
+    empty_default: Optional[Any] = Field(
+        default=None,
+        alias="emptyDefault",
+        description="Default value used when an aggregate formula returns NULL for an empty match",
+    )
 
     # Dependencies
     depends_on: List[str] = Field(default_factory=list, description="Dependent columns")
@@ -127,6 +132,7 @@ class CalculatedFieldDef(BaseModel):
 
     model_config = {
         "extra": "allow",
+        "populate_by_name": True,
     }
 
     def is_window_function(self) -> bool:

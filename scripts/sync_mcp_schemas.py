@@ -63,6 +63,7 @@ DESCRIPTION_FILES = [
     "descriptions/export_with_chart.md",
     "descriptions/generate_chart.md",
     "descriptions/inspect_table.md",
+    "descriptions/query_model_v3_CHANGELOG.md",
 ]
 
 
