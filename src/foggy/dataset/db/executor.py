@@ -10,6 +10,7 @@ This module provides async database execution capabilities using:
 from typing import Any, Dict, List, Optional, Union
 from abc import ABC, abstractmethod
 from datetime import datetime, date
+import asyncio
 import logging
 import time
 
@@ -200,13 +201,17 @@ class PostgreSQLExecutor(DatabaseExecutor):
         self._password = password
         self._pool_size = pool_size
         self._pool = None
+        self._pools_by_loop: Dict[int, Any] = {}
 
     async def _get_pool(self):
         """Get or create connection pool."""
-        if self._pool is None:
+        loop = asyncio.get_running_loop()
+        loop_key = id(loop)
+        pool = self._pools_by_loop.get(loop_key)
+        if pool is None:
             try:
                 import asyncpg
-                self._pool = await asyncpg.create_pool(
+                pool = await asyncpg.create_pool(
                     host=self._host,
                     port=self._port,
                     database=self._database,
@@ -215,9 +220,12 @@ class PostgreSQLExecutor(DatabaseExecutor):
                     min_size=1,
                     max_size=self._pool_size,
                 )
+                self._pools_by_loop[loop_key] = pool
+                if self._pool is None:
+                    self._pool = pool
             except ImportError:
                 raise RuntimeError("asyncpg not installed. Run: pip install asyncpg")
-        return self._pool
+        return pool
 
     async def execute(
         self,
@@ -320,9 +328,13 @@ class PostgreSQLExecutor(DatabaseExecutor):
 
     async def close(self) -> None:
         """Close the connection pool."""
-        if self._pool:
-            await self._pool.close()
-            self._pool = None
+        pools = list(dict.fromkeys(self._pools_by_loop.values()))
+        if self._pool and self._pool not in pools:
+            pools.append(self._pool)
+        for pool in pools:
+            await pool.close()
+        self._pools_by_loop.clear()
+        self._pool = None
 
 
 class SQLiteExecutor(DatabaseExecutor):

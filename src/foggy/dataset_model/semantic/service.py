@@ -155,6 +155,8 @@ class SemanticQueryService(SemanticServiceResolver):
         self._use_ast_expression_compiler = use_ast_expression_compiler
         self._formula_registry: SqlFormulaRegistry = get_default_registry()
         self._hierarchy_registry = get_default_hierarchy_registry()
+        import threading
+        self._sync_loop_lock = threading.RLock()
         # v1.3: physical column mapping cache (model_name → PhysicalColumnMapping)
         self._mapping_cache: Dict[str, PhysicalColumnMapping] = {}
         # v1.4 M4 Step 4.1: FormulaCompiler lazy-init cache for
@@ -2905,9 +2907,10 @@ class SemanticQueryService(SemanticServiceResolver):
         (e.g., asyncpg) that are bound to a specific event loop.
         """
         import asyncio
-        if not hasattr(self, '_sync_loop') or self._sync_loop is None or self._sync_loop.is_closed():
-            self._sync_loop = asyncio.new_event_loop()
-        return self._sync_loop
+        with self._sync_loop_lock:
+            if not hasattr(self, '_sync_loop') or self._sync_loop is None or self._sync_loop.is_closed():
+                self._sync_loop = asyncio.new_event_loop()
+            return self._sync_loop
 
     def _run_async_in_sync(self, coro, *, timeout: int = 60):
         """Run an awaitable on the service's persistent event loop.
@@ -2923,13 +2926,18 @@ class SemanticQueryService(SemanticServiceResolver):
         except RuntimeError:
             loop = None
 
-        sync_loop = self._get_sync_loop()
+        def _run_on_sync_loop():
+            with self._sync_loop_lock:
+                sync_loop = self._get_sync_loop()
+                asyncio.set_event_loop(sync_loop)
+                return sync_loop.run_until_complete(coro)
+
         if loop and loop.is_running():
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(sync_loop.run_until_complete, coro)
+                future = pool.submit(_run_on_sync_loop)
                 return future.result(timeout=timeout)
-        return sync_loop.run_until_complete(coro)
+        return _run_on_sync_loop()
 
     def _execute_query(
         self,

@@ -6,6 +6,10 @@ columns, not strings. MCP clients pass JSON strings like "2026-03-01"
 which must be converted before hitting asyncpg's prepared statement protocol.
 """
 
+import asyncio
+import sys
+import types
+
 import pytest
 from datetime import datetime, date
 
@@ -88,3 +92,63 @@ class TestConvertParamsIntegration:
         assert params == [date(2026, 3, 1), date(2026, 3, 31)]
         assert isinstance(params[0], date)
         assert isinstance(params[1], date)
+
+
+class TestPostgreSQLExecutorLoopScopedPools:
+    """Regression coverage for asyncpg pools bound to event loops."""
+
+    def test_execute_uses_separate_pool_per_event_loop(self, monkeypatch):
+        created_pools = []
+
+        class FakePool:
+            def __init__(self):
+                self.loop = asyncio.get_running_loop()
+                self.closed = False
+                created_pools.append(self)
+
+            def acquire(self):
+                return FakeAcquire(self)
+
+            async def close(self):
+                self.closed = True
+
+        class FakeAcquire:
+            def __init__(self, pool):
+                self.pool = pool
+
+            async def __aenter__(self):
+                if asyncio.get_running_loop() is not self.pool.loop:
+                    raise RuntimeError("Future attached to a different loop")
+                return FakeConnection()
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        class FakeConnection:
+            async def fetch(self, sql, *params):
+                return [{"value": len(params)}]
+
+        async def create_pool(**kwargs):
+            return FakePool()
+
+        monkeypatch.setitem(
+            sys.modules,
+            "asyncpg",
+            types.SimpleNamespace(create_pool=create_pool),
+        )
+
+        executor = PostgreSQLExecutor()
+
+        def run_in_fresh_loop():
+            loop = asyncio.new_event_loop()
+            try:
+                return loop.run_until_complete(executor.execute("SELECT 1"))
+            finally:
+                loop.close()
+
+        first = run_in_fresh_loop()
+        second = run_in_fresh_loop()
+
+        assert first.error is None
+        assert second.error is None
+        assert len(created_pools) == 2
