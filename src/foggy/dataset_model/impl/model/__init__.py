@@ -319,6 +319,11 @@ class DbTableModelImpl(BaseModel):
         default_factory=dict, description="All columns by name"
     )
 
+    # Predefined calculated fields (e.g. from columnGroups.formula)
+    predefined_calculated_fields: List[Dict[str, Any]] = Field(
+        default_factory=list, description="Predefined calculated fields"
+    )
+
     # Dimension JOINs (star schema)
     dimension_joins: List[DimensionJoinDef] = Field(
         default_factory=list,

@@ -74,6 +74,8 @@ _EXPR_KEYWORDS: frozenset[str] = frozenset({
     "coalesce", "ifnull", "nvl", "nullif", "calculate", "remove", "cast", "convert",
     "concat", "substring", "left", "right",
     "floor", "ceil", "ceiling", "mod", "power", "sqrt",
+    # Date/time helpers supported by the formula compiler.
+    "now", "today", "date_diff", "date_add", "date_sub",
 })
 
 
@@ -504,6 +506,12 @@ def validate_field_access(
             field_ref = ob
         else:
             continue
+        if not field_ref:
+            continue
+        if isinstance(field_ref, str):
+            field_ref = field_ref.strip()
+            if field_ref.startswith(("-", "+")):
+                field_ref = field_ref[1:].strip()
         if not field_ref:
             continue
         # Back-track alias to dependency fields

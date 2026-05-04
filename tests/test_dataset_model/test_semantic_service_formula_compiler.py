@@ -59,6 +59,8 @@ def model():
     m.add_measure(DbModelMeasureImpl(
         name="amountResidual", column="amount_residual", aggregation=AggregationType.SUM,
     ))
+    m.add_dimension(DbModelDimensionImpl(name="status", column="status"))
+    m.add_dimension(DbModelDimensionImpl(name="dueDate", column="due_date"))
     return m
 
 
@@ -134,6 +136,55 @@ class TestProductionFormulas:
         assert "* ?" in r.sql
         # The literal ``100`` is parameterised — this is the security win.
         assert 100 in (r.params or [])
+
+    def test_predefined_formula_with_now_is_not_validated_as_field(self, svc, model):
+        model.predefined_calculated_fields = [{
+            "name": "qualifiedAmount",
+            "expression": "sum(if(status == 'done' && dueDate < now(), amountTotal, 0))",
+        }]
+
+        req = SemanticQueryRequest(columns=["qualifiedAmount"])
+        r = svc.query_model("OrderFact", req, mode="validate")
+
+        assert r.error is None, r.error
+        assert "qualifiedAmount" in r.sql
+        assert "NOW()" in r.sql or "CURRENT_TIMESTAMP" in r.sql or "datetime('now')" in r.sql
+
+    def test_aggregate_alias_references_predefined_formula(self, svc, model):
+        model.predefined_calculated_fields = [{
+            "name": "qualifiedAmount",
+            "expression": "sum(if(status == 'done', amountTotal, 0))",
+        }]
+
+        req = SemanticQueryRequest(columns=["sum(qualifiedAmount) as totalQualifiedAmount"])
+        r = svc.query_model("OrderFact", req, mode="validate")
+
+        assert r.error is None, r.error
+        assert 'AS "totalQualifiedAmount"' in r.sql
+        assert "amount_total" in r.sql
+        assert "qualifiedAmount" not in r.sql.replace('"totalQualifiedAmount"', "")
+
+    def test_order_by_string_is_normalized(self, svc):
+        req = SemanticQueryRequest(
+            columns=["amountTotal"],
+            order_by=["amountTotal"],
+        )
+
+        r = svc.query_model("OrderFact", req, mode="validate")
+
+        assert r.error is None, r.error
+        assert 'ORDER BY "amountTotal" ASC' in r.sql
+
+    def test_order_by_desc_string_is_normalized(self, svc):
+        req = SemanticQueryRequest(
+            columns=["amountTotal"],
+            order_by=["-amountTotal"],
+        )
+
+        r = svc.query_model("OrderFact", req, mode="validate")
+
+        assert r.error is None, r.error
+        assert 'ORDER BY "amountTotal" DESC' in r.sql
 
 
 # --------------------------------------------------------------------------- #

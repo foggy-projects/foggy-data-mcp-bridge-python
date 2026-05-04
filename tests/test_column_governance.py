@@ -822,3 +822,66 @@ class TestExtractFieldDependenciesPublic:
     def test_simple_agg(self):
         deps = extract_field_dependencies("sum(amount) as total")
         assert deps == {"amount"}
+
+
+# ============================================================================
+# orderBy string shorthand in field validator
+# ============================================================================
+
+class TestValidateFieldAccessOrderByStringShorthand:
+    """Verify field_validator strips -/+ prefix from orderBy strings.
+
+    Bridge / LLM callers frequently send ``orderBy: ["-field"]`` or
+    ``orderBy: ["field"]`` as plain strings.  The validator must parse
+    these correctly, stripping the direction prefix before checking
+    field visibility.
+    """
+
+    def test_orderby_bare_string_passes(self):
+        """orderBy=["allowedField"] should pass when allowedField is visible."""
+        fa = FieldAccessDef(visible=["name", "amount"])
+        result = validate_field_access(
+            columns=["name", "amount"],
+            slice_items=[],
+            order_by=["amount"],
+            field_access=fa,
+        )
+        assert result.valid
+
+    def test_orderby_string_with_minus_prefix_not_blocked(self):
+        """orderBy=["-allowedField"] should NOT be blocked.
+
+        The '-' prefix indicates DESC direction, not a different field name.
+        The validator must strip it before checking against the visible set.
+        """
+        fa = FieldAccessDef(visible=["name", "amount"])
+        result = validate_field_access(
+            columns=["name", "amount"],
+            slice_items=[],
+            order_by=["-amount"],
+            field_access=fa,
+        )
+        assert result.valid
+
+    def test_orderby_string_with_plus_prefix_passes(self):
+        """orderBy=["+allowedField"] should pass (explicit ASC)."""
+        fa = FieldAccessDef(visible=["name", "amount"])
+        result = validate_field_access(
+            columns=["name", "amount"],
+            slice_items=[],
+            order_by=["+amount"],
+            field_access=fa,
+        )
+        assert result.valid
+
+    def test_orderby_string_minus_prefix_blocked_field(self):
+        """orderBy=["-blockedField"] should be blocked when field not visible."""
+        fa = FieldAccessDef(visible=["name"])
+        result = validate_field_access(
+            columns=["name"],
+            slice_items=[],
+            order_by=["-secretField"],
+            field_access=fa,
+        )
+        assert not result.valid
+        assert "secretField" in result.blocked_fields

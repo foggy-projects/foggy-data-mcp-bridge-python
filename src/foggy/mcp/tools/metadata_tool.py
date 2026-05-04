@@ -276,6 +276,21 @@ class DescriptionModelTool(BaseMcpTool):
                     lines.append(f"- **{name}** ({agg}): {desc}")
                 lines.append("")
 
+            # Predefined formula fields (from columnGroups.formula)
+            predefined_formulas = schema.get("predefined_formulas", [])
+            if predefined_formulas:
+                lines.append("## Predefined Formula Fields")
+                lines.append("")
+                lines.append("> These are pre-aggregated measures. Reference them directly in `columns[]` by name. Do NOT redefine them in `calculatedFields[]`.")
+                lines.append("")
+                for pf in predefined_formulas:
+                    name = pf.get("name", "")
+                    caption = pf.get("caption", name)
+                    pf_type = pf.get("type", "")
+                    desc = pf.get("description", "")
+                    lines.append(f"- **{name}** ({pf_type}): {caption} — {desc}")
+                lines.append("")
+
             # Dimensions
             dimensions = schema.get("dimensions", [])
             if dimensions:

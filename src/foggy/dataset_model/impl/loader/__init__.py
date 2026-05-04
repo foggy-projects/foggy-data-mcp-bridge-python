@@ -797,6 +797,23 @@ def load_models_from_directory(model_dir: str, namespace: Optional[str] = None) 
                             f"measures={len(alias_model.measures)})"
                         )
 
+                predefined_calcs = []
+                if column_groups and isinstance(column_groups, list):
+                    for group in column_groups:
+                        for item in group.get("items", []):
+                            if isinstance(item, dict) and item.get("formula"):
+                                predefined_calcs.append({
+                                    "name": item.get("name"),
+                                    "caption": item.get("caption"),
+                                    "expression": item.get("formula"),
+                                    "type": item.get("type"),
+                                    "description": item.get("description"),
+                                    "partitionBy": item.get("partitionBy"),
+                                    "windowOrderBy": item.get("windowOrderBy"),
+                                    "windowFrame": item.get("windowFrame"),
+                                })
+                alias_model.predefined_calculated_fields = predefined_calcs
+
                 models.append(alias_model)
                 logger.info(f"Loaded QM: {alias_model.name} -> {tm_ref_name} (source={qm_file.name})")
             else:

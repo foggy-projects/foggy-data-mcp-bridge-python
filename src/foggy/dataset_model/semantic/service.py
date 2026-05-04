@@ -28,6 +28,7 @@ from foggy.dataset_model.engine.hierarchy import (
 )
 from foggy.dataset_model.engine.join import JoinGraph, JoinEdge, JoinType
 from foggy.dataset_model.definitions.query_request import CalculatedFieldDef
+from foggy.dataset_model.semantic.formula_field_extractor import extract_formula_fields, resolve_base_column_references
 from foggy.mcp_spi import (
     SemanticServiceResolver,
     SemanticMetadataResponse,
@@ -311,6 +312,51 @@ class SemanticQueryService(SemanticServiceResolver):
         value = getattr(item, "field", None) or getattr(item, "field_name", None)
         return value if isinstance(value, str) else None
 
+    @staticmethod
+    def _normalize_order_by_item(item: Any) -> Tuple[Optional[str], str]:
+        """Return ``(field, direction)`` for supported orderBy shapes.
+
+        Public DSL accepts both Java-style objects
+        ``{"field": "amount", "dir": "desc"}`` and compact strings
+        ``"amount"`` / ``"-amount"``.  Keep the normalization local to the
+        semantic layer so callers do not need to pre-clean LLM output.
+        """
+        field_name: Optional[str] = None
+        direction: Any = "asc"
+
+        if isinstance(item, str):
+            field_name = item.strip()
+            if field_name.startswith("-"):
+                direction = "desc"
+                field_name = field_name[1:].strip()
+            elif field_name.startswith("+"):
+                field_name = field_name[1:].strip()
+        elif isinstance(item, dict):
+            field_name = item.get("column") or item.get("field") or item.get("fieldName")
+            direction = item.get("direction") or item.get("dir") or direction
+        else:
+            field_name = (
+                getattr(item, "column", None)
+                or getattr(item, "field", None)
+                or getattr(item, "field_name", None)
+            )
+            direction = (
+                getattr(item, "direction", None)
+                or getattr(item, "dir", None)
+                or direction
+            )
+
+        if not isinstance(field_name, str):
+            return None, "ASC"
+        field_name = field_name.strip()
+        if not field_name:
+            return None, "ASC"
+
+        direction_upper = str(direction or "asc").upper()
+        if direction_upper not in {"ASC", "DESC"}:
+            direction_upper = "ASC"
+        return field_name, direction_upper
+
     def get_physical_column_mapping(self, model_name: str) -> Optional[PhysicalColumnMapping]:
         """Get or lazily build the physical column mapping for a model.
 
@@ -563,6 +609,91 @@ class SemanticQueryService(SemanticServiceResolver):
         resp.warnings = []
         return resp
 
+    def _inject_predefined_calculated_fields(
+        self,
+        model: DbTableModelImpl,
+        request: SemanticQueryRequest,
+    ) -> None:
+        """Inject predefined calculated fields from model into request."""
+        predefined = getattr(model, "predefined_calculated_fields", None)
+        if not predefined:
+            return
+
+        predefined_names = {calc["name"] for calc in predefined}
+
+        # Remove colliding user calc fields
+        if request.calculated_fields:
+            replaced = []
+            new_calcs = []
+            for f in request.calculated_fields:
+                name = f.name if isinstance(f, CalculatedFieldDef) else f.get("name")
+                if name in predefined_names:
+                    replaced.append(name)
+                else:
+                    new_calcs.append(f)
+            if replaced:
+                logger.warning(f"Ignored custom calculated fields colliding with predefined QM formulas: {replaced}")
+                request.calculated_fields = new_calcs
+
+        existing_names = set()
+        if request.calculated_fields:
+            for f in request.calculated_fields:
+                name = f.name if isinstance(f, CalculatedFieldDef) else f.get("name")
+                existing_names.add(name)
+
+        predefined_by_name = {
+            calc.get("name"): calc
+            for calc in predefined
+            if calc.get("name")
+        }
+
+        referenced_columns = set()
+        rewritten_columns = []
+        derived_calcs = []
+        for column in request.columns or []:
+            if not isinstance(column, str):
+                rewritten_columns.append(column)
+                continue
+
+            inline_agg = parse_inline_aggregate(column)
+            if inline_agg and inline_agg.inner_expression in predefined_by_name:
+                source_calc = dict(predefined_by_name[inline_agg.inner_expression])
+                source_expr = str(source_calc.get("expression") or "")
+                alias = inline_agg.alias
+                source_calc["name"] = alias
+                source_calc["alias"] = alias
+                if parse_inline_aggregate(source_expr) is None:
+                    source_calc["agg"] = inline_agg.aggregation
+                derived_calcs.append(source_calc)
+                rewritten_columns.append(alias)
+                referenced_columns.add(alias)
+                continue
+
+            rewritten_columns.append(column)
+            if not isinstance(column, str):
+                continue
+            referenced_columns.add(column)
+            parsed = parse_column_with_alias(column)
+            referenced_columns.add(parsed.base_expr)
+            referenced_columns.update(extract_field_dependencies(parsed.base_expr))
+        if derived_calcs:
+            request.columns = rewritten_columns
+
+        to_inject = []
+        for calc in derived_calcs:
+            calc_name = calc.get("name")
+            if calc_name and calc_name not in existing_names:
+                to_inject.append(CalculatedFieldDef(**calc))
+                existing_names.add(calc_name)
+        for calc in predefined:
+            if calc["name"] in referenced_columns and calc["name"] not in existing_names:
+                to_inject.append(CalculatedFieldDef(**calc))
+
+        if to_inject:
+            if request.calculated_fields is None:
+                request.calculated_fields = []
+            request.calculated_fields = to_inject + request.calculated_fields
+
     def query_model(
         self,
         model: str,
@@ -595,6 +726,7 @@ class SemanticQueryService(SemanticServiceResolver):
                 return SemanticQueryResponse.from_error(str(e))
 
         # --- v1.2/v1.3: governance check + system_slice merge ---
+        self._inject_predefined_calculated_fields(table_model, request)
         governance_error, request = self._apply_query_governance(model, request)
         if governance_error is not None:
             return governance_error
@@ -777,6 +909,7 @@ class SemanticQueryService(SemanticServiceResolver):
             from foggy.dataset_model.semantic.pivot.executor import validate_and_translate_pivot
             request = validate_and_translate_pivot(request)
 
+        self._inject_predefined_calculated_fields(table_model, request)
         governance_error, request = self._apply_query_governance(model_name, request)
         if governance_error is not None:
             raise ValueError(
@@ -1082,8 +1215,7 @@ class SemanticQueryService(SemanticServiceResolver):
         # 6. ORDER BY
         selected_order_aliases = self._build_selected_order_aliases(columns_info)
         for order_item in request.order_by:
-            column = order_item.get("column") or order_item.get("field")
-            direction = (order_item.get("direction") or order_item.get("dir", "asc")).upper()
+            column, direction = self._normalize_order_by_item(order_item)
             if column:
                 selected_alias = selected_order_aliases.get(column)
                 if selected_alias:
@@ -1945,7 +2077,7 @@ class SemanticQueryService(SemanticServiceResolver):
     ) -> List[str]:
         order_parts: List[str] = []
         for item in request.order_by or []:
-            field_name = self._time_window_field_name(item)
+            field_name, direction_upper = self._normalize_order_by_item(item)
             if not field_name:
                 continue
             order_column = order_aliases.get(field_name, field_name)
@@ -1954,19 +2086,16 @@ class SemanticQueryService(SemanticServiceResolver):
                     f"TIMEWINDOW_ORDER_FIELD_NOT_AVAILABLE: order field "
                     f"{field_name!r} is not produced by the timeWindow plan."
                 )
-            direction = "asc"
-            if isinstance(item, dict):
-                direction = item.get("direction") or item.get("dir") or direction
-            direction_upper = str(direction).upper()
-            if direction_upper not in {"ASC", "DESC"}:
-                direction_upper = "ASC"
             order_parts.append(f"{self._qi(order_column)} {direction_upper}")
         return order_parts
 
     @staticmethod
     def _time_window_field_name(item: Any) -> Optional[str]:
         if isinstance(item, str):
-            return item
+            value = item.strip()
+            if value.startswith(("-", "+")):
+                value = value[1:].strip()
+            return value
         if isinstance(item, dict):
             return item.get("field") or item.get("fieldName") or item.get("column")
         return getattr(item, "field", None)
@@ -3273,6 +3402,21 @@ class SemanticQueryService(SemanticServiceResolver):
                 for col in model.columns.values()
             ]
 
+        # Predefined formula fields (from columnGroups.formula)
+        predefined = getattr(model, "predefined_calculated_fields", None)
+        if predefined:
+            metadata["predefined_formulas"] = [
+                {
+                    "name": calc.get("name"),
+                    "caption": calc.get("caption"),
+                    "type": calc.get("type"),
+                    "description": calc.get("description"),
+                    "usage": "predefined_formula",
+                }
+                for calc in predefined
+                if calc.get("name")
+            ]
+
         return metadata
 
     def get_metadata_v3(
@@ -3474,6 +3618,34 @@ class SemanticQueryService(SemanticServiceResolver):
                     "description": f"{measure.alias or measure_name} (Aggregation: {agg_name})",
                 }
 
+            # Predefined formula fields (from columnGroups.formula)
+            predefined = getattr(model, "predefined_calculated_fields", None)
+            if predefined:
+                for calc in predefined:
+                    calc_name = calc.get("name")
+                    if not calc_name or calc_name in fields:
+                        continue
+                    calc_type = (calc.get("type") or "NUMBER").upper()
+                    calc_caption = calc.get("caption") or calc_name
+                    calc_desc = calc.get("description") or ""
+                    fields[calc_name] = {
+                        "name": calc_caption,
+                        "fieldName": calc_name,
+                        "meta": f"Predefined Formula | {calc_type}",
+                        "type": calc_type,
+                        "filterType": "number",
+                        "filterable": False,
+                        "measure": True,
+                        "aggregatable": False,
+                        "usage": "predefined_formula",
+                        "description": calc_desc,
+                        "models": {},
+                    }
+                    fields[calc_name]["models"][model_name] = {
+                        "description": calc_desc or f"{calc_caption} (predefined formula)",
+                        "usage": "Reference directly in columns[]; do not redefine in calculatedFields[]",
+                    }
+
         # --- v1.3: collect physical tables (deduplicated, single pass) ---
         physical_tables: List[Dict[str, str]] = []
         pt_seen: set = set()
@@ -3497,12 +3669,44 @@ class SemanticQueryService(SemanticServiceResolver):
             filtered_fields: Dict[str, Any] = {}
             for field_name, field_info in fields.items():
                 models_of_field: Dict[str, Any] = field_info.get("models", {})
+                is_formula = field_info.get("usage") == "predefined_formula"
                 kept_models: Dict[str, Any] = {}
                 for model_name, model_info in models_of_field.items():
                     model_effective = per_model_effective.get(model_name)
                     if model_effective is None:
                         # Model has no mapping → treat as ungoverned; keep as-is.
                         kept_models[model_name] = model_info
+                    elif is_formula:
+                        # --- Phase 2: fail-closed formula permission check ---
+                        # A predefined formula field is accessible only when ALL
+                        # of its referenced underlying QM fields are visible.
+                        # Extract referenced fields from the formula expression.
+                        # The expression is stored during model loading; we look
+                        # it up from the model's predefined_calculated_fields.
+                        model = self._models.get(model_name)
+                        formula_accessible = True
+                        if model:
+                            pcf_list = getattr(model, "predefined_calculated_fields", None) or []
+                            calc_field_map = {c.get("name"): c.get("expression") for c in pcf_list if c.get("name") and c.get("expression")}
+                            calc = next(
+                                (c for c in pcf_list if c.get("name") == field_name),
+                                None,
+                            )
+                            if calc:
+                                expression = calc.get("expression") or ""
+                                referenced = resolve_base_column_references(expression, calc_field_map)
+                                # Fail-closed: any denied reference → deny formula
+                                for ref_field in referenced:
+                                    # Strip dimension suffix (e.g. move$moveType → move)
+                                    base_ref = ref_field.split("$")[0] if "$" in ref_field else ref_field
+                                    if base_ref not in model_effective and ref_field not in model_effective:
+                                        formula_accessible = False
+                                        break
+                            else:
+                                # Expression not found → fail-closed
+                                formula_accessible = False
+                        if formula_accessible:
+                            kept_models[model_name] = model_info
                     elif field_name in model_effective:
                         kept_models[model_name] = model_info
                 if kept_models:
@@ -3575,7 +3779,43 @@ class SemanticQueryService(SemanticServiceResolver):
                 target_models, per_model_visible=per_model_visible,
             )
 
+    # ---------- Phase 2: formula permission helpers ----------
+
+    @staticmethod
+    def _is_formula_accessible(
+        calc: Dict[str, Any],
+        visible_set: Optional[set],
+        calc_field_map: Optional[Dict[str, str]] = None,
+    ) -> bool:
+        """Return True iff a predefined formula is accessible under the given visible set.
+
+        Fail-closed: if ``visible_set`` is set and ANY underlying QM field
+        referenced in the formula expression is absent from it, returns ``False``.
+
+        Args:
+            calc:        A predefined_calculated_fields entry dict with keys
+                         ``name``, ``expression``, …
+            visible_set: Effective visible QM-field names for the model,
+                         or ``None`` (no governance → always accessible).
+            calc_field_map: Optional mapping of calculated field names to expressions
+                            for recursive resolution.
+        """
+        if visible_set is None:
+            return True
+        expression = calc.get("expression") or ""
+        if not expression:
+            # No expression → fail-closed: don't expose unknown formula
+            return False
+        calc_field_map = calc_field_map or {}
+        referenced = resolve_base_column_references(expression, calc_field_map)
+        for ref_field in referenced:
+            base_ref = ref_field.split("$")[0] if "$" in ref_field else ref_field
+            if base_ref not in visible_set and ref_field not in visible_set:
+                return False
+        return True
+
     # ---------- Type description helpers (aligned with Java getDataTypeDescription) ----------
+
 
     @staticmethod
     def _get_column_type_description(column_type) -> str:
@@ -3704,6 +3944,36 @@ class SemanticQueryService(SemanticServiceResolver):
                 lines.extend(measure_rows)
                 lines.append("")
 
+        # Predefined formula fields (from columnGroups.formula)
+        predefined = getattr(model, "predefined_calculated_fields", None)
+        if predefined:
+            formula_rows: List[str] = []
+            calc_field_map = {c.get("name"): c.get("expression") for c in predefined if c.get("name") and c.get("expression")}
+            for calc in predefined:
+                calc_name = calc.get("name")
+                if not calc_name:
+                    continue
+                # Phase 2 fail-closed: check all referenced fields are visible.
+                # Formula names are NOT in the physical-column visible_set directly;
+                # instead check that every underlying field the formula references is.
+                if not self._is_formula_accessible(calc, visible_set, calc_field_map):
+                    continue
+                calc_caption = calc.get("caption") or calc_name
+                calc_type = (calc.get("type") or "NUMBER").upper()
+                calc_desc = calc.get("description") or ""
+                # Sanitize description for markdown table (replace pipes and newlines)
+                calc_desc = calc_desc.replace("|", "｜").replace("\n", " ").replace("\r", "")
+                formula_rows.append(f"| {calc_name} | {calc_caption} | {calc_type} | {calc_desc} |")
+            if formula_rows:
+                lines.append("## Predefined Formula Fields")
+                lines.append("")
+                lines.append("> These are pre-aggregated measures. Reference them directly in `columns[]` by name. Do NOT redefine them in `calculatedFields[]`.")
+                lines.append("")
+                lines.append("| Field Name | Label | Type | Description |")
+                lines.append("|------------|-------|------|-------------|")
+                lines.extend(formula_rows)
+                lines.append("")
+
         lines.append("## Usage Tips")
         lines.append("- Use `xxx$id` for query/filtering, `xxx$caption` for display, and `xxx$property` for dimension properties")
         lines.append("- Measures support inline aggregation: `sum(salesAmount) as total`")
@@ -3825,6 +4095,26 @@ class SemanticQueryService(SemanticServiceResolver):
                     lines.append("")
                     lines.append("**Measures**")
                     lines.extend(measure_lines)
+
+            # Predefined formula fields (from columnGroups.formula)
+            predefined = getattr(model, "predefined_calculated_fields", None)
+            if predefined:
+                formula_lines: List[str] = []
+                calc_field_map = {c.get("name"): c.get("expression") for c in predefined if c.get("name") and c.get("expression")}
+                for calc in predefined:
+                    calc_name = calc.get("name")
+                    if not calc_name:
+                        continue
+                    # Phase 2 fail-closed: verify all referenced underlying fields visible
+                    if not self._is_formula_accessible(calc, current_visible, calc_field_map):
+                        continue
+                    calc_caption = calc.get("caption") or calc_name
+                    formula_lines.append(f"- {calc_caption}")
+                    formula_lines.append(f"    - [field:{calc_name}] | predefined_formula — use directly in columns[]")
+                if formula_lines:
+                    lines.append("")
+                    lines.append("**Predefined Formulas** *(reference directly; do not redefine)*")
+                    lines.extend(formula_lines)
 
             lines.append("")
 
