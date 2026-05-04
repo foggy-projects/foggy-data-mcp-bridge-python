@@ -357,6 +357,7 @@ class QueryPlan(ABC):
         *,
         columns: Optional[List[str]] = None,
         slice: Optional[List[Any]] = None,
+        having: Optional[List[Any]] = None,
         group_by: Optional[List[str]] = None,
         order_by: Optional[List[str]] = None,
         limit: Optional[int] = None,
@@ -375,6 +376,7 @@ class QueryPlan(ABC):
                 raise TypeError("options_dict must be a dictionary")
             columns = options_dict.get("columns", columns)
             slice = options_dict.get("slice", slice)
+            having = options_dict.get("having", having)
             group_by = options_dict.get("groupBy", group_by)
             order_by = options_dict.get("orderBy", order_by)
             limit = options_dict.get("limit", limit)
@@ -384,6 +386,11 @@ class QueryPlan(ABC):
         from ..sandbox import validate_derived_columns, validate_slice
         validate_derived_columns(columns, "plan-build")
         validate_slice(slice, "plan-build")
+        if having:
+            raise ValueError(
+                "QueryPlan.query() does not accept having; use slice for "
+                "derived-plan post-result filters."
+            )
 
         return DerivedQueryPlan(
             source=self,
@@ -662,6 +669,7 @@ class BaseModelPlan(QueryPlan):
     model: str
     columns: Tuple[str, ...]
     slice_: Tuple[Any, ...] = ()
+    having: Tuple[Any, ...] = ()
     group_by: Tuple[str, ...] = ()
     order_by: Tuple[str, ...] = ()
     calculated_fields: Tuple[Any, ...] = ()

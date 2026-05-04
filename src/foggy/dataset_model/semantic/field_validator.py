@@ -409,6 +409,7 @@ def validate_field_access(
     *,
     columns: List[str],
     slice_items: List[Any],
+    having_items: Optional[List[Any]] = None,
     order_by: List[Any],
     calculated_fields: Optional[List[Dict[str, Any]]] = None,
     field_access: Optional[FieldAccessDef] = None,
@@ -498,7 +499,17 @@ def validate_field_access(
     for f in slice_fields:
         _check_field(f)
 
-    # 3. Validate orderBy (with alias back-tracking to dependency fields)
+    # 3. Validate user having. HAVING shares slice's structural syntax but
+    # can reference calculated-field aliases, which back-track to dependencies.
+    having_fields = _extract_fields_from_slice(having_items or [])
+    for f in having_fields:
+        if f in alias_deps:
+            for dep in alias_deps[f]:
+                _check_field(dep)
+        else:
+            _check_field(f)
+
+    # 4. Validate orderBy (with alias back-tracking to dependency fields)
     for ob in order_by:
         if isinstance(ob, dict):
             field_ref = ob.get("field") or ob.get("fieldName") or ob.get("column", "")
@@ -521,7 +532,7 @@ def validate_field_access(
         else:
             _check_field(field_ref)
 
-    # 4. Validate calculatedFields
+    # 5. Validate calculatedFields
     if calculated_fields:
         calc_fields = _extract_fields_from_calculated(calculated_fields)
         for f in calc_fields:
@@ -648,6 +659,11 @@ def validate_query_fields(model: Any, request: Any) -> Optional[InvalidQueryFiel
             return detail
 
     for item in request.slice or []:
+        detail = _validate_slice_item(model, item, schema_fields, dynamic_fields)
+        if detail:
+            return detail
+
+    for item in getattr(request, "having", None) or []:
         detail = _validate_slice_item(model, item, schema_fields, dynamic_fields)
         if detail:
             return detail

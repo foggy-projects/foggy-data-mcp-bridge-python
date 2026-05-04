@@ -216,6 +216,7 @@ def _from_dsl(options: Dict[str, Any], *args):
 
         validate_columns(options.get("columns"), "script-eval")
         validate_slice(options.get("slice"), "script-eval")
+        validate_slice(options.get("having"), "script-eval")
         kwargs = {}
         for k, v in options.items():
             if k == "groupBy":

@@ -50,6 +50,7 @@ def from_(
     source: Optional[QueryPlan] = None,
     columns: Optional[List[str]] = None,
     slice: Optional[List[Any]] = None,
+    having: Optional[List[Any]] = None,
     group_by: Optional[List[str]] = None,
     order_by: Optional[List[str]] = None,
     calculated_fields: Optional[List[Any]] = None,
@@ -109,6 +110,7 @@ def from_(
     _validate_pagination(limit, start, "from_()")
 
     slice_tuple = _freeze_opt_list(slice)
+    having_tuple = _freeze_opt_list(having)
     group_by_tuple = _freeze_opt_str_list(group_by)
     order_by_tuple = _freeze_opt_str_list(order_by)
     calculated_fields_tuple = _freeze_opt_list(calculated_fields)
@@ -120,6 +122,7 @@ def from_(
             model=model,
             columns=cols,
             slice_=slice_tuple,
+            having=having_tuple,
             group_by=group_by_tuple,
             order_by=order_by_tuple,
             calculated_fields=calculated_fields_tuple,
@@ -130,6 +133,11 @@ def from_(
 
     # has_source branch
     _require_plan(source, "from_(source=...)")
+    if having_tuple:
+        raise ValueError(
+            "from_(source=...) does not accept having; use "
+            "source.query(slice=[...]) for derived-plan post-result filters."
+        )
     return DerivedQueryPlan(
         source=source,
         columns=cols,

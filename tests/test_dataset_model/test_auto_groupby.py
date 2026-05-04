@@ -74,6 +74,28 @@ class TestAutoGroupBy:
         # paymentMethod should NOT be in GROUP BY since explicit groupby was provided
         assert "t.payment_method" not in group_part
 
+    def test_having_on_aggregate_measure(self, service):
+        """Top-level having filters aggregate measures after grouping."""
+        request = SemanticQueryRequest(
+            columns=["orderStatus$caption", "salesAmount"],
+            group_by=["orderStatus$caption"],
+            having=[{"field": "salesAmount", "op": ">", "value": 0}],
+        )
+        sql = _build_sql(service, request)
+        assert "HAVING" in sql
+        assert "SUM(t.sales_amount)" in sql
+
+    def test_aggregate_measure_in_slice_is_rejected(self, service):
+        """Aggregate measures must not be pushed into WHERE via slice."""
+        request = SemanticQueryRequest(
+            columns=["orderStatus$caption", "salesAmount"],
+            group_by=["orderStatus$caption"],
+            slice=[{"field": "salesAmount", "op": ">", "value": 0}],
+        )
+        response = service.query_model("FactSalesModel", request, mode="validate")
+        assert response.error is not None
+        assert "AGGREGATE_MEASURE_IN_SLICE" in response.error
+
     def test_auto_groupby_mixed_measures(self, service):
         """Multiple measures with a single dimension should still auto GROUP BY."""
         request = SemanticQueryRequest(

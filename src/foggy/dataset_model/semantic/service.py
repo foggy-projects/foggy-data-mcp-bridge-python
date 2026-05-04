@@ -475,6 +475,7 @@ class SemanticQueryService(SemanticServiceResolver):
             validation = validate_field_access(
                 columns=request.columns,
                 slice_items=request.slice,
+                having_items=request.having,
                 order_by=request.order_by,
                 calculated_fields=request.calculated_fields,
                 field_access=field_access,
@@ -679,6 +680,11 @@ class SemanticQueryService(SemanticServiceResolver):
         if derived_calcs:
             request.columns = rewritten_columns
 
+        for condition in request.having or []:
+            self._collect_condition_field_refs(condition, referenced_columns)
+        for condition in request.slice or []:
+            self._collect_condition_field_refs(condition, referenced_columns)
+
         to_inject = []
         for calc in derived_calcs:
             calc_name = calc.get("name")
@@ -693,6 +699,18 @@ class SemanticQueryService(SemanticServiceResolver):
             if request.calculated_fields is None:
                 request.calculated_fields = []
             request.calculated_fields = to_inject + request.calculated_fields
+
+    def _collect_condition_field_refs(self, item: Any, target: set) -> None:
+        if not isinstance(item, dict):
+            return
+        field = item.get("field") or item.get("column")
+        if isinstance(field, str) and field:
+            target.add(field)
+        for key in ("conditions", "children", "filters", "$or", "$and", "or", "and"):
+            nested = item.get(key)
+            if isinstance(nested, list):
+                for child in nested:
+                    self._collect_condition_field_refs(child, target)
 
     def query_model(
         self,
@@ -1139,6 +1157,7 @@ class SemanticQueryService(SemanticServiceResolver):
         calc_field_defs = self._request_calculated_field_defs(request)
         if calc_field_defs:
             calc_field_defs = sort_calc_fields_by_dependencies(calc_field_defs)
+        aggregate_calc_fields = self._aggregate_calc_field_names(calc_field_defs)
         compiled_calcs: Dict[str, str] = {}
         # v1.4 M4 Step 4.1: parallel dict holding FormulaCompiler bind_params
         # per calc name.  When a calc is referenced by slice / having /
@@ -1166,6 +1185,7 @@ class SemanticQueryService(SemanticServiceResolver):
                 has_aggregation = True
 
         # 3. WHERE clause
+        self._reject_aggregate_conditions_in_slice(model, request.slice, aggregate_calc_fields)
         for filter_item in request.slice:
             self._add_filter(
                 builder, model, filter_item, ensure_join,
@@ -1196,6 +1216,27 @@ class SemanticQueryService(SemanticServiceResolver):
                 builder.group_by(dim_expr)
 
         # 5. HAVING
+        if request.having:
+            if not request.group_by:
+                raise ValueError(
+                    "HAVING_REQUIRES_GROUP_BY: request.having is only "
+                    "supported on grouped aggregate queries. Add groupBy or "
+                    "use a derived plan query({slice:[...]}) for post-result filters."
+                )
+            selected_aggregate_sql = self._selected_aggregate_sql(columns_info)
+            for condition in request.having:
+                fragment, params = self._build_having_condition(
+                    model,
+                    condition,
+                    ensure_runtime_joins,
+                    compiled_calcs=compiled_calcs,
+                    compiled_calcs_params=compiled_calcs_params,
+                    aggregate_calc_fields=aggregate_calc_fields,
+                    selected_aggregate_sql=selected_aggregate_sql,
+                )
+                if fragment:
+                    builder.having(fragment, params=params or None)
+
         having_filters = (request.hints or {}).get("having", [])
         for hf in having_filters:
             col, op, val = hf.get("column"), hf.get("operator"), hf.get("value")
@@ -2175,6 +2216,170 @@ class SemanticQueryService(SemanticServiceResolver):
             "select_expr": select_expr,
         }
 
+    def _aggregate_calc_field_names(
+        self,
+        calc_field_defs: List[CalculatedFieldDef],
+    ) -> set[str]:
+        names: set[str] = set()
+        for cf in calc_field_defs or []:
+            if cf.agg or parse_inline_aggregate(str(cf.expression or "")):
+                if cf.name:
+                    names.add(cf.name)
+                if cf.alias:
+                    names.add(cf.alias)
+        return names
+
+    def _selected_aggregate_sql(
+        self,
+        columns_info: List[Dict[str, Any]],
+    ) -> Dict[str, str]:
+        result: Dict[str, str] = {}
+        for info in columns_info:
+            agg = info.get("aggregation")
+            if not agg:
+                continue
+            expr = info.get("expression")
+            alias = info.get("name")
+            if not expr or not alias:
+                continue
+            agg_upper = str(agg).upper()
+            if agg_upper == "COUNT_DISTINCT":
+                result[alias] = f"COUNT(DISTINCT {expr})"
+            else:
+                result[alias] = f"{agg_upper}({expr})"
+        return result
+
+    def _is_aggregate_condition_field(
+        self,
+        model: DbTableModelImpl,
+        field_name: str,
+        aggregate_calc_fields: set[str],
+    ) -> bool:
+        if field_name in aggregate_calc_fields:
+            return True
+        resolved = model.resolve_field(field_name)
+        return bool(resolved and resolved.get("is_measure") and resolved.get("aggregation"))
+
+    def _reject_aggregate_conditions_in_slice(
+        self,
+        model: DbTableModelImpl,
+        items: List[Any],
+        aggregate_calc_fields: set[str],
+    ) -> None:
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            field = item.get("field") or item.get("column")
+            if isinstance(field, str) and self._is_aggregate_condition_field(
+                model, field, aggregate_calc_fields,
+            ):
+                raise ValueError(
+                    "AGGREGATE_MEASURE_IN_SLICE: field "
+                    f"{field!r} is an aggregate measure. Move this condition "
+                    "from slice to request.having, or filter by base fields "
+                    "before aggregation."
+                )
+            for key in ("conditions", "children", "filters", "$or", "$and", "or", "and"):
+                nested = item.get(key)
+                if isinstance(nested, list):
+                    self._reject_aggregate_conditions_in_slice(
+                        model, nested, aggregate_calc_fields,
+                    )
+
+    def _build_having_condition(
+        self,
+        model: DbTableModelImpl,
+        item: Dict[str, Any],
+        ensure_join=None,
+        *,
+        compiled_calcs: Optional[Dict[str, str]] = None,
+        compiled_calcs_params: Optional[Dict[str, List[Any]]] = None,
+        aggregate_calc_fields: Optional[set[str]] = None,
+        selected_aggregate_sql: Optional[Dict[str, str]] = None,
+    ) -> Tuple[str, List[Any]]:
+        if not isinstance(item, dict):
+            raise ValueError(
+                "UNSUPPORTED_HAVING_CONDITION: having entries must be objects."
+            )
+
+        for group_key, joiner in (("$or", " OR "), ("or", " OR "), ("$and", " AND "), ("and", " AND ")):
+            nested = item.get(group_key)
+            if isinstance(nested, list):
+                fragments: List[str] = []
+                params: List[Any] = []
+                for child in nested:
+                    fragment, child_params = self._build_having_condition(
+                        model,
+                        child,
+                        ensure_join,
+                        compiled_calcs=compiled_calcs,
+                        compiled_calcs_params=compiled_calcs_params,
+                        aggregate_calc_fields=aggregate_calc_fields,
+                        selected_aggregate_sql=selected_aggregate_sql,
+                    )
+                    if fragment:
+                        fragments.append(fragment)
+                        params.extend(child_params)
+                if not fragments:
+                    return "", []
+                joined = joiner.join(fragments)
+                if len(fragments) > 1:
+                    joined = f"({joined})"
+                return joined, params
+
+        column = item.get("field") or item.get("column")
+        operator = item.get("op") or item.get("operator") or "="
+        value = item.get("value")
+        if not column:
+            raise ValueError(
+                "UNSUPPORTED_HAVING_CONDITION: having leaf requires field/op/value."
+            )
+        if isinstance(value, dict) and "$field" in value:
+            raise ValueError(
+                "UNSUPPORTED_HAVING_CONDITION: field-to-field HAVING is not supported."
+            )
+
+        aggregate_calc_fields = aggregate_calc_fields or set()
+        selected_aggregate_sql = selected_aggregate_sql or {}
+        params: List[Any] = []
+
+        if compiled_calcs and column in compiled_calcs:
+            if column not in aggregate_calc_fields:
+                raise ValueError(
+                    "HAVING_REQUIRES_AGGREGATE_FIELD: having field "
+                    f"{column!r} is not an aggregate calculated field."
+                )
+            col_expr = f"({compiled_calcs[column]})"
+            params.extend(list((compiled_calcs_params or {}).get(column, [])))
+        elif column in selected_aggregate_sql:
+            col_expr = selected_aggregate_sql[column]
+        else:
+            resolved = model.resolve_field(column)
+            if not resolved or not resolved.get("is_measure") or not resolved.get("aggregation"):
+                raise ValueError(
+                    "HAVING_REQUIRES_AGGREGATE_FIELD: having field "
+                    f"{column!r} must be a predefined aggregate measure or "
+                    "aggregate alias."
+                )
+            if resolved["join_def"] and ensure_join:
+                ensure_join(resolved["join_def"])
+            agg = str(resolved["aggregation"]).upper()
+            if agg == "COUNT_DISTINCT":
+                col_expr = f"COUNT(DISTINCT {resolved['sql_expr']})"
+            else:
+                col_expr = f"{agg}({resolved['sql_expr']})"
+
+        condition_params: List[Any] = []
+        condition = self._formula_registry.build_condition(
+            col_expr, operator, value, condition_params,
+        )
+        if not condition:
+            raise ValueError(
+                "UNSUPPORTED_HAVING_CONDITION: unsupported HAVING operator "
+                f"{operator!r}."
+            )
+        return condition, params + condition_params
+
     def _build_selected_order_aliases(
         self,
         columns_info: List[Dict[str, Any]],
@@ -2746,6 +2951,10 @@ class SemanticQueryService(SemanticServiceResolver):
                 base_sql = f"COUNT(DISTINCT {base_sql})"
             else:
                 base_sql = f"{agg_upper}({base_sql})"
+
+        if getattr(cf, "empty_default", None) is not None:
+            base_sql = f"COALESCE({base_sql}, ?)"
+            base_params.append(cf.empty_default)
 
         return base_sql, base_params
 
@@ -4137,6 +4346,7 @@ class SemanticQueryService(SemanticServiceResolver):
             "model": model,
             "columns": sorted(request.columns),
             "slice": request.slice,
+            "having": request.having,
             "group_by": sorted(request.group_by) if request.group_by else [],
             "order_by": request.order_by,
             "limit": request.limit,

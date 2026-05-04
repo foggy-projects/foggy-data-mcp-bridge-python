@@ -269,7 +269,7 @@ class ComposeScriptTool(BaseMcpTool):
             )
 
         # 4. Success — shape the result for MCP callers.
-        data: Dict[str, Any] = {"value": result.value}
+        data: Dict[str, Any] = {"value": self._with_empty_result_semantic(result.value)}
         if result.sql is not None:
             data["sql"] = result.sql
             data["params"] = list(result.params or [])
@@ -278,6 +278,23 @@ class ComposeScriptTool(BaseMcpTool):
         return self._success_result(
             data=data, message="Compose script executed",
         )
+
+    @staticmethod
+    def _with_empty_result_semantic(value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        plans = value.get("plans")
+        if not isinstance(plans, list) or plans:
+            return value
+        if "semantic" in value:
+            return value
+        enriched = dict(value)
+        enriched["semantic"] = {
+            "emptyResult": True,
+            "emptyReason": "NO_MATCHING_ROWS_AFTER_COMPOSE",
+            "shouldAnswerDirectly": True,
+        }
+        return enriched
 
     # ------------------------------------------------------------------
     # Error payload helper

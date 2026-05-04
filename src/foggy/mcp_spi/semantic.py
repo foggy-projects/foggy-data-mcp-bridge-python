@@ -80,6 +80,7 @@ class NormalizedRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     slice: Optional[List[Dict[str, Any]]] = None
+    having: Optional[List[Dict[str, Any]]] = None
     group_by: Optional[List[Dict[str, Any]]] = Field(None, alias="groupBy")
     order_by: Optional[List[Dict[str, Any]]] = Field(None, alias="orderBy")
 
@@ -91,6 +92,15 @@ class DebugInfo(BaseModel):
     normalized: Optional[NormalizedRequest] = None
     duration_ms: Optional[float] = Field(None, alias="durationMs")
     extra: Optional[Dict[str, Any]] = None
+
+
+class SemanticInfo(BaseModel):
+    """Business-level result semantics — aligned with Java response semantic."""
+    model_config = ConfigDict(populate_by_name=True)
+
+    empty_result: Optional[bool] = Field(None, alias="emptyResult")
+    empty_reason: Optional[str] = Field(None, alias="emptyReason")
+    should_answer_directly: Optional[bool] = Field(None, alias="shouldAnswerDirectly")
 
 
 # ============================================================================
@@ -127,6 +137,7 @@ class SemanticQueryResponse(BaseModel):
     cursor: Optional[str] = None
     warnings: Optional[List[str]] = None
     debug: Optional[DebugInfo] = None
+    semantic: Optional[SemanticInfo] = None
     truncation_info: Optional[Dict[str, Any]] = Field(None, alias="truncationInfo")
     error_detail: Optional[Dict[str, Any]] = Field(None, alias="error")
 
@@ -258,6 +269,14 @@ class SemanticQueryResponse(BaseModel):
                 range_description=range_desc,
             )
 
+        semantic = None
+        if not error and not data:
+            semantic = SemanticInfo(
+                empty_result=True,
+                empty_reason="NO_MATCHING_ROWS",
+                should_answer_directly=True,
+            )
+
         resp = cls(
             items=data or [],
             schema_info=schema,
@@ -265,6 +284,7 @@ class SemanticQueryResponse(BaseModel):
             total=total or len(data or []),
             warnings=warnings if warnings else None,
             debug=debug,
+            semantic=semantic,
         )
         if error:
             resp._error = error
@@ -526,6 +546,7 @@ class SemanticQueryRequest(BaseModel):
             "columns": [...],
             "calculatedFields": [...],
             "slice": [...],
+            "having": [...],
             "groupBy": [...],
             "orderBy": [...],
             "start": 0,
@@ -544,6 +565,7 @@ class SemanticQueryRequest(BaseModel):
     columns: List[str] = []
     calculated_fields: List[Dict[str, Any]] = Field(default_factory=list, alias="calculatedFields")
     slice: List[Any] = []
+    having: List[Any] = []
     group_by: List[Any] = Field(default_factory=list, alias="groupBy")
     order_by: List[Any] = Field(default_factory=list, alias="orderBy")
     start: int = 0

@@ -103,6 +103,7 @@ def build_query_request(payload: Dict[str, Any]) -> SemanticQueryRequest:
     return SemanticQueryRequest(
         columns=payload.get("columns", []),
         slice=payload.get("slice", []),
+        having=payload.get("having", []),
         group_by=payload.get("groupBy", []),
         order_by=payload.get("orderBy", []),
         start=payload.get("start", 0),

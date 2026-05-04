@@ -201,6 +201,14 @@ class TestSemanticQueryResponseAlignment:
         j = resp.model_dump(by_alias=True, exclude_none=True)
         assert "pagination" not in j
 
+    def test_empty_legacy_response_has_semantic_marker(self):
+        """Empty successful responses tell callers this is a terminal result."""
+        resp = SemanticQueryResponse.from_legacy(data=[], total=0)
+        j = resp.model_dump(by_alias=True, exclude_none=True)
+        assert j["semantic"]["emptyResult"] is True
+        assert j["semantic"]["emptyReason"] == "NO_MATCHING_ROWS"
+        assert j["semantic"]["shouldAnswerDirectly"] is True
+
     def test_from_error_factory(self):
         """from_error() creates response with internal error."""
         resp = SemanticQueryResponse.from_error("Model not found: foo")
@@ -282,6 +290,7 @@ class TestSemanticQueryRequestAlignment:
         req = SemanticQueryRequest(
             columns=["name"],
             slice=[{"field": "status", "op": "=", "value": "A"}],
+            having=[{"field": "totalAmount", "op": ">", "value": 0}],
             group_by=[{"field": "name"}],
             order_by=[{"field": "name", "dir": "asc"}],
             return_total=True,
@@ -291,6 +300,7 @@ class TestSemanticQueryRequestAlignment:
         )
         j = req.model_dump(by_alias=True, exclude_none=True)
         assert "groupBy" in j
+        assert "having" in j
         assert "orderBy" in j
         assert "returnTotal" in j
         assert "withSubtotals" in j
@@ -298,6 +308,7 @@ class TestSemanticQueryRequestAlignment:
         assert "timeWindow" in j
         # No snake_case keys in output
         assert "group_by" not in j
+        assert "having_" not in j
         assert "order_by" not in j
         assert "return_total" not in j
         assert "time_window" not in j
@@ -361,10 +372,12 @@ class TestSemanticQueryRequestAlignment:
         }
         req = build_query_request({
             "columns": ["salesDate$caption", "sum(salesAmount)"],
+            "having": [{"field": "totalAmount", "op": ">", "value": 0}],
             "timeWindow": time_window,
         })
 
         assert req.time_window == time_window
+        assert req.having == [{"field": "totalAmount", "op": ">", "value": 0}]
         assert req.model_dump(by_alias=True, exclude_none=True)["timeWindow"] == time_window
 
 

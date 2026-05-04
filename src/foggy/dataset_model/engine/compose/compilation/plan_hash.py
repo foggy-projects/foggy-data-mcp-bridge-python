@@ -126,6 +126,7 @@ def plan_hash(plan: QueryPlan) -> CanonicalPlanTuple:
             plan.model,
             canonical(plan.columns),
             canonical(plan.slice_),
+            canonical(plan.having),
             canonical(plan.group_by),
             canonical(plan.order_by),
             canonical(plan.calculated_fields),

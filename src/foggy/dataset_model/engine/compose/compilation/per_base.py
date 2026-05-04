@@ -183,6 +183,7 @@ def _build_request(
         columns=list(plan.columns),
         calculated_fields=list(plan.calculated_fields),
         slice=list(plan.slice_),
+        having=list(plan.having),
         group_by=list(plan.group_by),
         order_by=order_by_entries,
         limit=plan.limit,

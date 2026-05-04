@@ -158,6 +158,20 @@ class TestBaseModelPlanShapeFields:
         # ``orderStatus``
         assert "GROUP BY" in composed.sql
 
+    def test_having_is_forwarded_to_v1_engine(self, svc, ctx):
+        plan = from_(
+            model="FactSalesModel",
+            columns=["orderStatus$caption", "salesAmount"],
+            group_by=["orderStatus$caption"],
+            having=[{"field": "salesAmount", "op": ">", "value": 0}],
+        )
+        composed = compile_plan_to_sql(
+            plan, ctx, semantic_service=svc, dialect="mysql8"
+        )
+        assert "HAVING" in composed.sql
+        assert "SUM(t.sales_amount)" in composed.sql
+        assert 0 in composed.params
+
 
 class TestBaseModelPlanDistinct:
     def test_distinct_flag_does_not_crash(self, svc, ctx):
