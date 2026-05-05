@@ -670,11 +670,21 @@ class SemanticQueryService(SemanticServiceResolver):
                 referenced_columns.add(alias)
                 continue
 
+            parsed = parse_column_with_alias(column)
+            if parsed.user_alias and parsed.base_expr in predefined_by_name:
+                source_calc = dict(predefined_by_name[parsed.base_expr])
+                alias = parsed.user_alias
+                source_calc["name"] = alias
+                source_calc["alias"] = alias
+                derived_calcs.append(source_calc)
+                rewritten_columns.append(alias)
+                referenced_columns.add(alias)
+                continue
+
             rewritten_columns.append(column)
             if not isinstance(column, str):
                 continue
             referenced_columns.add(column)
-            parsed = parse_column_with_alias(column)
             referenced_columns.add(parsed.base_expr)
             referenced_columns.update(extract_field_dependencies(parsed.base_expr))
         if derived_calcs:

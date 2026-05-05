@@ -118,6 +118,19 @@ def test_dsl_alias_equivalent_to_from():
     assert isinstance(r.value, BaseModelPlan)
 
 
+def test_dsl_forwards_having_to_base_model_plan():
+    r = run_script(
+        (
+            'dsl({model: "Sales", columns: ["customer", "amount"], '
+            'groupBy: ["customer"], '
+            'having: [{field: "amount", op: ">", value: 0}]})'
+        ),
+        _ctx(), semantic_service=_StubSemanticService(),
+    )
+    assert isinstance(r.value, BaseModelPlan)
+    assert r.value.having == ({"field": "amount", "op": ">", "value": 0},)
+
+
 def test_dsl_normalizes_camel_case_calculated_fields():
     r = run_script(
         (

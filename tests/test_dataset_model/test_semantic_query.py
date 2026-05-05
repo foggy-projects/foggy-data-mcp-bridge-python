@@ -90,6 +90,54 @@ def _build_sql(service: SemanticQueryService, model_name: str, request: Semantic
     return response.sql
 
 
+def _build_response(service: SemanticQueryService, model_name: str, request: SemanticQueryRequest):
+    response = service.query_model(model_name, request, mode="validate")
+    assert response.error is None, f"Query build failed: {response.error}"
+    assert response.sql is not None
+    return response
+
+
+class TestOdooAggregateHaving:
+    def test_predefined_formula_measure_having_generates_sql(self, odoo_service):
+        request = SemanticQueryRequest(
+            columns=["partner$caption", "arOverdueAmount"],
+            group_by=["partner$caption"],
+            having=[{"field": "arOverdueAmount", "op": ">", "value": 0}],
+            limit=10,
+        )
+
+        response = _build_response(
+            odoo_service, "OdooAccountMoveLineQueryModel", request,
+        )
+
+        assert "HAVING" in response.sql
+        assert "SUM(CASE" in response.sql
+        assert [column["name"] for column in response.columns] == [
+            "Partner",
+            "arOverdueAmount",
+        ]
+
+    def test_predefined_formula_measure_alias_can_be_used_in_having(self, odoo_service):
+        request = SemanticQueryRequest(
+            columns=["partner$caption", "arOverdueAmount AS overdue_amount"],
+            group_by=["partner$caption"],
+            having=[{"field": "overdue_amount", "op": ">", "value": 0}],
+            limit=10,
+        )
+
+        response = _build_response(
+            odoo_service, "OdooAccountMoveLineQueryModel", request,
+        )
+
+        assert "HAVING" in response.sql
+        assert "SUM(CASE" in response.sql
+        assert '"overdue_amount"' in response.sql
+        assert [column["name"] for column in response.columns] == [
+            "Partner",
+            "overdue_amount",
+        ]
+
+
 # ==================== TestFieldResolution ====================
 
 
