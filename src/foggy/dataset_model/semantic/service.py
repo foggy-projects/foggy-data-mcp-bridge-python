@@ -45,7 +45,18 @@ from foggy.dataset_model.semantic.field_validator import (
     validate_field_access,
     filter_response_columns,
     validate_query_fields,
+    _collect_model_schema_fields,
 )
+from foggy.dataset_model.semantic.case_insensitive_resolver import (
+    CaseInsensitiveFieldResolver,
+    CaseInsensitiveFieldAmbiguousError,
+    case_insensitive_field_resolve_enabled,
+    resolve_slice_fields,
+    resolve_order_by_fields,
+    resolve_group_by_fields,
+    resolve_columns,
+)
+from foggy.dataset_model.order_by import normalize_order_by_item
 from foggy.dataset_model.semantic.calc_field_sorter import (
     sort_calc_fields_by_dependencies,
     CircularCalcFieldError,
@@ -122,6 +133,7 @@ class SemanticQueryService(SemanticServiceResolver):
         dialect=None,
         use_ast_expression_compiler: bool = False,
         auto_lift_aggregate_slice_to_having: Optional[bool] = None,
+        auto_case_insensitive_field_resolve: Optional[bool] = None,
     ):
         """Initialize the semantic query service.
 
@@ -150,6 +162,13 @@ class SemanticQueryService(SemanticServiceResolver):
                      to True; pass False or set
                      ``FOGGY_DATASET_AUTO_LIFT_AGGREGATE_SLICE_TO_HAVING=false``
                      to preserve the previous rejection.
+            auto_case_insensitive_field_resolve: when True, field names
+                     that differ only by case from a canonical schema field
+                     are resolved to the canonical name before validation,
+                     permission checks, and SQL generation.  Defaults to
+                     True; pass False or set
+                     ``FOGGY_DATASET_CASE_INSENSITIVE_FIELD_RESOLVE=false``
+                     to preserve exact-match-only behaviour.
         """
         self._models: Dict[str, DbTableModelImpl] = {}
         self._default_limit = default_limit
@@ -165,6 +184,9 @@ class SemanticQueryService(SemanticServiceResolver):
             self._resolve_auto_lift_aggregate_slice_to_having_default()
             if auto_lift_aggregate_slice_to_having is None
             else auto_lift_aggregate_slice_to_having
+        )
+        self._auto_case_insensitive_field_resolve = (
+            case_insensitive_field_resolve_enabled(auto_case_insensitive_field_resolve)
         )
         self._formula_registry: SqlFormulaRegistry = get_default_registry()
         self._hierarchy_registry = get_default_hierarchy_registry()
@@ -340,41 +362,13 @@ class SemanticQueryService(SemanticServiceResolver):
         ``"amount"`` / ``"-amount"``.  Keep the normalization local to the
         semantic layer so callers do not need to pre-clean LLM output.
         """
-        field_name: Optional[str] = None
-        direction: Any = "asc"
-
-        if isinstance(item, str):
-            field_name = item.strip()
-            if field_name.startswith("-"):
-                direction = "desc"
-                field_name = field_name[1:].strip()
-            elif field_name.startswith("+"):
-                field_name = field_name[1:].strip()
-        elif isinstance(item, dict):
-            field_name = item.get("column") or item.get("field") or item.get("fieldName")
-            direction = item.get("direction") or item.get("dir") or direction
-        else:
-            field_name = (
-                getattr(item, "column", None)
-                or getattr(item, "field", None)
-                or getattr(item, "field_name", None)
-            )
-            direction = (
-                getattr(item, "direction", None)
-                or getattr(item, "dir", None)
-                or direction
-            )
-
-        if not isinstance(field_name, str):
+        try:
+            spec = normalize_order_by_item(item)
+        except TypeError:
             return None, "ASC"
-        field_name = field_name.strip()
-        if not field_name:
+        if not spec.field:
             return None, "ASC"
-
-        direction_upper = str(direction or "asc").upper()
-        if direction_upper not in {"ASC", "DESC"}:
-            direction_upper = "ASC"
-        return field_name, direction_upper
+        return spec.field, spec.direction.upper()
 
     def get_physical_column_mapping(self, model_name: str) -> Optional[PhysicalColumnMapping]:
         """Get or lazily build the physical column mapping for a model.
@@ -466,6 +460,89 @@ class SemanticQueryService(SemanticServiceResolver):
         self._cache.clear()
         self._mapping_cache.clear()
         logger.debug("Cache invalidated")
+
+    # ==================== Case-Insensitive Field Resolution ====================
+
+    def _resolve_request_fields_case_insensitive(
+        self,
+        table_model: DbTableModelImpl,
+        request: SemanticQueryRequest,
+    ):
+        """Resolve field names in *request* to their canonical casing.
+
+        Builds a :class:`CaseInsensitiveFieldResolver` from the model's
+        schema fields (dimensions + measures + calculated-field names +
+        predefined formula names) and walks every structured field
+        reference in the request.
+
+        Returns either:
+        * A **new** ``SemanticQueryRequest`` with canonical field names, or
+        * A ``SemanticQueryResponse`` error when ambiguity is detected.
+        """
+        # Collect canonical field names
+        schema_fields = _collect_model_schema_fields(table_model)
+
+        # Also include calculated-field names (they may be referenced in
+        # orderBy / having / slice).
+        calc_names = set()
+        if hasattr(request, "calculated_fields") and request.calculated_fields:
+            for cf in request.calculated_fields:
+                name = cf.get("name") if isinstance(cf, dict) else getattr(cf, "name", None)
+                if name:
+                    calc_names.add(name)
+        all_fields = schema_fields | calc_names
+
+        resolver = CaseInsensitiveFieldResolver(all_fields)
+
+        try:
+            new_columns = resolve_columns(
+                getattr(request, "columns", None), resolver,
+            )
+            new_slice = resolve_slice_fields(
+                getattr(request, "slice", None), resolver,
+            )
+            new_having = resolve_slice_fields(
+                getattr(request, "having", None), resolver,
+            )
+            new_order_by = resolve_order_by_fields(
+                getattr(request, "order_by", None), resolver,
+            )
+            new_group_by = resolve_group_by_fields(
+                getattr(request, "group_by", None), resolver,
+            )
+        except CaseInsensitiveFieldAmbiguousError as e:
+            return SemanticQueryResponse.from_error(
+                str(e),
+                error_detail={
+                    "error_code": e.error_code,
+                    "field": e.field,
+                    "candidates": e.candidates,
+                },
+            )
+
+        # Build an updated request (SemanticQueryRequest is a Pydantic model)
+        update_kwargs = {}
+        if new_columns is not None:
+            update_kwargs["columns"] = new_columns
+        if new_slice is not None:
+            update_kwargs["slice"] = new_slice
+        if new_having is not None:
+            update_kwargs["having"] = new_having
+        if new_order_by is not None:
+            update_kwargs["order_by"] = new_order_by
+        if new_group_by is not None:
+            update_kwargs["group_by"] = new_group_by
+
+        if update_kwargs:
+            try:
+                request = request.model_copy(update=update_kwargs)
+            except Exception:
+                # Fallback for older Pydantic or non-Pydantic request objects
+                for k, v in update_kwargs.items():
+                    if hasattr(request, k):
+                        setattr(request, k, v)
+
+        return request
 
     # ==================== Governance Helpers ====================
 
@@ -774,6 +851,16 @@ class SemanticQueryService(SemanticServiceResolver):
 
         # --- v1.2/v1.3: governance check + system_slice merge ---
         self._inject_predefined_calculated_fields(table_model, request)
+
+        # --- Case-insensitive canonical field resolution ---
+        if self._auto_case_insensitive_field_resolve:
+            ci_result = self._resolve_request_fields_case_insensitive(
+                table_model, request,
+            )
+            if isinstance(ci_result, SemanticQueryResponse):
+                return ci_result  # ambiguity error
+            request = ci_result
+
         governance_error, request = self._apply_query_governance(model, request)
         if governance_error is not None:
             return governance_error
