@@ -41,8 +41,10 @@ from foggy.dataset_model.engine.compose import (
 )
 from foggy.dataset_model.engine.compose import feature_flags
 from foggy.dataset_model.engine.compose.compilation import error_codes
+from foggy.dataset_model.engine.compose.schema import error_codes as schema_error_codes
 from foggy.dataset_model.engine.compose.schema.derive import derive_schema
 from foggy.dataset_model.engine.compose.schema.alias import extract_column_alias
+from foggy.dataset_model.engine.compose.schema.errors import ComposeSchemaError
 from foggy.dataset_model.engine.compose.security import (
     plan_aware_permission_validator,
 )
@@ -480,12 +482,15 @@ def _compile_derived(plan: DerivedQueryPlan, state: _CompileState) -> CteUnit:
             select_columns=None,
         )
     assert isinstance(inner, CteUnit)
+    source_columns = _source_output_columns_for_derived(plan.source, inner)
+    _validate_derived_output_refs_for_union_source(plan, source_columns)
 
     outer_sql, outer_params = _render_outer_select(
         plan=plan,
         inner_alias=inner.alias,
         inner_sql=inner.sql,
         dialect=state.dialect,
+        source_columns=source_columns,
     )
     derived_alias = state.next_alias()
     _register_plan_alias(state, plan, derived_alias)
@@ -739,20 +744,235 @@ def _base_declared_output_names(plan: BaseModelPlan) -> List[str]:
     return names
 
 
+_DERIVED_EXPR_RESERVED_TOKENS: frozenset = frozenset({
+    "SUM", "COUNT", "AVG", "MIN", "MAX",
+    "IIF", "IF", "CASE", "WHEN", "THEN", "ELSE", "END",
+    "COALESCE", "NULLIF",
+    "IS_NULL", "IS_NOT_NULL", "BETWEEN", "IN", "NOT",
+    "DATE_DIFF", "DATE_ADD", "NOW",
+    "AND", "OR",
+    "TRUE", "FALSE", "NULL",
+    "DISTINCT",
+})
+
+
+def _source_output_columns_for_derived(
+    source: QueryPlan,
+    inner: CteUnit,
+) -> List[str]:
+    if isinstance(source, UnionPlan):
+        return derive_schema(source).names()
+    if inner.select_columns:
+        return [
+            extract_column_alias(column).output_name
+            for column in inner.select_columns
+        ]
+    if isinstance(source, BaseModelPlan):
+        return _base_declared_output_names(source)
+    if isinstance(source, DerivedQueryPlan):
+        return [
+            extract_column_alias(column).output_name
+            for column in source.columns
+        ]
+    return []
+
+
+def _validate_derived_output_refs_for_union_source(
+    plan: DerivedQueryPlan,
+    source_columns: List[str],
+) -> None:
+    if not isinstance(plan.source, UnionPlan):
+        return
+    source_names = set(source_columns)
+    for column in plan.columns:
+        parts = extract_column_alias(column)
+        for ident in _iter_unquoted_identifiers(parts.expression):
+            if ident.upper() in _DERIVED_EXPR_RESERVED_TOKENS:
+                continue
+            if ident not in source_names:
+                raise ComposeSchemaError(
+                    code=schema_error_codes.DERIVED_QUERY_UNKNOWN_FIELD,
+                    message=(
+                        f"derived query references unknown field {ident!r} "
+                        "not present in source UNION output schema "
+                        f"(available: {sorted(source_names)!r})"
+                    ),
+                    phase=schema_error_codes.PHASE_SCHEMA_DERIVE,
+                    plan_path="DerivedQueryPlan",
+                    offending_field=ident,
+                )
+
+
+def _iter_unquoted_identifiers(expression: str) -> List[str]:
+    identifiers: List[str] = []
+    i = 0
+    length = len(expression)
+    while i < length:
+        ch = expression[i]
+        if ch == "'":
+            i = _consume_single_quoted(expression, i)
+            continue
+        if ch == '"':
+            i = _consume_double_quoted(expression, i)
+            continue
+        if ch == "`":
+            i = _consume_backtick_quoted(expression, i)
+            continue
+        if ch == "[":
+            i = _consume_bracket_quoted(expression, i)
+            continue
+        if ch.isalpha() or ch == "_":
+            j = i + 1
+            while j < length and (
+                expression[j].isalnum() or expression[j] in {"_", "$"}
+            ):
+                j += 1
+            prev_char = expression[i - 1] if i > 0 else ""
+            next_char = expression[j] if j < length else ""
+            if prev_char != "." and next_char != ".":
+                identifiers.append(expression[i:j])
+            i = j
+            continue
+        i += 1
+    return identifiers
+
+
 def _is_simple_output_ref(expr: str) -> bool:
     return bool(_SIMPLE_OUTPUT_REF.match(expr.strip()))
 
 
-def _render_select_column(column: str, inner_alias: str, dialect: str) -> str:
+def _render_select_column(
+    column: str,
+    inner_alias: str,
+    dialect: str,
+    source_columns: Optional[List[str]] = None,
+) -> str:
     if column.strip() == "*":
         return "*"
     parts = extract_column_alias(column)
-    if not _is_simple_output_ref(parts.expression):
-        return column
-    rendered = _render_qualified_ref(inner_alias, parts.expression, dialect)
+    if _is_simple_output_ref(parts.expression):
+        rendered = _render_qualified_ref(inner_alias, parts.expression, dialect)
+    else:
+        rendered = _render_expression_output_refs(
+            parts.expression,
+            inner_alias=inner_alias,
+            dialect=dialect,
+            source_columns=source_columns or [],
+        )
     if parts.has_alias:
         return f"{rendered} AS {_render_identifier(parts.output_name, dialect)}"
     return rendered
+
+
+def _render_expression_output_refs(
+    expression: str,
+    *,
+    inner_alias: str,
+    dialect: str,
+    source_columns: List[str],
+) -> str:
+    """Qualify output-schema references inside a derived expression.
+
+    Derived queries select from a subquery, so identifiers in expressions
+    refer to the source plan's output names. PostgreSQL folds unquoted
+    camelCase identifiers to lowercase; qualifying and quoting matched
+    output names preserves aliases such as ``currentMonthAmount``.
+    """
+    if not source_columns:
+        return expression
+
+    source_names = set(source_columns)
+    out: List[str] = []
+    i = 0
+    length = len(expression)
+    while i < length:
+        ch = expression[i]
+        if ch == "'":
+            end = _consume_single_quoted(expression, i)
+            out.append(expression[i:end])
+            i = end
+            continue
+        if ch == '"':
+            end = _consume_double_quoted(expression, i)
+            out.append(expression[i:end])
+            i = end
+            continue
+        if ch == "`":
+            end = _consume_backtick_quoted(expression, i)
+            out.append(expression[i:end])
+            i = end
+            continue
+        if ch == "[":
+            end = _consume_bracket_quoted(expression, i)
+            out.append(expression[i:end])
+            i = end
+            continue
+        if ch.isalpha() or ch == "_":
+            j = i + 1
+            while j < length and (
+                expression[j].isalnum() or expression[j] in {"_", "$"}
+            ):
+                j += 1
+            ident = expression[i:j]
+            prev_char = expression[i - 1] if i > 0 else ""
+            next_char = expression[j] if j < length else ""
+            if ident in source_names and prev_char != "." and next_char != ".":
+                out.append(_render_qualified_ref(inner_alias, ident, dialect))
+            else:
+                out.append(ident)
+            i = j
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def _consume_single_quoted(text: str, start: int) -> int:
+    i = start + 1
+    while i < len(text):
+        if text[i] == "'" and i + 1 < len(text) and text[i + 1] == "'":
+            i += 2
+            continue
+        if text[i] == "'":
+            return i + 1
+        i += 1
+    return len(text)
+
+
+def _consume_double_quoted(text: str, start: int) -> int:
+    i = start + 1
+    while i < len(text):
+        if text[i] == '"' and i + 1 < len(text) and text[i + 1] == '"':
+            i += 2
+            continue
+        if text[i] == '"':
+            return i + 1
+        i += 1
+    return len(text)
+
+
+def _consume_backtick_quoted(text: str, start: int) -> int:
+    i = start + 1
+    while i < len(text):
+        if text[i] == "`" and i + 1 < len(text) and text[i + 1] == "`":
+            i += 2
+            continue
+        if text[i] == "`":
+            return i + 1
+        i += 1
+    return len(text)
+
+
+def _consume_bracket_quoted(text: str, start: int) -> int:
+    i = start + 1
+    while i < len(text):
+        if text[i] == "]" and i + 1 < len(text) and text[i + 1] == "]":
+            i += 2
+            continue
+        if text[i] == "]":
+            return i + 1
+        i += 1
+    return len(text)
 
 
 def _sql_join_type(plan_type: str) -> str:
@@ -804,6 +1024,7 @@ def _render_outer_select(
     inner_alias: str,
     inner_sql: str,
     dialect: str,
+    source_columns: List[str],
 ) -> Tuple[str, List[Any]]:
     """Render ``SELECT <cols> FROM (<inner_sql>) AS <inner_alias> …``.
 
@@ -813,15 +1034,19 @@ def _render_outer_select(
     encounter order; LIMIT / OFFSET are inlined (integer literals, not
     parameters, to match v1.3 engine convention).
 
-    The SQL produced is intentionally plain-ANSI and **not** dialect-
-    specific — dialect-aware paren / alias quoting is handled downstream
-    by ``CteComposer``. Derived-chain snapshots in 6.5 verify 4 dialects
-    still round-trip.
+    Derived output references are rendered with dialect-aware identifier
+    quoting so aliases projected by the source subquery keep their exact
+    spelling on case-folding databases such as PostgreSQL.
     """
     distinct_kw = "DISTINCT " if plan.distinct else ""
     column_list = (
         ", ".join(
-            _render_select_column(column, inner_alias, dialect)
+            _render_select_column(
+                column,
+                inner_alias,
+                dialect,
+                source_columns=source_columns,
+            )
             for column in plan.columns
         )
         if plan.columns

@@ -10,6 +10,8 @@ using a datasource-aware ``ModelInfoProvider`` (F-7 post-v1.5 Stage 1).
 """
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from foggy.dataset_model.engine.compose.compilation import (
@@ -18,6 +20,7 @@ from foggy.dataset_model.engine.compose.compilation import (
     error_codes,
 )
 from foggy.dataset_model.engine.compose.plan import from_
+from foggy.dataset_model.engine.compose.schema.errors import ComposeSchemaError
 
 
 class TestUnionBasic:
@@ -107,6 +110,60 @@ class TestUnionWithDerived:
         assert "UNION" in composed.sql
         # Two derived wrappings visible
         assert composed.sql.count("FROM (") >= 2
+
+    def test_derived_over_union_quotes_camel_case_alias_refs_for_postgres(
+        self, svc, ctx
+    ):
+        """Regression: derived aggregate over UNION must preserve camelCase
+        source aliases on PostgreSQL instead of emitting currentmonthamount."""
+        current = from_(
+            model="FactSalesModel",
+            columns=["SUM(salesAmount) AS currentMonthAmount"],
+        )
+        prior = from_(
+            model="FactSalesModel",
+            columns=["SUM(salesAmount) AS currentMonthAmount"],
+        )
+        derived = current.union(prior, all=True).query(
+            columns=["SUM(currentMonthAmount) AS totalAmount"]
+        )
+
+        composed = compile_plan_to_sql(
+            derived, ctx, semantic_service=svc, dialect="postgresql"
+        )
+
+        assert re.search(
+            r'SUM\(cte_\d+\."currentMonthAmount"\) AS "totalAmount"',
+            composed.sql,
+        )
+        assert "SUM(currentMonthAmount)" not in composed.sql
+
+    def test_derived_over_union_rejects_right_only_alias_reference(
+        self, svc, ctx
+    ):
+        """UNION output names come from the left side; referencing a right
+        branch alias must fail before sending SQL to the database."""
+        current = from_(
+            model="FactSalesModel",
+            columns=["SUM(salesAmount) AS currentMonthAmount"],
+        )
+        prior = from_(
+            model="FactSalesModel",
+            columns=["SUM(salesAmount) AS priorMonthAmount"],
+        )
+        derived = current.union(prior, all=True).query(
+            columns=[
+                "SUM(currentMonthAmount) AS currentMonthAmount",
+                "SUM(priorMonthAmount) AS priorMonthAmount",
+            ]
+        )
+
+        with pytest.raises(ComposeSchemaError) as exc_info:
+            compile_plan_to_sql(
+                derived, ctx, semantic_service=svc, dialect="postgresql"
+            )
+
+        assert "priorMonthAmount" in str(exc_info.value)
 
 
 class TestUnionMultipleWay:
