@@ -151,6 +151,7 @@ class TestParity:
         "IF(salesAmount > 0, 1, 0)",
         "IF(status == 'a', salesAmount, costAmount)",
         "IF(status in ('a', 'b'), 1, 0)",
+        "IF(status in ['a', 'b'], 1, 0)",
         # Nested
         "IF(salesAmount > 0, IF(costAmount > 0, 1, 2), 0)",
         "ROUND(salesAmount - costAmount, 2)",
@@ -408,6 +409,15 @@ class TestSqlPredicates:
         sql = svc_ast._render_expression("IF(salesAmount IS NULL, 0, salesAmount)", model)
         assert "IS NULL" in sql.upper()
         assert "CASE WHEN" in sql.upper()
+
+    def test_if_with_square_bracket_in_list_char_path(self, svc_char, model):
+        sql = svc_char._render_expression(
+            "IF(status in ['not_paid', 'partial', 'in_payment'], 1, 0)",
+            model,
+        )
+        assert "CASE WHEN" in sql.upper()
+        assert "t.status in ('not_paid', 'partial', 'in_payment')" in sql
+        assert "Function 'IF' expects exactly 3 arguments" not in sql
 
     def test_compound_is_null_and_between(self, svc_ast, model):
         sql = svc_ast._render_expression(

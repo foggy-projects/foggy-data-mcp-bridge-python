@@ -67,9 +67,11 @@ def skip_string_literal(text: str, start: int) -> int:
 def find_matching_paren(text: str, open_index: int) -> int:
     """Find the index of the ``)`` that closes ``text[open_index]`` (a ``(``).
 
-    Respects single/double quoted string literals. Returns ``-1`` if unmatched.
+    Respects single/double quoted string literals and square-bracket list
+    literals. Returns ``-1`` if unmatched.
     """
     depth = 0
+    bracket_depth = 0
     i = open_index
     length = len(text)
     while i < length:
@@ -77,7 +79,13 @@ def find_matching_paren(text: str, open_index: int) -> int:
         if ch in ("'", '"'):
             i = skip_string_literal(text, i)
             continue
-        if ch == "(":
+        if ch == "[":
+            bracket_depth += 1
+        elif ch == "]" and bracket_depth > 0:
+            bracket_depth -= 1
+        elif bracket_depth > 0:
+            pass
+        elif ch == "(":
             depth += 1
         elif ch == ")":
             depth -= 1
@@ -88,9 +96,10 @@ def find_matching_paren(text: str, open_index: int) -> int:
 
 
 def split_top_level_commas(text: str) -> List[str]:
-    """Split ``text`` on commas that are outside of strings and parentheses."""
+    """Split on commas outside strings, parentheses, and list literals."""
     args: List[str] = []
     depth = 0
+    bracket_depth = 0
     start = 0
     i = 0
     length = len(text)
@@ -99,11 +108,15 @@ def split_top_level_commas(text: str) -> List[str]:
         if ch in ("'", '"'):
             i = skip_string_literal(text, i)
             continue
-        if ch == "(":
+        if ch == "[":
+            bracket_depth += 1
+        elif ch == "]" and bracket_depth > 0:
+            bracket_depth -= 1
+        elif ch == "(":
             depth += 1
         elif ch == ")":
             depth -= 1
-        elif ch == "," and depth == 0:
+        elif ch == "," and depth == 0 and bracket_depth == 0:
             args.append(text[start:i].strip())
             start = i + 1
         i += 1

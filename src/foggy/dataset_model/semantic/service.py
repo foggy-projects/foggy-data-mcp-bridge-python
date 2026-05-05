@@ -2936,6 +2936,14 @@ class SemanticQueryService(SemanticServiceResolver):
                 result.append(" = ")
                 i += 2
                 continue
+            if ch == "[":
+                result.append("(")
+                i += 1
+                continue
+            if ch == "]":
+                result.append(")")
+                i += 1
+                continue
             if ch.isalpha() or ch == "_":
                 start = i
                 i += 1

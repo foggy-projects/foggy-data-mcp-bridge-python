@@ -95,6 +95,38 @@ class TestJoinBasic:
         assert 'cte_1."orderStatus$caption"' in composed.sql
         assert "cte_0.orderStatus$caption" not in composed.sql
 
+    def test_postgres_implicit_dollar_outputs_survive_across_cte_layers(
+        self, svc, ctx
+    ):
+        left = from_(model="FactSalesModel", columns=["orderStatus$caption"])
+        right = from_(model="FactOrderModel", columns=["orderStatus$caption"])
+        joined = left.join(
+            right,
+            type="inner",
+            on=[
+                JoinOn(
+                    left="orderStatus$caption",
+                    op="=",
+                    right="orderStatus$caption",
+                )
+            ],
+        )
+        result = joined.query(
+            columns=["orderStatus$caption"],
+            order_by=["orderStatus$caption"],
+        )
+
+        composed = compile_plan_to_sql(
+            result,
+            ctx,
+            semantic_service=svc,
+            dialect="postgres",
+        )
+
+        assert ' AS "orderStatus$caption"' in composed.sql
+        assert 'cte_2."orderStatus$caption"' in composed.sql
+        assert "cte_2.orderStatus$caption" not in composed.sql
+
     def test_postgres_query_after_join_quotes_camel_case_outputs(self, svc, ctx):
         left = from_(
             model="FactSalesModel",

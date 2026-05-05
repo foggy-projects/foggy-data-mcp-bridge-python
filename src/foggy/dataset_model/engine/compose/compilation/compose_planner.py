@@ -382,13 +382,14 @@ def _compile_base(plan: BaseModelPlan, state: _CompileState) -> CteUnit:
         )
     alias = state.next_alias()
     _register_plan_alias(state, plan, alias)
-    return compile_base_model(
+    unit = compile_base_model(
         plan,
         binding,
         semantic_service=state.semantic_service,
         alias=alias,
         governance_cache=state.governance_cache,
     )
+    return _stabilize_base_output_names(unit, plan=plan, dialect=state.dialect)
 
 
 def _register_plan_alias(state: _CompileState, plan: QueryPlan, alias: str) -> None:
@@ -670,6 +671,45 @@ def _render_identifier(name: str, dialect: str) -> str:
 
 def _render_qualified_ref(alias: str, field: str, dialect: str) -> str:
     return f"{alias}.{_render_identifier(field, dialect)}"
+
+
+def _stabilize_base_output_names(
+    unit: CteUnit, *, plan: BaseModelPlan, dialect: str
+) -> CteUnit:
+    desired_columns = _base_declared_output_names(plan)
+    actual_columns = list(unit.select_columns or [])
+    if not desired_columns or actual_columns == desired_columns:
+        return unit
+    if len(actual_columns) != len(desired_columns):
+        return unit
+
+    inner_alias = f"{unit.alias}_src"
+    projection = []
+    for actual, desired in zip(actual_columns, desired_columns):
+        rendered = _render_qualified_ref(inner_alias, actual, dialect)
+        if actual != desired:
+            rendered += f" AS {_render_identifier(desired, dialect)}"
+        projection.append(rendered)
+    sql = (
+        "SELECT " + ", ".join(projection)
+        + f"\nFROM ({unit.sql}) AS {inner_alias}"
+    )
+    return CteUnit(
+        alias=unit.alias,
+        sql=sql,
+        params=list(unit.params or []),
+        select_columns=list(desired_columns),
+    )
+
+
+def _base_declared_output_names(plan: BaseModelPlan) -> List[str]:
+    names = [extract_column_alias(column).output_name for column in plan.columns]
+    for cf in plan.calculated_fields:
+        if isinstance(cf, dict):
+            name = cf.get("alias") or cf.get("name")
+            if isinstance(name, str) and name.strip():
+                names.append(name.strip())
+    return names
 
 
 def _is_simple_output_ref(expr: str) -> bool:
