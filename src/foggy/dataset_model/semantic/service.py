@@ -849,9 +849,6 @@ class SemanticQueryService(SemanticServiceResolver):
             except NotImplementedError as e:
                 return SemanticQueryResponse.from_error(str(e))
 
-        # --- v1.2/v1.3: governance check + system_slice merge ---
-        self._inject_predefined_calculated_fields(table_model, request)
-
         # --- Case-insensitive canonical field resolution ---
         if self._auto_case_insensitive_field_resolve:
             ci_result = self._resolve_request_fields_case_insensitive(
@@ -860,6 +857,9 @@ class SemanticQueryService(SemanticServiceResolver):
             if isinstance(ci_result, SemanticQueryResponse):
                 return ci_result  # ambiguity error
             request = ci_result
+
+        # --- v1.2/v1.3: governance check + system_slice merge ---
+        self._inject_predefined_calculated_fields(table_model, request)
 
         governance_error, request = self._apply_query_governance(model, request)
         if governance_error is not None:
@@ -1042,6 +1042,17 @@ class SemanticQueryService(SemanticServiceResolver):
             is_pivot = True
             from foggy.dataset_model.semantic.pivot.executor import validate_and_translate_pivot
             request = validate_and_translate_pivot(request)
+
+        if self._auto_case_insensitive_field_resolve:
+            ci_result = self._resolve_request_fields_case_insensitive(
+                table_model, request,
+            )
+            if isinstance(ci_result, SemanticQueryResponse):
+                raise ValueError(
+                    ci_result.error
+                    or f"Case-insensitive field resolution failed for model '{model_name}'"
+                )
+            request = ci_result
 
         self._inject_predefined_calculated_fields(table_model, request)
         governance_error, request = self._apply_query_governance(model_name, request)

@@ -154,6 +154,20 @@ class TestOdooAggregateHaving:
         where_part = response.sql.split("HAVING")[0]
         assert "WHERE SUM(CASE" not in where_part
 
+    def test_predefined_formula_measure_case_variant_resolves_before_injection(self, odoo_service):
+        request = SemanticQueryRequest(
+            columns=["aroverdueamount AS overdue_amount"],
+            limit=1,
+        )
+
+        response = _build_response(
+            odoo_service, "OdooAccountMoveLineQueryModel", request,
+        )
+
+        assert "SUM(CASE" in response.sql
+        assert '"overdue_amount"' in response.sql
+        assert [column["name"] for column in response.columns] == ["overdue_amount"]
+
 
 # ==================== TestFieldResolution ====================
 

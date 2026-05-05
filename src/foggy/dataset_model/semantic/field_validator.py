@@ -708,6 +708,11 @@ def _collect_model_schema_fields(model: Any) -> Set[str]:
     for name in getattr(model, "columns", {}) or {}:
         fields.add(name)
 
+    for calc in getattr(model, "predefined_calculated_fields", None) or []:
+        calc_name = calc.get("name") if isinstance(calc, dict) else getattr(calc, "name", None)
+        if calc_name:
+            fields.add(calc_name)
+
     dimension_joins = getattr(model, "dimension_joins", None) or {}
     if isinstance(dimension_joins, dict):
         iterable = dimension_joins.items()

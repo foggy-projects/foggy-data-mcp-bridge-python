@@ -32,6 +32,10 @@ import re
 logger = logging.getLogger(__name__)
 
 _BARE_FIELD_RE = re.compile(r"^[A-Za-z_]\w*(?:\$\w+)?$")
+_BARE_ALIAS_RE = re.compile(
+    r"^\s*([A-Za-z_]\w*(?:\$\w+)?)\s+as\s+([A-Za-z_]\w*)\s*$",
+    re.IGNORECASE,
+)
 
 
 class CaseInsensitiveFieldAmbiguousError(Exception):
@@ -270,11 +274,9 @@ def resolve_columns(
 ) -> Any:
     """Resolve field names in a columns list.
 
-    Only bare identifiers are resolved.  Expressions like
-    ``SUM(field) AS alias`` are left to the downstream expression
-    parser — the field inside the expression will be resolved when
-    it appears in ``calculatedFields`` or ``predefined_calculated_fields``
-    which inject the canonical name.
+    Bare identifiers and bare aliases (``field AS alias``) are resolved.
+    Other expressions like ``SUM(field) AS alias`` are left to the
+    downstream expression parser.
     """
     if columns is None:
         return columns
@@ -287,6 +289,8 @@ def resolve_columns(
             stripped = col.strip()
             if _BARE_FIELD_RE.match(stripped):
                 result.append(resolver.resolve(stripped))
+            elif match := _BARE_ALIAS_RE.match(stripped):
+                result.append(f"{resolver.resolve(match.group(1))} AS {match.group(2)}")
             else:
                 result.append(col)
         else:
