@@ -4286,6 +4286,49 @@ class SemanticQueryService(SemanticServiceResolver):
 
 
     @staticmethod
+    def _get_time_role_hint(obj) -> str:
+        """Return a compact semantic hint string for timeRole / recommendedUse.
+
+        Reads from Pydantic model_extra when available, falling back to getattr.
+        Returns empty string when neither field is present.
+
+        Output format::
+
+            timeRole=business_date; recommendedUse=Primary payment business date ...
+
+        Pipes and newlines in recommendedUse are sanitized so markdown table
+        cells remain valid.
+        """
+        extra = {}
+        if hasattr(obj, "model_extra") and isinstance(obj.model_extra, dict):
+            extra = obj.model_extra
+        time_role = (
+            extra.get("timeRole") or extra.get("time_role")
+            or getattr(obj, "timeRole", None) or getattr(obj, "time_role", None)
+        )
+        recommended_use = (
+            extra.get("recommendedUse") or extra.get("recommended_use")
+            or getattr(obj, "recommendedUse", None)
+            or getattr(obj, "recommended_use", None)
+        )
+        if not time_role and not recommended_use:
+            return ""
+        parts = []
+        if time_role:
+            parts.append(f"timeRole={str(time_role).strip()}")
+        if recommended_use:
+            sanitized = (
+                str(recommended_use)
+                .replace("|", "｜")
+                .replace("\n", " ")
+                .replace("\r", "")
+                .strip()
+            )
+            parts.append(f"recommendedUse={sanitized}")
+        return "; ".join(parts)
+
+
+    @staticmethod
     def _get_column_type_description(column_type) -> str:
         """Map ColumnType enum to English description (aligned with Java getDataTypeDescription)."""
         if column_type is None:
@@ -4368,7 +4411,11 @@ class SemanticQueryService(SemanticServiceResolver):
                     prop_field = f"{jd.name}${pn}"
                     dimension_field_names.add(prop_field)
                     if _visible(prop_field):
-                        dim_rows.append(f"| {prop_field} | {prop.caption or pn} | {prop.data_type} | - | {prop.description or ''} |")
+                        _prop_desc = prop.description or ""
+                        _trh = self._get_time_role_hint(prop)
+                        if _trh:
+                            _prop_desc = f"{_prop_desc} [{_trh}]".strip() if _prop_desc else f"[{_trh}]"
+                        dim_rows.append(f"| {prop_field} | {prop.caption or pn} | {prop.data_type} | - | {_prop_desc} |")
             if dim_rows:
                 lines.append("## Dimension Fields")
                 lines.append("| Field Name | Label | Type | Hierarchy | Description |")
@@ -4392,6 +4439,9 @@ class SemanticQueryService(SemanticServiceResolver):
                     col_caption = col.alias or col_name
                     col_type = self._get_column_type_description(col.column_type)
                     col_desc = col.comment or ""
+                    _col_trh = self._get_time_role_hint(col)
+                    if _col_trh:
+                        col_desc = f"{col_desc} [{_col_trh}]".strip() if col_desc else f"[{_col_trh}]"
                     lines.append(f"| {col_name} | {col_caption} | {col_type} | {col_desc} |")
                 lines.append("")
 
@@ -4526,7 +4576,11 @@ class SemanticQueryService(SemanticServiceResolver):
                         pn = prop.get_name()
                         prop_field = f"{jd.name}${pn}"
                         if _visible(prop_field):
-                            sub_lines.append(f"    - [field:{prop_field}] | {prop.caption or pn}")
+                            _mp_trh = self._get_time_role_hint(prop)
+                            _mp_label = f"{prop.caption or pn}"
+                            if _mp_trh:
+                                _mp_label = f"{_mp_label} | {_mp_trh}"
+                            sub_lines.append(f"    - [field:{prop_field}] | {_mp_label}")
                     if sub_lines:
                         dim_lines.append(f"- {dc}{hier_hint}")
                         dim_lines.extend(sub_lines)

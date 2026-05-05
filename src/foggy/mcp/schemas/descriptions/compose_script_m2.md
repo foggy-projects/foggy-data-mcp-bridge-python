@@ -115,7 +115,7 @@ return { plans: yoy };
 
 - 返回必须是 envelope：`return { plans: yourPlan };`
 - 用 `return` 输出最终值；不支持 ES module `export`。
-- Do not use `.execute()` directly unless the user explicitly asks for raw execution.
+- Do not use `.execute()` directly unless the user explicitly asks for raw execution；不要直接 `.execute()`，除非用户明确要求 raw execution。
 - 不要手写 raw SQL 或 CTE（如 `WITH ...`），用 `dsl()` / `.join()` / `.union()`。
 - 不要在脚本中传入用户身份、systemSlice、拒绝列、datasource routing 等 host-controlled security 参数。
 - 派生查询的 `calculatedFields` 不要使用聚合函数或窗口字段（`partitionBy`、`windowOrderBy`、`windowFrame`）。

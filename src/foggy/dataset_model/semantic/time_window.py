@@ -361,7 +361,18 @@ class TimeWindowExpander:
 def collect_time_window_field_sets(
     model: DbTableModelImpl,
 ) -> Tuple[Set[str], Set[str], Set[str]]:
-    """Collect available/time/measure field sets for TimeWindow validation."""
+    """Collect available/time/measure field sets for TimeWindow validation.
+
+    v1.6 BUG-2 fix: also recognise property-level timeRole.  A join property
+    field (e.g. ``move$date``) is added to *time_fields* when the property
+    explicitly declares a supported ``timeRole`` **and** its ``data_type`` is a
+    date-compatible type (DAY / DATE / DATETIME / TIMESTAMP).  This allows
+    ``timeWindow.field=move$date`` to pass validation without loosening the
+    rule to *any* field whose name contains "date".
+
+    Similarly, fact-table columns (``model.columns``) with an explicit
+    ``timeRole`` and a date-compatible type are added to *time_fields*.
+    """
 
     available_fields: Set[str] = set(model.columns.keys())
     time_fields: Set[str] = set()
@@ -370,6 +381,11 @@ def collect_time_window_field_sets(
         if _is_aggregate_measure(measure)
     }
     available_fields.update(model.measures.keys())
+
+    # --- Fact-table columns with explicit timeRole ---
+    for col_name, col in model.columns.items():
+        if _has_time_role(col) and _is_date_type(getattr(col, "column_type", None)):
+            time_fields.add(col_name)
 
     for name, dim in model.dimensions.items():
         available_fields.add(name)
@@ -383,6 +399,11 @@ def collect_time_window_field_sets(
         _add_join_fields(join, available_fields)
         if _is_time_join(join):
             time_fields.add(f"{join.name}$id")
+        # --- v1.6 BUG-2: property-level timeRole ---
+        for prop in join.properties:
+            prop_field = f"{join.name}${prop.get_name()}"
+            if _has_time_role(prop) and _is_date_type_str(prop.data_type):
+                time_fields.add(prop_field)
 
     return available_fields, time_fields, measure_fields
 
@@ -403,6 +424,38 @@ def _is_time_join(join: DimensionJoinDef) -> bool:
     ]
     text = " ".join(text_parts).lower()
     return "date" in text or "日期" in text
+
+
+def _has_time_role(obj) -> bool:
+    """Return True iff the object declares a non-empty timeRole extra field."""
+    extra = {}
+    if hasattr(obj, "model_extra") and isinstance(obj.model_extra, dict):
+        extra = obj.model_extra
+    time_role = (
+        extra.get("timeRole") or extra.get("time_role")
+        or getattr(obj, "timeRole", None) or getattr(obj, "time_role", None)
+    )
+    return bool(time_role and str(time_role).strip())
+
+
+_DATE_COMPATIBLE_COLUMN_TYPES = frozenset({
+    "date", "day", "datetime", "timestamp",
+})
+
+
+def _is_date_type(column_type) -> bool:
+    """Return True iff column_type is a date-compatible ColumnType enum value."""
+    if column_type is None:
+        return False
+    val = column_type.value.lower() if hasattr(column_type, "value") else str(column_type).lower()
+    return val in _DATE_COMPATIBLE_COLUMN_TYPES
+
+
+def _is_date_type_str(data_type: str) -> bool:
+    """Return True iff a string data_type (e.g. 'DAY', 'DATE') is date-compatible."""
+    if not data_type:
+        return False
+    return str(data_type).strip().lower() in _DATE_COMPATIBLE_COLUMN_TYPES
 
 
 def _is_aggregate_measure(measure: DbModelMeasureImpl) -> bool:
