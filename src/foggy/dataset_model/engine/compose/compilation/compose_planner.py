@@ -558,6 +558,9 @@ def _compile_join(plan: JoinPlan, state: _CompileState) -> ComposedSql:
         units=anchors,
         join_specs=[join_spec],
         use_cte=dialect_supports_cte(state.dialect),
+        select_columns=_join_projection_columns(
+            left_unit, right_unit, dialect=state.dialect
+        ),
     )
 
 
@@ -673,6 +676,27 @@ def _render_qualified_ref(alias: str, field: str, dialect: str) -> str:
     return f"{alias}.{_render_identifier(field, dialect)}"
 
 
+def _join_projection_columns(
+    left_unit: CteUnit, right_unit: CteUnit, *, dialect: str
+) -> Optional[List[str]]:
+    left_columns = list(left_unit.select_columns or [])
+    right_columns = list(right_unit.select_columns or [])
+    if not left_columns or not right_columns:
+        return None
+
+    projection: List[str] = [
+        _render_qualified_ref(left_unit.alias, column, dialect)
+        for column in left_columns
+    ]
+    seen = set(left_columns)
+    for column in right_columns:
+        if column in seen:
+            continue
+        projection.append(_render_qualified_ref(right_unit.alias, column, dialect))
+        seen.add(column)
+    return projection or None
+
+
 def _stabilize_base_output_names(
     unit: CteUnit, *, plan: BaseModelPlan, dialect: str
 ) -> CteUnit:
@@ -680,16 +704,19 @@ def _stabilize_base_output_names(
     actual_columns = list(unit.select_columns or [])
     if not desired_columns or actual_columns == desired_columns:
         return unit
-    if len(actual_columns) != len(desired_columns):
+    if len(actual_columns) < len(desired_columns):
         return unit
 
     inner_alias = f"{unit.alias}_src"
     projection = []
-    for actual, desired in zip(actual_columns, desired_columns):
+    stabilized_columns: List[str] = []
+    for idx, actual in enumerate(actual_columns):
+        desired = desired_columns[idx] if idx < len(desired_columns) else actual
         rendered = _render_qualified_ref(inner_alias, actual, dialect)
         if actual != desired:
             rendered += f" AS {_render_identifier(desired, dialect)}"
         projection.append(rendered)
+        stabilized_columns.append(desired)
     sql = (
         "SELECT " + ", ".join(projection)
         + f"\nFROM ({unit.sql}) AS {inner_alias}"
@@ -698,7 +725,7 @@ def _stabilize_base_output_names(
         alias=unit.alias,
         sql=sql,
         params=list(unit.params or []),
-        select_columns=list(desired_columns),
+        select_columns=stabilized_columns,
     )
 
 

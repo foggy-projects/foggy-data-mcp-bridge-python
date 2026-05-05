@@ -9,6 +9,8 @@ SQLite carve-out: ``type='full'`` on SQLite dialect is rejected with
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from foggy.dataset_model.engine.compose.compilation import (
@@ -126,6 +128,135 @@ class TestJoinBasic:
         assert ' AS "orderStatus$caption"' in composed.sql
         assert 'cte_2."orderStatus$caption"' in composed.sql
         assert "cte_2.orderStatus$caption" not in composed.sql
+
+    def test_postgres_join_projects_duplicate_dollar_outputs_once(self, svc, ctx):
+        left = from_(
+            model="FactSalesModel",
+            columns=["orderStatus$caption", "salesAmount"],
+        )
+        right = from_(
+            model="FactOrderModel",
+            columns=["orderStatus$caption", "totalAmount"],
+        )
+        joined = left.join(
+            right,
+            type="inner",
+            on=[
+                JoinOn(
+                    left="orderStatus$caption",
+                    op="=",
+                    right="orderStatus$caption",
+                )
+            ],
+        )
+
+        composed = compile_plan_to_sql(
+            joined,
+            ctx,
+            semantic_service=svc,
+            dialect="postgres",
+        )
+
+        assert "SELECT *" not in composed.sql
+        assert (
+            'SELECT cte_0."orderStatus$caption", '
+            'cte_0."salesAmount", cte_1."totalAmount"'
+        ) in composed.sql
+        assert composed.sql.count('"orderStatus$caption"') == 5
+        assert "cte_0.orderStatus$caption" not in composed.sql
+        assert "cte_1.orderStatus$caption" not in composed.sql
+
+    def test_postgres_query_after_join_can_select_duplicate_dollar_once(
+        self, svc, ctx
+    ):
+        left = from_(
+            model="FactSalesModel",
+            columns=["orderStatus$caption", "salesAmount"],
+        )
+        right = from_(
+            model="FactOrderModel",
+            columns=["orderStatus$caption", "totalAmount"],
+        )
+        joined = left.join(
+            right,
+            type="inner",
+            on=[
+                JoinOn(
+                    left="orderStatus$caption",
+                    op="=",
+                    right="orderStatus$caption",
+                )
+            ],
+        )
+        result = joined.query(
+            columns=["orderStatus$caption", "salesAmount", "totalAmount"],
+            order_by=["-salesAmount"],
+        )
+
+        composed = compile_plan_to_sql(
+            result,
+            ctx,
+            semantic_service=svc,
+            dialect="postgres",
+        )
+
+        assert "SELECT *\nFROM cte_0\nINNER JOIN" not in composed.sql
+        assert 'cte_2."orderStatus$caption"' in composed.sql
+        assert "cte_2.orderStatus$caption" not in composed.sql
+
+    def test_postgres_base_stabilizes_declared_dollar_outputs_with_extra_columns(
+        self, ctx
+    ):
+        class _Service:
+            def build_query_with_governance(self, model, request):
+                if model == "LeftModel":
+                    return SimpleNamespace(
+                        sql=(
+                            'SELECT 1 AS "Partner(ID)", '
+                            '2 AS "Partner", 3 AS "arOverdueAmount"'
+                        ),
+                        params=[],
+                        columns=[
+                            {"name": "Partner(ID)"},
+                            {"name": "Partner"},
+                            {"name": "arOverdueAmount"},
+                        ],
+                    )
+                return SimpleNamespace(
+                    sql='SELECT 1 AS "Customer(ID)", 2 AS "Customer"',
+                    params=[],
+                    columns=[
+                        {"name": "Customer(ID)"},
+                        {"name": "Customer"},
+                    ],
+                )
+
+        left = from_(
+            model="LeftModel",
+            columns=["partner$id", "partner$caption"],
+        )
+        right = from_(
+            model="RightModel",
+            columns=["partner$id", "partner$caption"],
+        )
+        joined = left.join(
+            right,
+            type="inner",
+            on=[JoinOn(left="partner$id", op="=", right="partner$id")],
+        )
+
+        composed = compile_plan_to_sql(
+            joined,
+            ctx,
+            semantic_service=_Service(),
+            dialect="postgres",
+        )
+
+        assert 'cte_0_src."Partner(ID)" AS "partner$id"' in composed.sql
+        assert 'cte_0_src."Partner" AS "partner$caption"' in composed.sql
+        assert 'cte_0_src."arOverdueAmount"' in composed.sql
+        assert 'cte_0."partner$id" = cte_1."partner$id"' in composed.sql
+        assert "cte_0.partner$id" not in composed.sql
 
     def test_postgres_query_after_join_quotes_camel_case_outputs(self, svc, ctx):
         left = from_(
