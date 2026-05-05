@@ -39,6 +39,7 @@ from ..plan import (
     UnionPlan,
 )
 from ..plan.plan_id import PlanId
+from foggy.dataset_model.order_by import normalize_order_by_item
 from . import error_codes
 from .alias import ColumnAliasParts, extract_column_alias
 from .errors import ComposeSchemaError
@@ -432,8 +433,7 @@ def _validate_group_and_order_by(
             slot="group_by",
         )
     for ob in order_by:
-        # strip leading '-' for desc sort
-        stripped = ob[1:] if ob.startswith("-") else ob
+        stripped = normalize_order_by_item(ob).field
         _assert_reference_visible(
             stripped,
             output_names,

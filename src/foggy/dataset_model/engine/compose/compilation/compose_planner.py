@@ -67,6 +67,7 @@ from foggy.dataset_model.engine.compose.plan.plan import (
     UnionPlan,
 )
 from foggy.dataset_model.engine.compose.security.models import ModelBinding
+from foggy.dataset_model.order_by import normalize_order_by_item
 
 
 # ---------------------------------------------------------------------------
@@ -780,26 +781,15 @@ def _render_slice(slice_: List[Any]) -> Tuple[List[str], List[Any]]:
 
 def _render_order_entry(entry: Any) -> str:
     """Render one ``order_by`` entry into a ``<name> [ASC|DESC]`` fragment."""
-    if isinstance(entry, str):
-        # Allow "name" or "name:desc"
-        if ":" in entry:
-            name, direction = entry.split(":", 1)
-            direction = direction.strip().upper()
-            if direction not in ("ASC", "DESC"):
-                direction = "ASC"
-            return f"{name.strip()} {direction}"
-        return entry
-    if isinstance(entry, dict):
-        name = entry.get("field") or entry.get("column")
-        direction = (entry.get("dir") or entry.get("direction") or "asc").upper()
-        if direction not in ("ASC", "DESC"):
-            direction = "ASC"
-        return f"{name} {direction}"
-    raise ComposeCompileError(
-        code=error_codes.UNSUPPORTED_PLAN_SHAPE,
-        phase="plan-lower",
-        message=(
-            f"order_by entries must be str or dict, got "
-            f"{type(entry).__name__}"
-        ),
-    )
+    try:
+        spec = normalize_order_by_item(entry)
+    except TypeError as exc:
+        raise ComposeCompileError(
+            code=error_codes.UNSUPPORTED_PLAN_SHAPE,
+            phase="plan-lower",
+            message=(
+                f"order_by entries must be str or dict, got "
+                f"{type(entry).__name__}"
+            ),
+        ) from exc
+    return f"{spec.field} {spec.direction.upper()}"

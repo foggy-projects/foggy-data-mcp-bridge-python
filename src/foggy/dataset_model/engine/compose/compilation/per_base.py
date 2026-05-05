@@ -21,6 +21,7 @@ from foggy.dataset_model.engine.compose.compilation.errors import (
 )
 from foggy.dataset_model.engine.compose.plan.plan import BaseModelPlan
 from foggy.dataset_model.engine.compose.security.models import ModelBinding
+from foggy.dataset_model.order_by import normalize_order_by_dict
 from foggy.mcp_spi.semantic import (
     FieldAccessDef,
     SemanticQueryRequest,
@@ -200,26 +201,13 @@ def _to_order_entry(entry: Any) -> Any:
     """Normalise one plan-level ``order_by`` entry to the dict shape v1.3 expects.
 
     Accepted inputs (in priority order):
-      - already-dict entry (``{"field": "x", "dir": "asc"}``) — passed through
+      - dict/object entry (``{"field": "x", "dir": "asc"}``)
+      - query_model shorthands ``"-name"`` / ``"+name"``
+      - ``"name asc"`` / ``"name desc"``
       - ``"name:asc"`` / ``"name:desc"`` — split and boxed
       - ``"name"`` — boxed with implicit ``dir="asc"``
     """
-    if isinstance(entry, dict):
-        return entry
-    if isinstance(entry, str):
-        if ":" in entry:
-            name, direction = entry.split(":", 1)
-            direction = direction.strip().lower()
-            if direction not in ("asc", "desc"):
-                direction = "asc"
-            return {"field": name.strip(), "dir": direction}
-        return {"field": entry, "dir": "asc"}
-    # Fail-closed: plan layer should not allow other shapes; the v1.3
-    # engine would raise unhelpfully further down.
-    raise TypeError(
-        f"BaseModelPlan.order_by entries must be str or dict, got "
-        f"{type(entry).__name__}"
-    )
+    return normalize_order_by_dict(entry)
 
 
 def _extract_select_columns(build_result: Any) -> List[str]:

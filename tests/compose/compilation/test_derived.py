@@ -66,6 +66,30 @@ class TestDerivedSingleLevel:
         )
         assert "ORDER BY orderStatus" in composed.sql
 
+    def test_derived_cte_order_by_shorthand_is_rendered_canonically(
+        self, svc, ctx
+    ):
+        base = from_(
+            model="FactSalesModel",
+            columns=["orderStatus$caption", "salesAmount"],
+            order_by=["-salesAmount"],
+            limit=5,
+        )
+        derived = base.query(
+            columns=["orderStatus$caption", "salesAmount"],
+            order_by=["+salesAmount"],
+            limit=3,
+        )
+
+        composed = compile_plan_to_sql(
+            derived, ctx, semantic_service=svc, dialect="mysql8"
+        )
+
+        assert composed.sql.upper().startswith("WITH ")
+        assert "ORDER BY salesAmount ASC" in composed.sql
+        assert "+salesAmount" not in composed.sql
+        assert "-salesAmount" not in composed.sql
+
     def test_derived_with_slice_inlines_params(self, svc, ctx, base_sales):
         derived = base_sales.query(
             columns=["orderStatus$caption"],

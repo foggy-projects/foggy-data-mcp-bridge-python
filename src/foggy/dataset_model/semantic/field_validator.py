@@ -30,6 +30,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
+from foggy.dataset_model.order_by import normalize_order_by_item
 from foggy.mcp_spi.semantic import FieldAccessDef
 
 
@@ -511,18 +512,13 @@ def validate_field_access(
 
     # 4. Validate orderBy (with alias back-tracking to dependency fields)
     for ob in order_by:
-        if isinstance(ob, dict):
-            field_ref = ob.get("field") or ob.get("fieldName") or ob.get("column", "")
-        elif isinstance(ob, str):
-            field_ref = ob
-        else:
+        try:
+            field_ref = normalize_order_by_item(ob).field
+        except TypeError:
             continue
         if not field_ref:
             continue
-        if isinstance(field_ref, str):
-            field_ref = field_ref.strip()
-            if field_ref.startswith(("-", "+")):
-                field_ref = field_ref[1:].strip()
+        field_ref = field_ref.strip()
         if not field_ref:
             continue
         # Back-track alias to dependency fields
@@ -669,7 +665,10 @@ def validate_query_fields(model: Any, request: Any) -> Optional[InvalidQueryFiel
             return detail
 
     for item in request.order_by or []:
-        field_name = item.get("field") if isinstance(item, dict) else getattr(item, "field", None)
+        try:
+            field_name = normalize_order_by_item(item).field
+        except TypeError:
+            field_name = None
         if not field_name:
             continue
         if field_name in dynamic_fields:

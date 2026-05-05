@@ -83,6 +83,89 @@ class TestBaseModelPlanShapeFields:
         )
         assert "ORDER BY" in composed.sql
 
+    @pytest.mark.parametrize(
+        ("raw_order_by", "expected_field", "expected_dir"),
+        [
+            ("-salesAmount", "salesAmount", "desc"),
+            ("+salesAmount", "salesAmount", "asc"),
+            ("salesAmount", "salesAmount", "asc"),
+            ("salesAmount desc", "salesAmount", "desc"),
+            ("salesAmount asc", "salesAmount", "asc"),
+        ],
+    )
+    def test_order_by_shorthand_is_normalized_before_v1_validation(
+        self, svc, ctx, raw_order_by, expected_field, expected_dir
+    ):
+        plan = from_(
+            model="FactSalesModel",
+            columns=["orderStatus$caption", "salesAmount"],
+            order_by=[raw_order_by],
+        )
+        captured_requests = []
+        original_build_query = svc._build_query
+
+        def capturing_build_query(table_model, request):
+            captured_requests.append(request)
+            return original_build_query(table_model, request)
+
+        svc._build_query = capturing_build_query  # type: ignore[method-assign]
+
+        try:
+            compile_plan_to_sql(plan, ctx, semantic_service=svc, dialect="mysql8")
+        finally:
+            svc._build_query = original_build_query  # type: ignore[method-assign]
+
+        assert captured_requests
+        assert captured_requests[0].order_by == [
+            {"field": expected_field, "dir": expected_dir}
+        ]
+
+    def test_order_by_invalid_field_fails_after_prefix_normalization(self, svc, ctx):
+        plan = from_(
+            model="FactSalesModel",
+            columns=["orderStatus$caption", "salesAmount"],
+            order_by=["-missingField"],
+        )
+
+        with pytest.raises(ComposeCompileError) as exc_info:
+            compile_plan_to_sql(plan, ctx, semantic_service=svc, dialect="mysql8")
+
+        message = str(exc_info.value.__cause__ or exc_info.value)
+        assert "missingField" in message
+        assert "-missingField" not in message
+
+    def test_order_by_field_access_uses_normalized_field(
+        self, svc, ctx, make_fixed_resolver
+    ):
+        from foggy.dataset_model.engine.compose.context import ComposeQueryContext
+        from foggy.dataset_model.engine.compose.security import ModelBinding
+
+        resolver = make_fixed_resolver({
+            "FactSalesModel": ModelBinding(field_access=["orderStatus$caption"])
+        })
+        restricted_ctx = ComposeQueryContext(
+            principal=ctx.principal,
+            namespace=ctx.namespace,
+            authority_resolver=resolver,
+        )
+        plan = from_(
+            model="FactSalesModel",
+            columns=["orderStatus$caption"],
+            order_by=["-salesAmount"],
+        )
+
+        with pytest.raises(ComposeCompileError) as exc_info:
+            compile_plan_to_sql(
+                plan,
+                restricted_ctx,
+                semantic_service=svc,
+                dialect="mysql8",
+            )
+
+        message = str(exc_info.value.__cause__ or exc_info.value)
+        assert "salesAmount" in message
+        assert "-salesAmount" not in message
+
     def test_limit_is_honored(self, svc, ctx):
         plan = from_(
             model="FactSalesModel",
