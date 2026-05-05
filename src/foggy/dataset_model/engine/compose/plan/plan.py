@@ -386,6 +386,9 @@ class QueryPlan(ABC):
             distinct = options_dict.get("distinct", distinct)
 
         from ..sandbox import validate_derived_columns, validate_slice
+        from .column_normalizer import normalize_columns_to_strings
+
+        columns = normalize_columns_to_strings(columns)
         validate_derived_columns(columns, "plan-build")
         validate_slice(slice, "plan-build")
         if having:

@@ -186,6 +186,60 @@ class TestOdooAggregateHaving:
         assert [column["name"] for column in response.columns] == ["overdue_amount"]
 
 
+class TestOdooJoinToDimensions:
+    def test_payment_company_projection_joins_through_move_alias(self, odoo_service):
+        request = SemanticQueryRequest(
+            columns=["company$caption"],
+            group_by=["company$caption"],
+            limit=10,
+        )
+
+        response = _build_response(
+            odoo_service, "OdooAccountPaymentQueryModel", request,
+        )
+
+        assert 'LEFT JOIN account_move AS am ON t.move_id = am.id' in response.sql
+        assert 'LEFT JOIN res_company AS rc ON am.company_id = rc.id' in response.sql
+        assert 't.company_id = rc.id' not in response.sql
+
+    def test_payment_company_system_slice_uses_move_company_fk(self, odoo_service):
+        request = SemanticQueryRequest(
+            columns=["paymentCount"],
+            systemSlice=[{"field": "company$id", "op": "in", "value": [2, 1]}],
+            limit=10,
+        )
+
+        response = _build_response(
+            odoo_service, "OdooAccountPaymentQueryModel", request,
+        )
+
+        assert 'LEFT JOIN account_move AS am ON t.move_id = am.id' in response.sql
+        assert 'LEFT JOIN res_company AS rc ON am.company_id = rc.id' in response.sql
+        assert 'rc.id IN (?, ?)' in response.sql
+        assert 't.company_id' not in response.sql
+        assert 'move$companyId' not in response.sql
+
+    def test_payment_company_hierarchy_slice_uses_move_company_fk(self, odoo_service):
+        request = SemanticQueryRequest(
+            columns=["paymentCount"],
+            systemSlice=[{
+                "field": "company$id",
+                "op": "selfAndDescendantsOf",
+                "value": 2,
+            }],
+            limit=10,
+        )
+
+        response = _build_response(
+            odoo_service, "OdooAccountPaymentQueryModel", request,
+        )
+
+        assert 'LEFT JOIN account_move AS am ON t.move_id = am.id' in response.sql
+        assert 'LEFT JOIN res_company_closure AS h_company_' in response.sql
+        assert 'am.company_id = h_company_' in response.sql
+        assert 't.company_id' not in response.sql
+
+
 # ==================== TestFieldResolution ====================
 
 

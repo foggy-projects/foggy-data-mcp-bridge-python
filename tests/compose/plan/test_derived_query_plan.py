@@ -81,6 +81,22 @@ class TestChainQuerySugar:
         assert d.start == 0
         assert d.distinct is True
 
+    def test_plan_query_normalizes_f4_and_f5_column_objects(self):
+        base = _base()
+        d = base.query(columns=[
+            {"field": "id", "as": "sale_id"},
+            {"plan": base, "field": "name", "as": "sale_name"},
+        ])
+        assert d.columns == ("id AS sale_id", "name AS sale_name")
+
+    def test_plan_query_rejects_unsupported_column_object_shape(self):
+        base = _base()
+        with pytest.raises(ValueError, match="COLUMN_FIELD_INVALID_KEY"):
+            base.query(columns=[{
+                "name": "prev_month",
+                "expression": "LAG(id, 1, NULL) OVER (ORDER BY name)",
+            }])
+
 
 class TestDerivedExecuteToSqlNeedRuntime:
     """M7: without an ambient bundle, execute/to_sql raise RuntimeError."""

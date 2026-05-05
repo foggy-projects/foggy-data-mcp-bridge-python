@@ -4,7 +4,7 @@ This module provides the main service for executing semantic layer queries,
 integrating SqlQueryBuilder with table/query models.
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from datetime import datetime
 import os
 import time
@@ -1118,8 +1118,15 @@ class SemanticQueryService(SemanticServiceResolver):
                 ensure_explicit_joins_for_field(join_def.name)
                 joined_dims[join_def.name] = join_def
                 ta = join_def.get_alias()
-                root_alias = model.get_table_alias_for_model(model.get_field_model_name(join_def.name))
-                on_cond = f"{root_alias}.{join_def.foreign_key} = {ta}.{join_def.primary_key}"
+                join_source_alias, join_source_column = self._resolve_dimension_join_source(
+                    model,
+                    join_def,
+                    ensure_join=ensure_join,
+                )
+                on_cond = (
+                    f"{join_source_alias}.{join_source_column} = "
+                    f"{ta}.{join_def.primary_key}"
+                )
                 builder.left_join(join_def.table_name, alias=ta, on_condition=on_cond)
 
         def ensure_explicit_joins_for_field(field_name: str) -> None:
@@ -2068,11 +2075,13 @@ class SemanticQueryService(SemanticServiceResolver):
             ensure_explicit_joins_for_field(join_def.name)
             joined_dims[join_def.name] = join_def
             table_alias = join_def.get_alias()
-            root_alias = model.get_table_alias_for_model(
-                model.get_field_model_name(join_def.name)
+            join_source_alias, join_source_column = self._resolve_dimension_join_source(
+                model,
+                join_def,
+                ensure_join=ensure_join,
             )
             on_cond = (
-                f"{root_alias}.{join_def.foreign_key} = "
+                f"{join_source_alias}.{join_source_column} = "
                 f"{table_alias}.{join_def.primary_key}"
             )
             builder.left_join(join_def.table_name, alias=table_alias, on_condition=on_cond)
@@ -3324,7 +3333,7 @@ class SemanticQueryService(SemanticServiceResolver):
                 effective_value = [from_val, to_val]
 
         hierarchy_condition = self._build_hierarchy_filter(
-            root_builder, model, column, operator, effective_value
+            root_builder, model, column, operator, effective_value, ensure_join=ensure_join
         )
         if hierarchy_condition:
             builder.where(
@@ -3344,6 +3353,46 @@ class SemanticQueryService(SemanticServiceResolver):
             merged_params = inline_calc_params + params
             builder.where(condition, params=merged_params if merged_params else None)
 
+    def _resolve_join_parent(
+        self,
+        model: DbTableModelImpl,
+        join_def: DimensionJoinDef,
+    ) -> Optional[DimensionJoinDef]:
+        """Resolve the parent dimension for a joinTo dimension."""
+        if not join_def.join_to:
+            return None
+        parent_join = model.get_dimension_join(join_def.join_to)
+        if parent_join is None:
+            raise ValueError(
+                "DIMENSION_JOIN_PARENT_NOT_FOUND: "
+                f"dimension {join_def.name!r} declares joinTo={join_def.join_to!r} "
+                "but the parent dimension join is missing."
+            )
+        return parent_join
+
+    def _resolve_dimension_join_source(
+        self,
+        model: DbTableModelImpl,
+        join_def: DimensionJoinDef,
+        ensure_join: Optional[Callable[[DimensionJoinDef], None]] = None,
+    ) -> Tuple[str, str]:
+        """Return the SQL alias + FK column that should drive a dimension JOIN.
+
+        Top-level dimensions join from the model root alias. ``joinTo`` dimensions
+        instead join from their parent dimension alias, which may require the
+        parent JOIN to be materialized first.
+        """
+        parent_join = self._resolve_join_parent(model, join_def)
+        if parent_join is not None:
+            if ensure_join is not None:
+                ensure_join(parent_join)
+            return parent_join.get_alias(), join_def.foreign_key
+
+        root_alias = model.get_table_alias_for_model(
+            model.get_field_model_name(join_def.name)
+        )
+        return root_alias, join_def.foreign_key
+
     def _build_hierarchy_filter(
         self,
         builder: SqlQueryBuilder,
@@ -3351,6 +3400,7 @@ class SemanticQueryService(SemanticServiceResolver):
         field_name: str,
         operator: str,
         value: Any,
+        ensure_join: Optional[Callable[[DimensionJoinDef], None]] = None,
     ) -> Optional[Dict[str, Any]]:
         """Build closure-table JOIN + WHERE for hierarchy operators."""
         op_class = self._hierarchy_registry.get(operator)
@@ -3384,13 +3434,16 @@ class SemanticQueryService(SemanticServiceResolver):
         values = value if isinstance(value, list) else [value]
         params: List[Any] = []
         fragments: List[str] = []
+        fact_alias, fact_fk_column = self._resolve_dimension_join_source(
+            model, join_def, ensure_join=ensure_join
+        )
 
         self._ensure_join(
             builder,
             closure.qualified_table(),
             closure_alias,
             (
-                f"t.{join_def.foreign_key} = {closure_alias}."
+                f"{fact_alias}.{fact_fk_column} = {closure_alias}."
                 f"{closure.parent_column if op_instance.is_ancestor_direction else closure.child_column}"
             ),
         )
@@ -3400,8 +3453,8 @@ class SemanticQueryService(SemanticServiceResolver):
                 built = HierarchyConditionBuilder.build_ancestors_condition(
                     closure=closure,
                     closure_alias=closure_alias,
-                    fact_fk_column=join_def.foreign_key,
-                    fact_alias="t",
+                    fact_fk_column=fact_fk_column,
+                    fact_alias=fact_alias,
                     value=single_value,
                     include_self=operator.lower() == "selfandancestorsof",
                 )
@@ -3409,8 +3462,8 @@ class SemanticQueryService(SemanticServiceResolver):
                 built = HierarchyConditionBuilder.build_descendants_condition(
                     closure=closure,
                     closure_alias=closure_alias,
-                    fact_fk_column=join_def.foreign_key,
-                    fact_alias="t",
+                    fact_fk_column=fact_fk_column,
+                    fact_alias=fact_alias,
                     value=single_value,
                     include_self=operator.lower() == "selfanddescendantsof",
                 )

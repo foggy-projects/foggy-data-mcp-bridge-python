@@ -60,6 +60,7 @@ class DimensionJoinDef(BaseModel):
     description: Optional[str] = Field(default=None, description="Dimension description")
     key_description: Optional[str] = Field(default=None, description="Key format description")
     alias: Optional[str] = Field(default=None, description="Table alias in SQL (auto-generated if None)")
+    join_to: Optional[str] = Field(default=None, description="Parent dimension name when the FK lives on another joined dimension")
     properties: List[DimensionPropertyDef] = Field(default_factory=list, description="Dimension properties")
     caption_def_raw: Optional[Any] = Field(
         default=None, exclude=True,
@@ -131,6 +132,7 @@ class DbModelDimensionImpl(BaseModel):
     # Column reference
     column: str = Field(..., description="Source column name")
     table: Optional[str] = Field(default=None, description="Source table name")
+    join_to: Optional[str] = Field(default=None, description="Parent dimension name when the FK lives on another joined dimension")
 
     # Type
     dimension_type: DimensionType = Field(
