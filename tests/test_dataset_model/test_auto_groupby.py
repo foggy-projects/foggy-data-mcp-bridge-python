@@ -85,16 +85,48 @@ class TestAutoGroupBy:
         assert "HAVING" in sql
         assert "SUM(t.sales_amount)" in sql
 
-    def test_aggregate_measure_in_slice_is_rejected(self, service):
-        """Aggregate measures must not be pushed into WHERE via slice."""
+    def test_aggregate_measure_in_slice_is_lifted_to_having(self, service):
+        """Aggregate measures in slice are lifted to HAVING by default."""
+        request = SemanticQueryRequest(
+            columns=["orderStatus$caption", "salesAmount"],
+            slice=[{"field": "salesAmount", "op": ">", "value": 0}],
+        )
+        sql = _build_sql(service, request)
+        assert "GROUP BY" in sql
+        assert "HAVING" in sql
+        assert "SUM(t.sales_amount)" in sql
+        where_part = sql.split("HAVING")[0]
+        assert "WHERE SUM(t.sales_amount)" not in where_part
+
+    def test_aggregate_measure_in_slice_rejected_when_switch_off(self):
+        """The rollout switch preserves the previous rejection behavior."""
+        svc = SemanticQueryService(auto_lift_aggregate_slice_to_having=False)
+        svc.register_model(create_fact_sales_model())
         request = SemanticQueryRequest(
             columns=["orderStatus$caption", "salesAmount"],
             group_by=["orderStatus$caption"],
             slice=[{"field": "salesAmount", "op": ">", "value": 0}],
         )
-        response = service.query_model("FactSalesModel", request, mode="validate")
+        response = svc.query_model("FactSalesModel", request, mode="validate")
         assert response.error is not None
         assert "AGGREGATE_MEASURE_IN_SLICE" in response.error
+
+    def test_mixed_row_and_aggregate_slice_group_is_rejected(self, service):
+        """A single logical group cannot be split safely across WHERE and HAVING."""
+        request = SemanticQueryRequest(
+            columns=["orderStatus$caption", "salesAmount"],
+            slice=[
+                {
+                    "$or": [
+                        {"field": "orderStatus$caption", "op": "=", "value": "paid"},
+                        {"field": "salesAmount", "op": ">", "value": 0},
+                    ]
+                }
+            ],
+        )
+        response = service.query_model("FactSalesModel", request, mode="validate")
+        assert response.error is not None
+        assert "MIXED_ROW_AND_AGGREGATE_SLICE" in response.error
 
     def test_auto_groupby_mixed_measures(self, service):
         """Multiple measures with a single dimension should still auto GROUP BY."""

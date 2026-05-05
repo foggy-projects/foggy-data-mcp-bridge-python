@@ -121,6 +121,7 @@ class SemanticQueryService(SemanticServiceResolver):
         executor=None,
         dialect=None,
         use_ast_expression_compiler: bool = False,
+        auto_lift_aggregate_slice_to_having: Optional[bool] = None,
     ):
         """Initialize the semantic query service.
 
@@ -143,6 +144,12 @@ class SemanticQueryService(SemanticServiceResolver):
                      calls (``s.startsWith('x')``), ternary ``a ? b : c``,
                      null coalescing ``a ?? b``, etc.  Default ``False``
                      preserves pre-v1.5-Phase-3 behaviour byte-for-byte.
+            auto_lift_aggregate_slice_to_having: when True, pure aggregate
+                     measure conditions in ``slice`` are treated as
+                     post-aggregate filters and emitted as HAVING. Defaults
+                     to True; pass False or set
+                     ``FOGGY_DATASET_AUTO_LIFT_AGGREGATE_SLICE_TO_HAVING=false``
+                     to preserve the previous rejection.
         """
         self._models: Dict[str, DbTableModelImpl] = {}
         self._default_limit = default_limit
@@ -154,6 +161,11 @@ class SemanticQueryService(SemanticServiceResolver):
         self._executor_manager = None  # Optional[ExecutorManager] for multi-datasource routing
         self._dialect = dialect or self._infer_dialect_from_executor(executor)
         self._use_ast_expression_compiler = use_ast_expression_compiler
+        self._auto_lift_aggregate_slice_to_having = (
+            self._resolve_auto_lift_aggregate_slice_to_having_default()
+            if auto_lift_aggregate_slice_to_having is None
+            else auto_lift_aggregate_slice_to_having
+        )
         self._formula_registry: SqlFormulaRegistry = get_default_registry()
         self._hierarchy_registry = get_default_hierarchy_registry()
         import threading
@@ -166,6 +178,13 @@ class SemanticQueryService(SemanticServiceResolver):
         # dialect is None (legacy default matches prior ANSI double-quote
         # identifier behaviour).
         self._formula_compiler: Optional[FormulaCompiler] = None
+
+    @staticmethod
+    def _resolve_auto_lift_aggregate_slice_to_having_default() -> bool:
+        value = os.getenv("FOGGY_DATASET_AUTO_LIFT_AGGREGATE_SLICE_TO_HAVING")
+        if value is None or value.strip() == "":
+            return True
+        return value.strip().lower() not in {"0", "false", "no", "off"}
 
     def _qi(self, identifier: str) -> str:
         """Quote an SQL identifier using the configured dialect.
@@ -1194,9 +1213,21 @@ class SemanticQueryService(SemanticServiceResolver):
             if cf.agg or cf.is_window_function():
                 has_aggregation = True
 
-        # 3. WHERE clause
-        self._reject_aggregate_conditions_in_slice(model, request.slice, aggregate_calc_fields)
-        for filter_item in request.slice:
+        # 3. WHERE clause. Pure aggregate slice conditions are semantic
+        # post-aggregate filters and are emitted as HAVING by default.
+        effective_slice = list(request.slice or [])
+        effective_having = list(request.having or [])
+        if self._auto_lift_aggregate_slice_to_having:
+            effective_slice, lifted_having = self._partition_slice_for_aggregate_lift(
+                model,
+                effective_slice,
+                aggregate_calc_fields,
+            )
+            effective_having.extend(lifted_having)
+        else:
+            self._reject_aggregate_conditions_in_slice(model, effective_slice, aggregate_calc_fields)
+
+        for filter_item in effective_slice:
             self._add_filter(
                 builder, model, filter_item, ensure_join,
                 compiled_calcs=compiled_calcs,
@@ -1221,20 +1252,19 @@ class SemanticQueryService(SemanticServiceResolver):
                     dim = model.get_dimension(col_name)
                     alias = model.get_table_alias_for_model(model.get_field_model_name(col_name))
                     builder.group_by(f"{alias}.{dim.column}" if dim else f"{alias}.{col_name}")
-        elif has_aggregation and selected_dims:
+        elif (has_aggregation or effective_having) and selected_dims:
             for dim_expr in selected_dims:
                 builder.group_by(dim_expr)
 
         # 5. HAVING
-        if request.having:
-            if not request.group_by:
+        if effective_having:
+            if not has_aggregation and not request.group_by and not selected_dims:
                 raise ValueError(
-                    "HAVING_REQUIRES_GROUP_BY: request.having is only "
-                    "supported on grouped aggregate queries. Add groupBy or "
-                    "use a derived plan query({slice:[...]}) for post-result filters."
+                    "HAVING_REQUIRES_AGGREGATE_QUERY: aggregate filters require "
+                    "an aggregate measure, groupBy, or selected dimension columns."
                 )
             selected_aggregate_sql = self._selected_aggregate_sql(columns_info)
-            for condition in request.having:
+            for condition in effective_having:
                 fragment, params = self._build_having_condition(
                     model,
                     condition,
@@ -2295,6 +2325,66 @@ class SemanticQueryService(SemanticServiceResolver):
                     self._reject_aggregate_conditions_in_slice(
                         model, nested, aggregate_calc_fields,
                     )
+
+    def _partition_slice_for_aggregate_lift(
+        self,
+        model: DbTableModelImpl,
+        items: List[Any],
+        aggregate_calc_fields: set[str],
+    ) -> Tuple[List[Any], List[Any]]:
+        row_filters: List[Any] = []
+        aggregate_filters: List[Any] = []
+        for item in items or []:
+            phase = self._classify_slice_condition_phase(
+                model,
+                item,
+                aggregate_calc_fields,
+            )
+            if phase == "aggregate":
+                aggregate_filters.append(item)
+            else:
+                row_filters.append(item)
+        return row_filters, aggregate_filters
+
+    def _classify_slice_condition_phase(
+        self,
+        model: DbTableModelImpl,
+        item: Any,
+        aggregate_calc_fields: set[str],
+    ) -> str:
+        if not isinstance(item, dict):
+            return "row"
+
+        for group_key in ("$or", "or", "$and", "and", "conditions", "children", "filters"):
+            nested = item.get(group_key)
+            if not isinstance(nested, list):
+                continue
+            phase: Optional[str] = None
+            for child in nested:
+                child_phase = self._classify_slice_condition_phase(
+                    model,
+                    child,
+                    aggregate_calc_fields,
+                )
+                if phase is None:
+                    phase = child_phase
+                elif phase != child_phase:
+                    raise ValueError(
+                        "MIXED_ROW_AND_AGGREGATE_SLICE: a single logical "
+                        "slice group cannot mix row-level fields and aggregate "
+                        "measures because it cannot be safely split between "
+                        "WHERE and HAVING. Keep row-level filters in slice and "
+                        "aggregate filters in having or separate top-level "
+                        "slice entries."
+                    )
+            return phase or "row"
+
+        field = item.get("field") or item.get("column")
+        if isinstance(field, str) and self._is_aggregate_condition_field(
+            model, field, aggregate_calc_fields,
+        ):
+            return "aggregate"
+        return "row"
 
     def _build_having_condition(
         self,

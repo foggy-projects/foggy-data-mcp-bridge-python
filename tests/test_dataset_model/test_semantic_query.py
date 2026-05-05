@@ -137,6 +137,23 @@ class TestOdooAggregateHaving:
             "overdue_amount",
         ]
 
+    def test_predefined_formula_measure_slice_is_lifted_to_having(self, odoo_service):
+        request = SemanticQueryRequest(
+            columns=["partner$caption", "arOverdueAmount"],
+            group_by=["partner$caption"],
+            slice=[{"field": "arOverdueAmount", "op": ">", "value": 0}],
+            limit=10,
+        )
+
+        response = _build_response(
+            odoo_service, "OdooAccountMoveLineQueryModel", request,
+        )
+
+        assert "HAVING" in response.sql
+        assert "SUM(CASE" in response.sql
+        where_part = response.sql.split("HAVING")[0]
+        assert "WHERE SUM(CASE" not in where_part
+
 
 # ==================== TestFieldResolution ====================
 
