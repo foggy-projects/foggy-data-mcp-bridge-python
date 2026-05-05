@@ -29,6 +29,7 @@ the r2 spec §6.5.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -41,6 +42,7 @@ from foggy.dataset_model.engine.compose import (
 from foggy.dataset_model.engine.compose import feature_flags
 from foggy.dataset_model.engine.compose.compilation import error_codes
 from foggy.dataset_model.engine.compose.schema.derive import derive_schema
+from foggy.dataset_model.engine.compose.schema.alias import extract_column_alias
 from foggy.dataset_model.engine.compose.security import (
     plan_aware_permission_validator,
 )
@@ -482,6 +484,7 @@ def _compile_derived(plan: DerivedQueryPlan, state: _CompileState) -> CteUnit:
         plan=plan,
         inner_alias=inner.alias,
         inner_sql=inner.sql,
+        dialect=state.dialect,
     )
     derived_alias = state.next_alias()
     _register_plan_alias(state, plan, derived_alias)
@@ -539,7 +542,9 @@ def _compile_join(plan: JoinPlan, state: _CompileState) -> ComposedSql:
         left_alias=left_unit.alias,
         right_alias=right_unit.alias,
         on_condition=" AND ".join(
-            f"{left_unit.alias}.{o.left} {o.op} {right_unit.alias}.{o.right}"
+            f"{_render_qualified_ref(left_unit.alias, o.left, state.dialect)} "
+            f"{o.op} "
+            f"{_render_qualified_ref(right_unit.alias, o.right, state.dialect)}"
             for o in plan.on
         ),
         join_type=_sql_join_type(plan.type),
@@ -634,6 +639,55 @@ def _check_cross_datasource(
 # ---------------------------------------------------------------------------
 
 
+_SIMPLE_OUTPUT_REF = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*$")
+_LOWER_SAFE_IDENT = re.compile(r"^[a-z_][a-z0-9_]*$")
+
+
+def _quote_identifier(name: str, dialect: str) -> str:
+    n = dialect.lower()
+    if n in {"mssql", "sqlserver"}:
+        return "[" + name.replace("]", "]]") + "]"
+    if n in {"mysql", "mysql57", "mysql8"}:
+        return "`" + name.replace("`", "``") + "`"
+    return '"' + name.replace('"', '""') + '"'
+
+
+def _needs_identifier_quote(name: str, dialect: str) -> bool:
+    if name == "*":
+        return False
+    if not _SIMPLE_OUTPUT_REF.match(name):
+        return True
+    if "$" in name:
+        return True
+    if dialect.lower() in {"postgres", "postgresql", "sqlite", "mssql", "sqlserver"}:
+        return not _LOWER_SAFE_IDENT.match(name)
+    return False
+
+
+def _render_identifier(name: str, dialect: str) -> str:
+    return _quote_identifier(name, dialect) if _needs_identifier_quote(name, dialect) else name
+
+
+def _render_qualified_ref(alias: str, field: str, dialect: str) -> str:
+    return f"{alias}.{_render_identifier(field, dialect)}"
+
+
+def _is_simple_output_ref(expr: str) -> bool:
+    return bool(_SIMPLE_OUTPUT_REF.match(expr.strip()))
+
+
+def _render_select_column(column: str, inner_alias: str, dialect: str) -> str:
+    if column.strip() == "*":
+        return "*"
+    parts = extract_column_alias(column)
+    if not _is_simple_output_ref(parts.expression):
+        return column
+    rendered = _render_qualified_ref(inner_alias, parts.expression, dialect)
+    if parts.has_alias:
+        return f"{rendered} AS {_render_identifier(parts.output_name, dialect)}"
+    return rendered
+
+
 def _sql_join_type(plan_type: str) -> str:
     """Map plan-level join type (lowercase) to SQL keyword."""
     mapping = {
@@ -682,6 +736,7 @@ def _render_outer_select(
     plan: DerivedQueryPlan,
     inner_alias: str,
     inner_sql: str,
+    dialect: str,
 ) -> Tuple[str, List[Any]]:
     """Render ``SELECT <cols> FROM (<inner_sql>) AS <inner_alias> …``.
 
@@ -697,7 +752,14 @@ def _render_outer_select(
     still round-trip.
     """
     distinct_kw = "DISTINCT " if plan.distinct else ""
-    column_list = ", ".join(plan.columns) if plan.columns else "*"
+    column_list = (
+        ", ".join(
+            _render_select_column(column, inner_alias, dialect)
+            for column in plan.columns
+        )
+        if plan.columns
+        else "*"
+    )
 
     parts: List[str] = [
         f"SELECT {distinct_kw}{column_list}",
@@ -707,18 +769,28 @@ def _render_outer_select(
 
     # WHERE — one item per slice entry; each is a {field, op, value} dict
     if plan.slice_:
-        where_fragments, where_params = _render_slice(list(plan.slice_))
+        where_fragments, where_params = _render_slice(
+            list(plan.slice_),
+            inner_alias=inner_alias,
+            dialect=dialect,
+        )
         if where_fragments:
             parts.append("WHERE " + " AND ".join(where_fragments))
             params.extend(where_params)
 
     # GROUP BY
     if plan.group_by:
-        parts.append("GROUP BY " + ", ".join(plan.group_by))
+        parts.append(
+            "GROUP BY " + ", ".join(
+                _render_identifier(field, dialect) for field in plan.group_by
+            )
+        )
 
     # ORDER BY — entries may be "name" or "name:asc|desc" / dict forms
     if plan.order_by:
-        order_fragments = [_render_order_entry(entry) for entry in plan.order_by]
+        order_fragments = [
+            _render_order_entry(entry, dialect) for entry in plan.order_by
+        ]
         parts.append("ORDER BY " + ", ".join(order_fragments))
 
     # LIMIT / OFFSET — inline integers (matches v1.3)
@@ -733,7 +805,12 @@ def _render_outer_select(
     return "\n".join(parts), params
 
 
-def _render_slice(slice_: List[Any]) -> Tuple[List[str], List[Any]]:
+def _render_slice(
+    slice_: List[Any],
+    *,
+    inner_alias: str,
+    dialect: str,
+) -> Tuple[List[str], List[Any]]:
     """Render each slice entry as ``<field> <op> ?`` with a bound param.
 
     Accepts two shapes:
@@ -774,12 +851,17 @@ def _render_slice(slice_: List[Any]) -> Tuple[List[str], List[Any]]:
                 )
             field_name, value = next(iter(entry.items()))
             op = "="
-        fragments.append(f"{field_name} {op} ?")
+        field_sql = (
+            _render_qualified_ref(inner_alias, str(field_name), dialect)
+            if _is_simple_output_ref(str(field_name))
+            else str(field_name)
+        )
+        fragments.append(f"{field_sql} {op} ?")
         params.append(value)
     return fragments, params
 
 
-def _render_order_entry(entry: Any) -> str:
+def _render_order_entry(entry: Any, dialect: str) -> str:
     """Render one ``order_by`` entry into a ``<name> [ASC|DESC]`` fragment."""
     try:
         spec = normalize_order_by_item(entry)
@@ -792,4 +874,4 @@ def _render_order_entry(entry: Any) -> str:
                 f"{type(entry).__name__}"
             ),
         ) from exc
-    return f"{spec.field} {spec.direction.upper()}"
+    return f"{_render_identifier(spec.field, dialect)} {spec.direction.upper()}"

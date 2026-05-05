@@ -32,6 +32,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
+from foggy.dataset_model.order_by import normalize_order_by_item
+
 from .result import SqlPreview, UnsupportedInM2Error
 
 if TYPE_CHECKING:
@@ -359,7 +361,7 @@ class QueryPlan(ABC):
         slice: Optional[List[Any]] = None,
         having: Optional[List[Any]] = None,
         group_by: Optional[List[str]] = None,
-        order_by: Optional[List[str]] = None,
+        order_by: Optional[List[Any]] = None,
         limit: Optional[int] = None,
         start: Optional[int] = None,
         distinct: bool = False,
@@ -397,7 +399,7 @@ class QueryPlan(ABC):
             columns=_freeze_columns(columns),
             slice_=_freeze_opt_list(slice),
             group_by=_freeze_opt_str_list(group_by),
-            order_by=_freeze_opt_str_list(order_by),
+            order_by=_freeze_opt_order_by_list(order_by),
             limit=limit,
             start=start,
             distinct=distinct,
@@ -671,7 +673,7 @@ class BaseModelPlan(QueryPlan):
     slice_: Tuple[Any, ...] = ()
     having: Tuple[Any, ...] = ()
     group_by: Tuple[str, ...] = ()
-    order_by: Tuple[str, ...] = ()
+    order_by: Tuple[Any, ...] = ()
     calculated_fields: Tuple[Any, ...] = ()
     limit: Optional[int] = None
     start: Optional[int] = None
@@ -709,7 +711,7 @@ class DerivedQueryPlan(QueryPlan):
     columns: Tuple[str, ...]
     slice_: Tuple[Any, ...] = ()
     group_by: Tuple[str, ...] = ()
-    order_by: Tuple[str, ...] = ()
+    order_by: Tuple[Any, ...] = ()
     limit: Optional[int] = None
     start: Optional[int] = None
     distinct: bool = False
@@ -892,5 +894,21 @@ def _freeze_opt_str_list(value: Optional[List[str]]) -> Tuple[str, ...]:
             raise ValueError(
                 f"list entry[{i}] must be a non-empty str, got {v!r}"
             )
+        out.append(v)
+    return tuple(out)
+
+
+def _freeze_opt_order_by_list(value: Optional[List[Any]]) -> Tuple[Any, ...]:
+    if value is None:
+        return ()
+    out: List[Any] = []
+    for i, v in enumerate(value):
+        try:
+            normalize_order_by_item(v)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"order_by entry[{i}] must be a non-empty str or order dict, "
+                f"got {v!r}"
+            ) from exc
         out.append(v)
     return tuple(out)

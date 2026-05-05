@@ -154,6 +154,23 @@ class TestOdooAggregateHaving:
         where_part = response.sql.split("HAVING")[0]
         assert "WHERE SUM(CASE" not in where_part
 
+    def test_global_formula_measure_slice_is_lifted_to_having(self, odoo_service):
+        request = SemanticQueryRequest(
+            columns=["arOverdueAmount", "arOverdueCustomerCount"],
+            slice=[{"field": "arOverdueAmount", "op": ">", "value": 0}],
+            systemSlice=[{"field": "company$id", "op": "in", "value": [2, 1]}],
+        )
+
+        response = _build_response(
+            odoo_service, "OdooAccountMoveLineQueryModel", request,
+        )
+
+        assert "GROUP BY" not in response.sql
+        assert "HAVING" in response.sql
+        assert "SUM(CASE" in response.sql
+        where_part = response.sql.split("HAVING")[0]
+        assert "WHERE SUM(CASE" not in where_part
+
     def test_predefined_formula_measure_case_variant_resolves_before_injection(self, odoo_service):
         request = SemanticQueryRequest(
             columns=["aroverdueamount AS overdue_amount"],

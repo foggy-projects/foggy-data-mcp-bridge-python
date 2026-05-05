@@ -123,6 +123,25 @@ class TestSpecExample3JoinThenFilter:
             left="partnerId", op="=", right="partnerId"
         )
 
+    def test_query_accepts_order_by_object_form(self):
+        base = from_(
+            model="SaleOrderQM",
+            columns=[
+                "partner$id AS partnerId",
+                "SUM(amountTotal) AS arOverdueAmount",
+            ],
+            group_by=["partnerId"],
+        )
+
+        final_plan = base.query({
+            "columns": ["partnerId", "arOverdueAmount"],
+            "orderBy": [{"field": "arOverdueAmount", "dir": "desc"}],
+        })
+
+        assert final_plan.order_by == (
+            {"field": "arOverdueAmount", "dir": "desc"},
+        )
+
 
 class TestMultiLevelDerivation:
     def test_three_level_derivation_chain(self):

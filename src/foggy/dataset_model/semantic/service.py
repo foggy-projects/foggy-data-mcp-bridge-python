@@ -1308,7 +1308,7 @@ class SemanticQueryService(SemanticServiceResolver):
                 "expression": cf.expression, "aggregation": cf.agg,
                 "window": cf.is_window_function(),
             })
-            if cf.agg or cf.is_window_function():
+            if cf.agg or cf.is_window_function() or parse_inline_aggregate(str(cf.expression or "")):
                 has_aggregation = True
 
         # 3. WHERE clause. Pure aggregate slice conditions are semantic

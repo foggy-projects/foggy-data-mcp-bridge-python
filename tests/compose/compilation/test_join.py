@@ -79,6 +79,60 @@ class TestJoinBasic:
         assert "cte_0.orderStatus" in composed.sql
         assert "cte_1.orderStatus" in composed.sql
 
+    def test_postgres_join_on_quotes_dollar_output_names(self, svc, ctx):
+        left = from_(model="FactSalesModel", columns=["orderStatus$caption"])
+        right = from_(model="FactOrderModel", columns=["orderStatus$caption"])
+        on = [JoinOn(left="orderStatus$caption", op="=", right="orderStatus$caption")]
+
+        composed = compile_plan_to_sql(
+            left.join(right, type="inner", on=on),
+            ctx,
+            semantic_service=svc,
+            dialect="postgres",
+        )
+
+        assert 'cte_0."orderStatus$caption"' in composed.sql
+        assert 'cte_1."orderStatus$caption"' in composed.sql
+        assert "cte_0.orderStatus$caption" not in composed.sql
+
+    def test_postgres_query_after_join_quotes_camel_case_outputs(self, svc, ctx):
+        left = from_(
+            model="FactSalesModel",
+            columns=[
+                "orderStatus$caption AS customer_id",
+                "salesAmount AS arOverdueAmount",
+            ],
+            group_by=["orderStatus$caption"],
+        )
+        right = from_(
+            model="FactOrderModel",
+            columns=[
+                "orderStatus$caption AS lead_customer_id",
+                "totalAmount AS lead_count",
+            ],
+            group_by=["orderStatus$caption"],
+        )
+        joined = left.join(
+            right,
+            type="inner",
+            on=[JoinOn(left="customer_id", op="=", right="lead_customer_id")],
+        )
+        result = joined.query(
+            columns=["customer_id", "arOverdueAmount", "lead_count"],
+            order_by=["-arOverdueAmount"],
+        )
+
+        composed = compile_plan_to_sql(
+            result,
+            ctx,
+            semantic_service=svc,
+            dialect="postgres",
+        )
+
+        assert '."arOverdueAmount"' in composed.sql
+        assert 'ORDER BY "arOverdueAmount" DESC' in composed.sql
+        assert "ORDER BY arOverdueAmount DESC" not in composed.sql
+
 
 # ===========================================================================
 # Multiple ON conditions

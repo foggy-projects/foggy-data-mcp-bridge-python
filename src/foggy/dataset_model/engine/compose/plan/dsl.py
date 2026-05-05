@@ -37,6 +37,7 @@ from .plan import (
     QueryPlan,
     _freeze_columns,
     _freeze_opt_list,
+    _freeze_opt_order_by_list,
     _freeze_opt_str_list,
     _require_plan,
     _validate_columns,
@@ -52,7 +53,7 @@ def from_(
     slice: Optional[List[Any]] = None,
     having: Optional[List[Any]] = None,
     group_by: Optional[List[str]] = None,
-    order_by: Optional[List[str]] = None,
+    order_by: Optional[List[Any]] = None,
     calculated_fields: Optional[List[Any]] = None,
     limit: Optional[int] = None,
     start: Optional[int] = None,
@@ -112,7 +113,7 @@ def from_(
     slice_tuple = _freeze_opt_list(slice)
     having_tuple = _freeze_opt_list(having)
     group_by_tuple = _freeze_opt_str_list(group_by)
-    order_by_tuple = _freeze_opt_str_list(order_by)
+    order_by_tuple = _freeze_opt_order_by_list(order_by)
     calculated_fields_tuple = _freeze_opt_list(calculated_fields)
 
     if has_model:

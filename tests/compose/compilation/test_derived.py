@@ -54,7 +54,7 @@ class TestDerivedSingleLevel:
             derived, ctx, semantic_service=svc, dialect="mysql8"
         )
         # GROUP BY appears at outer layer
-        assert "GROUP BY orderStatus" in composed.sql
+        assert "GROUP BY `orderStatus$caption`" in composed.sql
 
     def test_derived_order_by(self, svc, ctx, base_sales):
         derived = base_sales.query(
@@ -64,7 +64,7 @@ class TestDerivedSingleLevel:
         composed = compile_plan_to_sql(
             derived, ctx, semantic_service=svc, dialect="mysql8"
         )
-        assert "ORDER BY orderStatus" in composed.sql
+        assert "ORDER BY `orderStatus$caption` ASC" in composed.sql
 
     def test_derived_cte_order_by_shorthand_is_rendered_canonically(
         self, svc, ctx
