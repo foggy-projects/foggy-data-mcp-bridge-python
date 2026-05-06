@@ -1324,15 +1324,19 @@ class SemanticQueryService(SemanticServiceResolver):
         # post-aggregate filters and are emitted as HAVING by default.
         effective_slice = list(request.slice or [])
         effective_having = list(request.having or [])
+        
+        # Ensure inline aggregate aliases are recognized as aggregate fields
+        all_aggregate_fields = aggregate_calc_fields | set(self._selected_aggregate_sql(columns_info).keys())
+
         if self._auto_lift_aggregate_slice_to_having:
             effective_slice, lifted_having = self._partition_slice_for_aggregate_lift(
                 model,
                 effective_slice,
-                aggregate_calc_fields,
+                all_aggregate_fields,
             )
             effective_having.extend(lifted_having)
         else:
-            self._reject_aggregate_conditions_in_slice(model, effective_slice, aggregate_calc_fields)
+            self._reject_aggregate_conditions_in_slice(model, effective_slice, all_aggregate_fields)
 
         for filter_item in effective_slice:
             self._add_filter(
@@ -1378,7 +1382,7 @@ class SemanticQueryService(SemanticServiceResolver):
                     ensure_runtime_joins,
                     compiled_calcs=compiled_calcs,
                     compiled_calcs_params=compiled_calcs_params,
-                    aggregate_calc_fields=aggregate_calc_fields,
+                    aggregate_calc_fields=all_aggregate_fields,
                     selected_aggregate_sql=selected_aggregate_sql,
                 )
                 if fragment:

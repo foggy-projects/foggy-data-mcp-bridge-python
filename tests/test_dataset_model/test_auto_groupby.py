@@ -128,6 +128,38 @@ class TestAutoGroupBy:
         assert response.error is not None
         assert "MIXED_ROW_AND_AGGREGATE_SLICE" in response.error
 
+    def test_inline_aggregate_alias_slice_lifted_to_having(self, service):
+        """Inline aggregate alias in slice is lifted to HAVING."""
+        request = SemanticQueryRequest(
+            columns=["orderStatus$caption", "sum(salesAmount) as totalSales"],
+            slice=[{"field": "totalSales", "op": ">", "value": 0}],
+            order_by=[{"field": "totalSales", "dir": "desc"}],
+        )
+        sql = _build_sql(service, request)
+        assert "HAVING" in sql
+        assert "SUM(t.sales_amount)>" in sql.replace(" ", "")
+        where_part = sql.split("HAVING")[0]
+        assert "WHERE totalSales" not in where_part
+        assert "WHERE totalsales" not in where_part
+        assert "ORDER BY \"totalSales\" DESC" in sql or "ORDER BY totalSales DESC" in sql or 'ORDER BY `totalSales` DESC' in sql or 'ORDER BY t.totalsales DESC' not in sql
+
+    def test_mixed_row_and_inline_aggregate_slice_is_rejected(self, service):
+        """Mixed group with inline aggregate alias is rejected."""
+        request = SemanticQueryRequest(
+            columns=["orderStatus$caption", "sum(salesAmount) as totalSales"],
+            slice=[
+                {
+                    "$or": [
+                        {"field": "orderStatus$caption", "op": "=", "value": "paid"},
+                        {"field": "totalSales", "op": ">", "value": 0},
+                    ]
+                }
+            ],
+        )
+        response = service.query_model("FactSalesModel", request, mode="validate")
+        assert response.error is not None
+        assert "MIXED_ROW_AND_AGGREGATE_SLICE" in response.error
+
     def test_auto_groupby_mixed_measures(self, service):
         """Multiple measures with a single dimension should still auto GROUP BY."""
         request = SemanticQueryRequest(
