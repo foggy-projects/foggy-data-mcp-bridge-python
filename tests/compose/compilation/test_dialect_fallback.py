@@ -217,7 +217,7 @@ class TestDialectParamOrdering:
     def slice_plan(self, base_sales):
         return base_sales.query(
             columns=["orderStatus$caption"],
-            slice=[{"field": "orderStatus", "op": "=", "value": "done"}],
+            slice=[{"field": "orderStatus$caption", "op": "=", "value": "done"}],
         )
 
     def test_params_identical_across_dialects(self, svc, ctx, slice_plan):

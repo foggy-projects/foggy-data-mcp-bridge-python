@@ -3,7 +3,7 @@
 Provides validation and translation logic for the S2 Flat Pivot MVP.
 """
 
-from typing import Any, Union
+from typing import Any, Union, Tuple
 from foggy.mcp_spi.semantic import (
     SemanticQueryRequest,
     PivotRequest,
@@ -20,7 +20,7 @@ def _extract_field_name(item: Union[str, PivotAxisField]) -> str:
     return item.field
 
 
-def validate_and_translate_pivot(request: SemanticQueryRequest) -> SemanticQueryRequest:
+def validate_and_translate_pivot(request: SemanticQueryRequest) -> Tuple[SemanticQueryRequest, bool]:
     """Validate Pivot support and translate into a standard semantic query request.
 
     Raises:
@@ -39,9 +39,19 @@ def validate_and_translate_pivot(request: SemanticQueryRequest) -> SemanticQuery
             f"is not supported. Only 'flat' and 'grid' are supported in S3."
         )
 
-    # Crossjoin is allowed in S3
-    if pivot.options.row_subtotals or pivot.options.column_subtotals or pivot.options.grand_total:
-        raise NotImplementedError(f"{PIVOT_FEATURE_NOT_IMPLEMENTED_IN_PYTHON}subtotals")
+    # columnSubtotals: never supported in any pivot shape.
+    if pivot.options.column_subtotals:
+        raise NotImplementedError(
+            f"{PIVOT_FEATURE_NOT_IMPLEMENTED_IN_PYTHON}"
+            "columnSubtotals is not supported for any pivot shape. "
+            "Remove columnSubtotals from pivot.options and retry."
+        )
+
+    # rowSubtotals on ordinary pivot: silently ignored (single-layer rows subtotal is a no-op).
+    # grandTotal: supported on ordinary pivot via post-processing in service.py.
+    # (cascade pivot with exactly 2-level rows + limit handles these via cascade_staged_sql path)
+    want_grand_total = bool(pivot.options and pivot.options.grand_total)
+
     if pivot.properties:
         raise NotImplementedError(f"{PIVOT_FEATURE_NOT_IMPLEMENTED_IN_PYTHON}properties")
 
@@ -84,4 +94,4 @@ def validate_and_translate_pivot(request: SemanticQueryRequest) -> SemanticQuery
     # We do NOT touch slice, system_slice, field_access, denied_columns, start, limit etc.
     # They are preserved.
 
-    return translated_request
+    return translated_request, want_grand_total

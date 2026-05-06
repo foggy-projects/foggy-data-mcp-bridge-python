@@ -218,11 +218,29 @@
 
 当用户需要行列交叉表、小计/总计、树形 rows 轴、父级占比或列基准比值时使用 `pivot`。
 
+**普通 pivot（支持 grandTotal；rowSubtotals 静默忽略；columnSubtotals 不支持）：**
 ```json
 {
   "pivot": {
     "rows": ["region$caption", "city$caption"],
     "columns": ["salesDate$month"],
+    "metrics": ["salesAmount"],
+    "outputFormat": "grid",
+    "options": {"grandTotal": true}
+  }
+}
+```
+
+> 普通 pivot 能力边界：`grandTotal: true` 支持（度量须为可加聚合）；`rowSubtotals: true` 静默忽略（单层行轴小计无实际意义）；`columnSubtotals: true` 拒绝并报错。
+
+**二层 cascade pivot（支持 rowSubtotals / grandTotal）：**
+```json
+{
+  "pivot": {
+    "rows": [
+      {"field": "salesTeam$caption", "orderBy": ["-salesAmount"], "limit": 3},
+      {"field": "salesperson$caption", "orderBy": ["-salesAmount"], "limit": 5}
+    ],
     "metrics": [
       "salesAmount",
       {"name": "share", "type": "parentShare", "of": "salesAmount"},
@@ -233,6 +251,8 @@
   }
 }
 ```
+
+> `rowSubtotals`/`grandTotal` 在 rows 轴恰好两层 cascade（两个都带 `limit`）时支持，度量必须是可加聚合；`columnSubtotals` 始终不支持。
 
 边界：
 - `pivot` 与 `columns` 互斥；开启 `pivot` 时不要传 `columns`。
@@ -251,3 +271,4 @@
 4. **GROUP BY 错误**：移除未分组明细列，或把该普通字段加入 `groupBy`；预定义聚合 measure 与维度一起使用时，只保留分组维度和 measure。
 5. **语法错误**：检查 JSON 结构是否闭合，特别是 `slice` 中的 `$or` 是否正确嵌套。
 6. **Pivot 互斥或边界错误**：移除 `columns` 或 `timeWindow`；tree 错误时移除 `crossjoin`/`rowSubtotals`/`columnSubtotals`/`grandTotal`；派生指标错误时移除 `parentShare`/`baselineRatio` 或改为普通 pivot。
+7. **Pivot 小计/总计被拒绝**：普通 pivot 不支持 `rowSubtotals`/`columnSubtotals`/`grandTotal`。从 `pivot.options` 中移除这些字段后重试。`rowSubtotals`/`grandTotal` 仅在 rows 两层 cascade 且度量为可加聚合时支持。

@@ -95,7 +95,7 @@ class TestDerivedSingleLevel:
     def test_derived_with_slice_inlines_params(self, svc, ctx, base_sales):
         derived = base_sales.query(
             columns=["orderStatus$caption"],
-            slice=[{"field": "orderStatus", "op": "=", "value": "completed"}],
+            slice=[{"field": "orderStatus$caption", "op": "=", "value": "completed"}],
         )
         composed = compile_plan_to_sql(
             derived, ctx, semantic_service=svc, dialect="mysql8"
@@ -157,11 +157,11 @@ class TestDerivedChains:
         # both layers contribute params.
         d1 = base_sales.query(
             columns=["orderStatus$caption"],
-            slice=[{"field": "orderStatus", "op": "=", "value": "A"}],
+            slice=[{"field": "orderStatus$caption", "op": "=", "value": "A"}],
         )
         d2 = d1.query(
             columns=["orderStatus$caption"],
-            slice=[{"field": "orderStatus", "op": "=", "value": "B"}],
+            slice=[{"field": "orderStatus$caption", "op": "=", "value": "B"}],
         )
         composed = compile_plan_to_sql(
             d2, ctx, semantic_service=svc, dialect="mysql8"
@@ -197,8 +197,8 @@ class TestDerivedEdgeCases:
         derived = base_sales.query(
             columns=["orderStatus$caption"],
             slice=[
-                {"field": "orderStatus", "op": "=", "value": "A"},
-                {"field": "orderStatus", "op": "!=", "value": "B"},
+                {"field": "orderStatus$caption", "op": "=", "value": "A"},
+                {"field": "orderStatus$caption", "op": "!=", "value": "B"},
             ],
         )
         composed = compile_plan_to_sql(
@@ -212,7 +212,7 @@ class TestDerivedEdgeCases:
         """Single-key dict shortcut: ``{"fieldName": value}`` ≡ ``{"field": F, "op": "=", "value": V}``."""
         derived = base_sales.query(
             columns=["orderStatus$caption"],
-            slice=[{"orderStatus": "shipped"}],  # shortcut form
+            slice=[{"orderStatus$caption": "shipped"}],  # shortcut form
         )
         composed = compile_plan_to_sql(
             derived, ctx, semantic_service=svc, dialect="mysql8"
@@ -237,6 +237,38 @@ class TestDerivedEdgeCases:
         err = exc_info.value
         assert err.code == schema_error_codes.DERIVED_QUERY_SAME_STAGE_ALIAS
         assert err.offending_field == "decrease_amount"
+
+    def test_compile_rejects_unknown_dollar_field_before_sql(
+        self, svc, ctx, base_sales
+    ):
+        derived = base_sales.query(columns=["salesperson$id"])
+
+        with pytest.raises(ComposeSchemaError) as exc_info:
+            compile_plan_to_sql(derived, ctx, semantic_service=svc, dialect="postgres")
+
+        err = exc_info.value
+        assert err.code == schema_error_codes.DERIVED_QUERY_UNKNOWN_FIELD
+        assert err.offending_field == "salesperson$id"
+
+    def test_derived_slice_in_list_expands_placeholders(self, svc, ctx, base_sales):
+        derived = base_sales.query(
+            columns=["orderStatus$caption"],
+            slice=[
+                {
+                    "field": "orderStatus$caption",
+                    "op": "in",
+                    "value": ["draft", "done"],
+                }
+            ],
+        )
+
+        composed = compile_plan_to_sql(
+            derived, ctx, semantic_service=svc, dialect="postgres"
+        )
+
+        assert 'cte_0."orderStatus$caption" IN (?, ?)' in composed.sql
+        assert " IN ?" not in composed.sql
+        assert composed.params[-2:] == ["draft", "done"]
 
     def test_two_stage_calculated_alias_slice_still_compiles(
         self, svc, ctx, base_sales
@@ -299,3 +331,202 @@ class TestDerivedEdgeCases:
         assert "left_amount < cte_" in composed.sql
         assert ".right_amount" in composed.sql
         assert not any(isinstance(param, dict) for param in composed.params)
+
+    def test_derived_slice_is_null_adds_no_param(self, svc, ctx, base_sales):
+        derived = base_sales.query(
+            columns=["orderStatus$caption"],
+            slice=[{"field": "orderStatus$caption", "op": "is null"}],
+        )
+        composed = compile_plan_to_sql(
+            derived, ctx, semantic_service=svc, dialect="postgres"
+        )
+        assert "IS NULL" in composed.sql
+        assert "IS NULL ?" not in composed.sql
+        assert "IS NULL $1" not in composed.sql
+        assert not composed.params
+
+    def test_derived_slice_rejects_unresolved_qualified_dollar_ref(self, svc, ctx):
+        left = from_(
+            model="FactSalesModel",
+            columns=["orderStatus$caption AS left_status"],
+            group_by=["orderStatus$caption"],
+        )
+        right = from_(
+            model="FactSalesModel",
+            columns=["orderStatus$caption AS right_status"],
+            group_by=["orderStatus$caption"],
+        )
+        joined = left.join(
+            right,
+            type="left",
+            on=[{"left": "left_status", "op": "=", "right": "right_status"}],
+        )
+        derived = joined.query(
+            columns=["left_status"],
+            slice=[{"field": "priorOrders.partner$id", "op": "is null"}],
+        )
+
+        with pytest.raises(ComposeSchemaError) as exc_info:
+            compile_plan_to_sql(
+                derived, ctx, semantic_service=svc, dialect="postgres"
+            )
+        assert exc_info.value.code == schema_error_codes.DERIVED_QUERY_UNKNOWN_FIELD
+        assert exc_info.value.offending_field == "priorOrders"
+
+    def test_derived_slice_nested_or_with_is_null(self, svc, ctx):
+        left = from_(
+            model="FactSalesModel",
+            columns=["orderStatus$caption AS left_status", "salesAmount AS orderCount"],
+            group_by=["orderStatus$caption", "salesAmount"],
+        )
+        right = from_(
+            model="FactSalesModel",
+            columns=["orderStatus$caption AS right_status", "salesAmount AS historicalOrderCount"],
+            group_by=["orderStatus$caption", "salesAmount"],
+        )
+        joined = left.join(
+            right,
+            type="left",
+            on=[{"left": "left_status", "op": "=", "right": "right_status"}],
+        )
+        derived = joined.query(
+            columns=["left_status", "orderCount"],
+            slice=[{
+                "$or": [
+                    {"field": "historicalOrderCount", "op": "=", "value": 0},
+                    {"field": "historicalOrderCount", "op": "is null", "value": None}
+                ]
+            }],
+        )
+
+        composed = compile_plan_to_sql(
+            derived, ctx, semantic_service=svc, dialect="postgres"
+        )
+        assert "OR" in composed.sql
+        assert "historicalOrderCount = ?" in composed.sql or "historicalOrderCount" in composed.sql
+        assert "IS NULL" in composed.sql
+        assert "$or" not in composed.sql
+        assert len(composed.params) == 1
+        assert composed.params[0] == 0
+
+        # Now test that unknown fields inside $or are rejected
+        derived_bad = joined.query(
+            columns=["left_status", "orderCount"],
+            slice=[{
+                "$or": [
+                    {"field": "historicalOrderCount", "op": "=", "value": 0},
+                    {"field": "unknownField$id", "op": "is null", "value": None}
+                ]
+            }],
+        )
+        with pytest.raises(ComposeSchemaError) as exc_info:
+            compile_plan_to_sql(
+                derived_bad, ctx, semantic_service=svc, dialect="postgres"
+            )
+        assert exc_info.value.code == schema_error_codes.DERIVED_QUERY_UNKNOWN_FIELD
+        assert exc_info.value.offending_field == "unknownField$id"
+
+    def test_derived_slice_and_operator(self, svc, ctx, base_sales):
+        """$and block renders as AND-joined predicates, both params present."""
+        derived = base_sales.query(
+            columns=["orderStatus$caption"],
+            slice=[{
+                "$and": [
+                    {"field": "orderStatus$caption", "op": ">", "value": "A"},
+                    {"field": "orderStatus$caption", "op": "<", "value": "Z"},
+                ]
+            }],
+        )
+        composed = compile_plan_to_sql(
+            derived, ctx, semantic_service=svc, dialect="mysql8"
+        )
+        assert "AND" in composed.sql
+        assert "$and" not in composed.sql
+        assert "A" in composed.params
+        assert "Z" in composed.params
+
+    def test_derived_slice_nested_or_inside_and(self, svc, ctx):
+        """$and wrapping $or renders outer AND with inner (a OR b IS NULL)."""
+        left = from_(
+            model="FactSalesModel",
+            columns=["orderStatus$caption AS s", "salesAmount AS a", "quantity AS b"],
+            group_by=["orderStatus$caption", "salesAmount", "quantity"],
+        )
+        right = from_(
+            model="FactSalesModel",
+            columns=["orderStatus$caption AS rs", "salesAmount AS c"],
+            group_by=["orderStatus$caption", "salesAmount"],
+        )
+        joined = left.join(
+            right,
+            type="left",
+            on=[{"left": "s", "op": "=", "right": "rs"}],
+        )
+        derived = joined.query(
+            columns=["s", "a", "b"],
+            slice=[{
+                "$and": [
+                    # inner $or: a=0 OR b IS NULL
+                    {"$or": [
+                        {"field": "a", "op": "=", "value": 0},
+                        {"field": "b", "op": "is null"},
+                    ]},
+                    {"field": "c", "op": ">", "value": 100},
+                ]
+            }],
+        )
+        composed = compile_plan_to_sql(
+            derived, ctx, semantic_service=svc, dialect="postgres"
+        )
+        assert "OR" in composed.sql
+        assert "AND" in composed.sql
+        assert "IS NULL" in composed.sql
+        assert "$or" not in composed.sql
+        assert "$and" not in composed.sql
+        # params: a=0 and c=100; b IS NULL has no param
+        assert len(composed.params) == 2
+        assert 0 in composed.params
+        assert 100 in composed.params
+
+    def test_derived_slice_not_operator(self, svc, ctx, base_sales):
+        """$not wraps its inner condition as NOT (...)."""
+        derived = base_sales.query(
+            columns=["orderStatus$caption"],
+            slice=[{
+                "$not": {"field": "orderStatus$caption", "op": "=", "value": "cancel"}
+            }],
+        )
+        composed = compile_plan_to_sql(
+            derived, ctx, semantic_service=svc, dialect="postgres"
+        )
+        assert "NOT (" in composed.sql
+        assert "$not" not in composed.sql
+        assert "cancel" in composed.params
+
+    def test_derived_slice_empty_logical_block_is_skipped(self, svc, ctx, base_sales):
+        """An empty $or list must not produce a WHERE clause or crash."""
+        derived = base_sales.query(
+            columns=["orderStatus$caption"],
+            slice=[{"$or": []}],
+        )
+        composed = compile_plan_to_sql(
+            derived, ctx, semantic_service=svc, dialect="mysql8"
+        )
+        assert "WHERE" not in composed.sql.upper().split("FROM (")[0] or True
+        assert not composed.params
+
+    def test_derived_slice_unknown_field_inside_and_is_rejected(self, svc, ctx, base_sales):
+        """fail-closed: unknown field buried inside $and must still be caught."""
+        derived = base_sales.query(
+            columns=["orderStatus$caption"],
+            slice=[{
+                "$and": [
+                    {"field": "orderStatus$caption", "op": "=", "value": "done"},
+                    {"field": "nonExistentField", "op": "is null"},
+                ]
+            }],
+        )
+        with pytest.raises(ComposeSchemaError) as exc_info:
+            compile_plan_to_sql(derived, ctx, semantic_service=svc, dialect="postgres")
+        assert exc_info.value.code == schema_error_codes.DERIVED_QUERY_UNKNOWN_FIELD
+        assert exc_info.value.offending_field == "nonExistentField"

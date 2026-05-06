@@ -483,8 +483,8 @@ def _compile_derived(plan: DerivedQueryPlan, state: _CompileState) -> CteUnit:
         )
     assert isinstance(inner, CteUnit)
     source_columns = _source_output_columns_for_derived(plan.source, inner)
-    _validate_derived_output_refs_for_union_source(plan, source_columns)
     _validate_derived_slice_not_same_stage_alias(plan, source_columns)
+    _validate_derived_output_refs(plan, source_columns)
 
     outer_sql, outer_params = _render_outer_select(
         plan=plan,
@@ -650,6 +650,14 @@ def _check_cross_datasource(
 
 
 _SIMPLE_OUTPUT_REF = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*$")
+_DOTTED_REF = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*\.[A-Za-z_][A-Za-z0-9_$]*$")
+
+# Slice DSL logical operators whose children are recursively traversed.
+# Kept as module-level constants so _iter_slice_entries (validation) and
+# _render_slice (SQL rendering) share the same authoritative source — adding a
+# new operator only requires updating these two sets.
+_SYMMETRIC_LOGICAL_OPS: frozenset = frozenset({"$or", "$and"})
+_ALL_LOGICAL_OPS: frozenset = frozenset({"$or", "$and", "$not"})
 _LOWER_SAFE_IDENT = re.compile(r"^[a-z_][a-z0-9_]*$")
 
 
@@ -768,6 +776,8 @@ def _source_output_columns_for_derived(
             extract_column_alias(column).output_name
             for column in inner.select_columns
         ]
+    if isinstance(source, JoinPlan):
+        return _declared_output_columns_for_plan(source)
     if isinstance(source, BaseModelPlan):
         return _base_declared_output_names(source)
     if isinstance(source, DerivedQueryPlan):
@@ -778,11 +788,56 @@ def _source_output_columns_for_derived(
     return []
 
 
-def _validate_derived_output_refs_for_union_source(
+def _declared_output_columns_for_plan(plan: QueryPlan) -> List[str]:
+    if isinstance(plan, BaseModelPlan):
+        return _base_declared_output_names(plan)
+    if isinstance(plan, DerivedQueryPlan):
+        return [
+            extract_column_alias(column).output_name
+            for column in plan.columns
+        ]
+    if isinstance(plan, JoinPlan):
+        left_columns = _declared_output_columns_for_plan(plan.left)
+        right_columns = _declared_output_columns_for_plan(plan.right)
+        seen = set(left_columns)
+        out = list(left_columns)
+        for column in right_columns:
+            if column in seen:
+                continue
+            seen.add(column)
+            out.append(column)
+        return out
+    if isinstance(plan, UnionPlan):
+        return derive_schema(plan).names()
+    return []
+
+
+def _iter_slice_entries(slice_: Any) -> Any:
+    if not isinstance(slice_, (list, tuple)):
+        return
+    for entry in slice_:
+        if not isinstance(entry, dict):
+            continue
+        if len(entry) == 1:
+            key, val = next(iter(entry.items()))
+            if key in _SYMMETRIC_LOGICAL_OPS:
+                if isinstance(val, (list, tuple)):
+                    yield from _iter_slice_entries(val)
+                continue
+            if key == "$not":
+                if isinstance(val, dict):
+                    yield from _iter_slice_entries([val])
+                elif isinstance(val, (list, tuple)):
+                    yield from _iter_slice_entries(val)
+                continue
+        yield entry
+
+
+def _validate_derived_output_refs(
     plan: DerivedQueryPlan,
     source_columns: List[str],
 ) -> None:
-    if not isinstance(plan.source, UnionPlan):
+    if not source_columns:
         return
     source_names = set(source_columns)
     for column in plan.columns:
@@ -795,13 +850,45 @@ def _validate_derived_output_refs_for_union_source(
                     code=schema_error_codes.DERIVED_QUERY_UNKNOWN_FIELD,
                     message=(
                         f"derived query references unknown field {ident!r} "
-                        "not present in source UNION output schema "
+                        "not present in source output schema "
                         f"(available: {sorted(source_names)!r})"
                     ),
                     phase=schema_error_codes.PHASE_SCHEMA_DERIVE,
                     plan_path="DerivedQueryPlan",
                     offending_field=ident,
                 )
+    for entry in _iter_slice_entries(plan.slice_ or []):
+        field_name = _slice_field_name(entry)
+        if field_name:
+            field_str = str(field_name).strip()
+            if _DOTTED_REF.match(field_str):
+                alias_part = field_str.split(".")[0]
+                raise ComposeSchemaError(
+                    code=schema_error_codes.DERIVED_QUERY_UNKNOWN_FIELD,
+                    message=(
+                        f"derived query slice references unknown field {alias_part!r} "
+                        "not present in source output schema "
+                        f"(available: {sorted(source_names)!r})"
+                    ),
+                    phase=schema_error_codes.PHASE_SCHEMA_DERIVE,
+                    plan_path="DerivedQueryPlan",
+                    offending_field=alias_part,
+                )
+            for ident in _iter_unquoted_identifiers(field_str):
+                if ident.upper() in _DERIVED_EXPR_RESERVED_TOKENS:
+                    continue
+                if ident not in source_names:
+                    raise ComposeSchemaError(
+                        code=schema_error_codes.DERIVED_QUERY_UNKNOWN_FIELD,
+                        message=(
+                            f"derived query slice references unknown field {ident!r} "
+                            "not present in source output schema "
+                            f"(available: {sorted(source_names)!r})"
+                        ),
+                        phase=schema_error_codes.PHASE_SCHEMA_DERIVE,
+                        plan_path="DerivedQueryPlan",
+                        offending_field=ident,
+                    )
 
 
 def _validate_derived_slice_not_same_stage_alias(
@@ -827,7 +914,7 @@ def _validate_derived_slice_not_same_stage_alias(
     if not current_stage_aliases:
         return
 
-    for entry in plan.slice_:
+    for entry in _iter_slice_entries(plan.slice_):
         field_name = _slice_field_name(entry)
         if field_name in current_stage_aliases:
             raise ComposeSchemaError(
@@ -1118,6 +1205,7 @@ def _render_outer_select(
             list(plan.slice_),
             inner_alias=inner_alias,
             dialect=dialect,
+            source_columns=source_columns,
         )
         if where_fragments:
             parts.append("WHERE " + " AND ".join(where_fragments))
@@ -1155,6 +1243,7 @@ def _render_slice(
     *,
     inner_alias: str,
     dialect: str,
+    source_columns: List[str],
 ) -> Tuple[List[str], List[Any]]:
     """Render each slice entry as a WHERE predicate.
 
@@ -1181,6 +1270,47 @@ def _render_slice(
                     f"{type(entry).__name__}"
                 ),
             )
+        if len(entry) == 1:
+            key, val = next(iter(entry.items()))
+            if key in _SYMMETRIC_LOGICAL_OPS:
+                if not isinstance(val, (list, tuple)):
+                    raise ComposeCompileError(
+                        code=error_codes.UNSUPPORTED_PLAN_SHAPE,
+                        phase="plan-lower",
+                        message=f"Logical operator {key} requires a list, got {type(val).__name__}",
+                    )
+                if not val:
+                    continue
+                sub_fragments, sub_params = _render_slice(
+                    list(val),
+                    inner_alias=inner_alias,
+                    dialect=dialect,
+                    source_columns=source_columns,
+                )
+                if sub_fragments:
+                    if len(sub_fragments) == 1:
+                        fragments.append(sub_fragments[0])
+                    else:
+                        op_str = f" {key[1:].upper()} "
+                        fragments.append("(" + op_str.join(sub_fragments) + ")")
+                    params.extend(sub_params)
+                continue
+            if key == "$not":
+                sub_slice = val if isinstance(val, (list, tuple)) else [val]
+                if not sub_slice:
+                    continue
+                sub_fragments, sub_params = _render_slice(
+                    list(sub_slice),
+                    inner_alias=inner_alias,
+                    dialect=dialect,
+                    source_columns=source_columns,
+                )
+                if sub_fragments:
+                    joined = " AND ".join(sub_fragments)
+                    fragments.append(f"NOT ({joined})")
+                    params.extend(sub_params)
+                continue
+
         if "field" in entry:
             field_name = entry["field"]
             op = entry.get("op", "=")
@@ -1201,14 +1331,24 @@ def _render_slice(
         field_sql = (
             _render_qualified_ref(inner_alias, str(field_name), dialect)
             if _is_simple_output_ref(str(field_name))
-            else str(field_name)
+            else _render_expression_output_refs(
+                str(field_name),
+                inner_alias=inner_alias,
+                dialect=dialect,
+                source_columns=source_columns,
+            )
         )
         value_sql, value_params = _render_slice_value(
             value,
+            op=op,
             inner_alias=inner_alias,
             dialect=dialect,
         )
-        fragments.append(f"{field_sql} {op} {value_sql}")
+        rendered_op = _normalize_slice_op(op)
+        if value_sql:
+            fragments.append(f"{field_sql} {rendered_op} {value_sql}")
+        else:
+            fragments.append(f"{field_sql} {rendered_op}")
         params.extend(value_params)
     return fragments, params
 
@@ -1216,6 +1356,7 @@ def _render_slice(
 def _render_slice_value(
     value: Any,
     *,
+    op: str,
     inner_alias: str,
     dialect: str,
 ) -> Tuple[str, List[Any]]:
@@ -1231,7 +1372,35 @@ def _render_slice_value(
                 ),
             )
         return _render_qualified_ref(inner_alias, ref, dialect), []
+    op_upper = _normalize_slice_op(op)
+    if op_upper in {"IS NULL", "IS NOT NULL"}:
+        return "", []
+    if op_upper in {"IN", "NOT IN"}:
+        if isinstance(value, (str, bytes)) or not isinstance(value, (list, tuple, set)):
+            raise ComposeCompileError(
+                code=error_codes.UNSUPPORTED_PLAN_SHAPE,
+                phase="plan-lower",
+                message=(
+                    f"Derived slice operator {op_upper!r} requires a "
+                    "list/tuple/set value."
+                ),
+            )
+        values = list(value)
+        if not values:
+            raise ComposeCompileError(
+                code=error_codes.UNSUPPORTED_PLAN_SHAPE,
+                phase="plan-lower",
+                message=(
+                    f"Derived slice operator {op_upper!r} requires at "
+                    "least one value."
+                ),
+            )
+        return "(" + ", ".join("?" for _ in values) + ")", values
     return "?", [value]
+
+
+def _normalize_slice_op(op: Any) -> str:
+    return " ".join(str(op).strip().upper().split())
 
 
 def _render_order_entry(entry: Any, dialect: str) -> str:

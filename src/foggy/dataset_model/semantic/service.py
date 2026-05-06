@@ -845,7 +845,7 @@ class SemanticQueryService(SemanticServiceResolver):
                 
             from foggy.dataset_model.semantic.pivot.executor import validate_and_translate_pivot
             try:
-                request = validate_and_translate_pivot(request)
+                request, _pivot_want_grand_total = validate_and_translate_pivot(request)
             except NotImplementedError as e:
                 return SemanticQueryResponse.from_error(str(e))
 
@@ -937,6 +937,28 @@ class SemanticQueryService(SemanticServiceResolver):
 
             processor = MemoryCubeProcessor(response.items, pivot_request, key_map)
             response.items = processor.process()
+
+            # --- grandTotal post-processing for ordinary (non-cascade) pivot ---
+            if _pivot_want_grand_total and response.items:
+                from foggy.dataset_model.semantic.pivot.cascade_totals import _build_grand_totals
+                row_fields = [
+                    _f if isinstance(_f, str) else _f.field
+                    for _f in (pivot_request.rows or [])
+                ]
+                col_fields = [
+                    _f if isinstance(_f, str) else _f.field
+                    for _f in (pivot_request.columns or [])
+                ]
+                metric_names = [
+                    _m if isinstance(_m, str) else (_m.of if hasattr(_m, 'of') else _m.name)
+                    for _m in (pivot_request.metrics or [])
+                ]
+                # Resolve through key_map (QM field name -> display column name)
+                row_keys = [key_map.get(f, f) for f in row_fields]
+                col_keys = [key_map.get(f, f) for f in col_fields]
+                metric_keys = [key_map.get(m, m) for m in metric_names]
+                grand_rows = _build_grand_totals(response.items, row_keys, col_keys, metric_keys)
+                response.items = response.items + grand_rows
 
             if getattr(pivot_request, "output_format", "flat") == "grid":
                 shaper = GridShaper(response.items, pivot_request, key_map)
@@ -1041,7 +1063,7 @@ class SemanticQueryService(SemanticServiceResolver):
         if pivot_request:
             is_pivot = True
             from foggy.dataset_model.semantic.pivot.executor import validate_and_translate_pivot
-            request = validate_and_translate_pivot(request)
+            request, _ = validate_and_translate_pivot(request)
 
         if self._auto_case_insensitive_field_resolve:
             ci_result = self._resolve_request_fields_case_insensitive(
@@ -2942,6 +2964,69 @@ class SemanticQueryService(SemanticServiceResolver):
             return f"{alias}.{measure.column or measure.name}"
         return field_name
 
+    def _validate_window_order_by_field(
+        self,
+        field_name: str,
+        calc_field_name: str,
+        model: Any,
+        compiled_calcs: Optional[Dict[str, str]],
+    ) -> None:
+        """Fail-closed guard for ``calculatedFields.windowOrderBy`` field references.
+
+        A window ``ORDER BY`` field must resolve to a real QM column (measure,
+        dimension, or dimension property) or to a *previously compiled* scalar
+        calc field available in ``compiled_calcs``.  Inline aggregate aliases
+        from a sibling ``calculatedFields`` entry (e.g. ``totalSales`` emitted
+        as ``SUM(sales_amount) AS totalSales`` in the same SELECT) and raw SQL
+        expressions (e.g. ``sum(salesAmount)``) cannot be used — they either
+        don't exist yet in the OVER clause scope or produce identifiers that
+        PostgreSQL cannot resolve, causing ``column "totalsales" does not exist``
+        with a physical-column HINT that leaks internal schema details.
+
+        Raises
+        ------
+        ValueError
+            With prefix ``COMPOSE_WINDOW_ORDER_BY_UNRESOLVABLE:`` and a message
+            that names the offending field without leaking physical-table SQL.
+        """
+        # Guard 1: raw SQL expression (contains parenthesis) — never a field ref.
+        if "(" in field_name:
+            raise ValueError(
+                f"COMPOSE_WINDOW_ORDER_BY_UNRESOLVABLE: "
+                f"calculatedFields[{calc_field_name!r}].windowOrderBy field "
+                f"{field_name!r} looks like a raw SQL expression (contains '('). "
+                f"Only QM field names (measures, dimensions, dimension properties) "
+                f"or previously compiled calc-field names are valid here. "
+                f"Use a base model measure field (e.g. 'salesAmount') instead."
+            )
+
+        # Guard 2: compiled_calcs entry (previous scalar calc) — allow.
+        if compiled_calcs and field_name in compiled_calcs:
+            return
+
+        # Guard 3: model-resolvable field (measure / dimension / property) — allow.
+        if model.resolve_field(field_name) is not None:
+            return
+        if model.get_dimension(field_name) is not None:
+            return
+        if model.get_measure(field_name) is not None:
+            return
+
+        # Guard 4: unresolvable — reject with a clear diagnostic.
+        # Do NOT include model.resolve_field SQL expressions in the message
+        # (that would leak physical column names).
+        raise ValueError(
+            f"COMPOSE_WINDOW_ORDER_BY_UNRESOLVABLE: "
+            f"calculatedFields[{calc_field_name!r}].windowOrderBy field "
+            f"{field_name!r} cannot be resolved as a QM measure, dimension, "
+            f"or prior calc-field name. "
+            f"If {field_name!r} is an alias defined by another calculatedField "
+            f"in this same query, it is not available in the OVER clause at this "
+            f"stage. Use a base model measure field or wrap the aggregation in a "
+            f"preceding query stage before applying the window function."
+        )
+
+
     @staticmethod
     def _normalize_string_literal_for_sql(raw: str) -> str:
         """Rewrite a DSL string literal as a SQL-standard single-quoted literal.
@@ -3298,7 +3383,11 @@ class SemanticQueryService(SemanticServiceResolver):
             if cf.window_order_by:
                 order_clauses = []
                 for wo in cf.window_order_by:
-                    col_sql = self._resolve_single_field(wo["field"], model, ensure_join, compiled_calcs)
+                    wo_field = wo["field"]
+                    self._validate_window_order_by_field(
+                        wo_field, cf.name, model, compiled_calcs
+                    )
+                    col_sql = self._resolve_single_field(wo_field, model, ensure_join, compiled_calcs)
                     direction = wo.get("dir", "asc").upper()
                     order_clauses.append(f"{col_sql} {direction}")
                 over_parts.append(f"ORDER BY {', '.join(order_clauses)}")
