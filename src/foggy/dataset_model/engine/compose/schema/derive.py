@@ -162,6 +162,19 @@ def _derive_derived(plan: DerivedQueryPlan, *, path: str) -> OutputSchema:
     _validate_group_and_order_by(
         plan.group_by, plan.order_by, output_schema, plan_path=current_path,
     )
+
+    # Detect same-stage alias references in slice.
+    # A derived plan's ``slice`` is rendered as a WHERE clause against
+    # the *inner* subquery (the source plan's output). If ``slice``
+    # references a column alias that is CREATED by this derived plan's
+    # own ``columns`` (e.g. ``count(x) AS month_count``), the compiler
+    # would emit ``cte_0.month_count`` which does not exist in the inner
+    # CTE. Catch this early with an actionable error instead of letting
+    # it fail at SQL execution time with a cryptic database error.
+    _validate_slice_not_same_stage_alias(
+        plan.slice_, parts_list, source_names, plan_path=current_path,
+    )
+
     return output_schema
 
 
@@ -462,6 +475,72 @@ def _assert_reference_visible(
             plan_path=plan_path,
             offending_field=field_name,
         )
+
+
+def _validate_slice_not_same_stage_alias(
+    slice_: Iterable[object],
+    parts_list: List[ColumnAliasParts],
+    source_names: frozenset,
+    *,
+    plan_path: str,
+) -> None:
+    """Detect when a derived plan's ``slice`` references a column alias
+    that is CREATED by this plan's own ``columns`` (a SELECT-stage alias).
+
+    Such a reference cannot be rendered as a WHERE clause against the
+    inner subquery because the alias only exists in the outer SELECT.
+    The correct pattern is to add a second ``.query({ slice: [...] })``
+    stage after the aggregation stage.
+
+    Parameters
+    ----------
+    slice_:
+        The plan's ``slice_`` tuple; may be empty.
+    parts_list:
+        Already-parsed ``ColumnAliasParts`` from this plan's columns.
+    source_names:
+        Source plan's output schema name set.
+    plan_path:
+        Diagnostic path for error messages.
+    """
+    if not slice_:
+        return
+
+    # Collect aliases that are newly created by this stage's SELECT,
+    # i.e. they have an explicit alias and the output_name is NOT
+    # already a column in the source schema.
+    current_stage_aliases: Set[str] = set()
+    for parts in parts_list:
+        if parts.has_alias and parts.output_name not in source_names:
+            current_stage_aliases.add(parts.output_name)
+
+    if not current_stage_aliases:
+        return
+
+    for entry in slice_:
+        if not isinstance(entry, dict):
+            continue
+        # Normalise both canonical {field, op, value} shape and the
+        # single-key shortcut {fieldName: value}.
+        field_name = entry.get("field")
+        if field_name is None:
+            # Single-key shortcut — first key is the field name.
+            keys = list(entry.keys())
+            if len(keys) == 1:
+                field_name = keys[0]
+        if isinstance(field_name, str) and field_name in current_stage_aliases:
+            raise ComposeSchemaError(
+                code=error_codes.DERIVED_QUERY_SAME_STAGE_ALIAS,
+                message=(
+                    f"field {field_name!r} is created by this derived "
+                    f"query's SELECT and cannot be filtered in the same "
+                    f"stage; add another .query({{ slice: "
+                    f"[{{field: {field_name!r}, ...}}] }}) stage"
+                ),
+                phase=error_codes.PHASE_SCHEMA_DERIVE,
+                plan_path=plan_path,
+                offending_field=field_name,
+            )
 
 
 # ---------------------------------------------------------------------------

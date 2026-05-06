@@ -27,6 +27,15 @@ def _qualify(kind: str) -> str:
 # Derived query references a column that is NOT in source.output_schema.
 DERIVED_QUERY_UNKNOWN_FIELD: str = _qualify("derived-query/unknown-field")
 
+# Derived query's ``slice`` references a column alias that is CREATED by
+# this same derived query's ``columns`` (a SELECT-stage alias), not a
+# column from the source plan's output schema. This cannot be rendered
+# as a WHERE clause against the inner subquery.
+#
+# The user must add a second ``.query({ slice: [...] })`` stage to
+# filter on the newly-created alias.
+DERIVED_QUERY_SAME_STAGE_ALIAS: str = _qualify("derived-query/same-stage-alias")
+
 # Base-model plan has a column spec whose expression references the
 # empty alias slot (``... AS``) or similar malformed shape. Usually
 # caught at ``extract_column_alias`` but this code exists so derivation
@@ -139,6 +148,7 @@ VALID_PHASES: frozenset = frozenset(
 ALL_CODES: frozenset = frozenset(
     {
         DERIVED_QUERY_UNKNOWN_FIELD,
+        DERIVED_QUERY_SAME_STAGE_ALIAS,
         COLUMN_SPEC_MALFORMED,
         DUPLICATE_OUTPUT_COLUMN,
         UNION_COLUMN_COUNT_MISMATCH,

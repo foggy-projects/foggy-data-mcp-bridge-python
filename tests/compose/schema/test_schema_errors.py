@@ -12,6 +12,7 @@ from foggy.dataset_model.engine.compose.schema import (
 
 EXPECTED_CODES = {
     "compose-schema-error/derived-query/unknown-field",
+    "compose-schema-error/derived-query/same-stage-alias",
     "compose-schema-error/column-spec/malformed",
     "compose-schema-error/duplicate-output-column",
     "compose-schema-error/union/column-count-mismatch",
@@ -28,7 +29,7 @@ EXPECTED_CODES = {
     # G5 Phase 2 (F5) — append two F5 plan-qualified codes.
     "compose-schema-error/column/plan-type-invalid",
     "compose-schema-error/column/plan-not-visible",
-    # S7a — append two relation codes; ALL_CODES = 16.
+    # S7a — append two relation codes; ALL_CODES = 17.
     "compose-schema-error/relation/output-schema-unavailable",
     "compose-schema-error/relation/column-reference-unsupported",
 }
@@ -45,7 +46,7 @@ EXPECTED_PHASES = {
 class TestCatalogue:
     def test_all_codes_matches_expected(self):
         assert error_codes.ALL_CODES == frozenset(EXPECTED_CODES)
-        assert len(error_codes.ALL_CODES) == 16
+        assert len(error_codes.ALL_CODES) == 17
 
     def test_constants_expose_full_namespace(self):
         assert (
