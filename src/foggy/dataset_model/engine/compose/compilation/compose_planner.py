@@ -1156,11 +1156,13 @@ def _render_slice(
     inner_alias: str,
     dialect: str,
 ) -> Tuple[List[str], List[Any]]:
-    """Render each slice entry as ``<field> <op> ?`` with a bound param.
+    """Render each slice entry as a WHERE predicate.
 
     Accepts two shapes:
       - ``{"field": F, "op": OP, "value": V}``
       - ``{F: V}`` (single-key shortcut; op defaults to ``=``)
+      - ``{"field": F, "op": OP, "value": {"$field": R}}`` for
+        field-to-field predicates over the source output schema.
 
     M6 derived slice is intentionally simple — richer operators (IN,
     BETWEEN, IS NULL) flow through v1.3 engine at the base level. If a
@@ -1201,9 +1203,35 @@ def _render_slice(
             if _is_simple_output_ref(str(field_name))
             else str(field_name)
         )
-        fragments.append(f"{field_sql} {op} ?")
-        params.append(value)
+        value_sql, value_params = _render_slice_value(
+            value,
+            inner_alias=inner_alias,
+            dialect=dialect,
+        )
+        fragments.append(f"{field_sql} {op} {value_sql}")
+        params.extend(value_params)
     return fragments, params
+
+
+def _render_slice_value(
+    value: Any,
+    *,
+    inner_alias: str,
+    dialect: str,
+) -> Tuple[str, List[Any]]:
+    if isinstance(value, dict) and set(value.keys()) == {"$field"}:
+        ref = value.get("$field")
+        if not isinstance(ref, str) or not _is_simple_output_ref(ref):
+            raise ComposeCompileError(
+                code=error_codes.UNSUPPORTED_PLAN_SHAPE,
+                phase="plan-lower",
+                message=(
+                    "Derived slice value {'$field': ...} requires a simple "
+                    f"output field name, got {ref!r}"
+                ),
+            )
+        return _render_qualified_ref(inner_alias, ref, dialect), []
+    return "?", [value]
 
 
 def _render_order_entry(entry: Any, dialect: str) -> str:

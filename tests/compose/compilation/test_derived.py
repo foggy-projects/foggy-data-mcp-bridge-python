@@ -258,3 +258,44 @@ class TestDerivedEdgeCases:
 
         assert "decrease_amount" in composed.sql
         assert 100 in composed.params
+
+    def test_derived_slice_supports_field_to_field_value(self, svc, ctx):
+        left = from_(
+            model="FactSalesModel",
+            columns=[
+                "orderStatus$caption AS left_status",
+                "SUM(salesAmount) AS left_amount",
+            ],
+            group_by=["orderStatus$caption"],
+        )
+        right = from_(
+            model="FactSalesModel",
+            columns=[
+                "orderStatus$caption AS right_status",
+                "SUM(salesAmount) AS right_amount",
+            ],
+            group_by=["orderStatus$caption"],
+        )
+        joined = left.join(
+            right,
+            type="left",
+            on=[{"left": "left_status", "op": "=", "right": "right_status"}],
+        )
+        derived = joined.query(
+            columns=["left_status", "left_amount", "right_amount"],
+            slice=[
+                {
+                    "field": "left_amount",
+                    "op": "<",
+                    "value": {"$field": "right_amount"},
+                }
+            ],
+        )
+
+        composed = compile_plan_to_sql(
+            derived, ctx, semantic_service=svc, dialect="mysql8"
+        )
+
+        assert "left_amount < cte_" in composed.sql
+        assert ".right_amount" in composed.sql
+        assert not any(isinstance(param, dict) for param in composed.params)
