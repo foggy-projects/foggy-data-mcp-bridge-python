@@ -149,6 +149,45 @@ class TestFullStructuralDedup:
             f"left={left_half.strip()!r} right={right_half.strip()!r}"
         )
 
+    def test_same_model_different_base_shapes_do_not_share_governance_build(
+        self, svc, ctx
+    ):
+        """Per-base build caching must include the full request shape."""
+        left = from_(
+            model="FactSalesModel",
+            columns=[
+                "orderStatus$caption AS left_status",
+                "SUM(salesAmount) AS left_amount",
+            ],
+            slice=[{"field": "orderStatus", "op": "=", "value": "recent"}],
+            group_by=["orderStatus$caption"],
+        )
+        right = from_(
+            model="FactSalesModel",
+            columns=[
+                "orderStatus$caption AS right_status",
+                "SUM(salesAmount) AS right_amount",
+            ],
+            slice=[{"field": "orderStatus", "op": "=", "value": "prior"}],
+            group_by=["orderStatus$caption"],
+        )
+
+        composed = compile_plan_to_sql(
+            left.join(
+                right,
+                type="left",
+                on=[JoinOn(left="left_status", op="=", right="right_status")],
+            ),
+            ctx,
+            semantic_service=svc,
+            dialect="mysql8",
+        )
+
+        assert "left_amount" in composed.sql
+        assert "right_amount" in composed.sql
+        assert "recent" in composed.params
+        assert "prior" in composed.params
+
 
 # ===========================================================================
 # MAX_PLAN_DEPTH DOS guard

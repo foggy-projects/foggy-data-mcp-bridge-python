@@ -19,6 +19,7 @@ from foggy.dataset_model.engine.compose.compilation import error_codes
 from foggy.dataset_model.engine.compose.compilation.errors import (
     ComposeCompileError,
 )
+from foggy.dataset_model.engine.compose.compilation.plan_hash import plan_hash
 from foggy.dataset_model.engine.compose.plan.plan import BaseModelPlan
 from foggy.dataset_model.engine.compose.security.models import ModelBinding
 from foggy.dataset_model.order_by import normalize_order_by_dict
@@ -34,7 +35,7 @@ def compile_base_model(
     *,
     semantic_service: Any,
     alias: str,
-    governance_cache: Optional[Dict[Tuple[str, int], Any]] = None,
+    governance_cache: Optional[Dict[Tuple[str, int, Tuple[Any, ...]], Any]] = None,
 ) -> CteUnit:
     """Compile one ``BaseModelPlan`` against its ``ModelBinding``.
 
@@ -51,8 +52,8 @@ def compile_base_model(
         Alias for the resulting ``CteUnit`` (caller owns numbering).
     governance_cache:
         Optional dict from ``_CompileState`` that memoises the
-        ``QueryBuildResult`` across identical ``(model, binding)``
-        pairs within a single compile pass — skips
+        ``QueryBuildResult`` across identical base query shapes under
+        the same ``(model, binding)`` within a single compile pass — skips
         ``_apply_query_governance`` + ``validate_query_fields`` +
         ``_build_query`` re-execution for self-join / self-union cases.
 
@@ -71,11 +72,12 @@ def compile_base_model(
           rejects the request or raises during query build. Original
           exception preserved on ``__cause__``.
     """
-    # Cache key: model + binding identity. ``ModelBinding`` is a frozen
-    # dataclass with List fields (not hashable), so we key on id() —
-    # correct within a single compile pass because bindings are not
-    # mutated mid-compile.
-    cache_key = (plan.model, id(binding))
+    # Cache key: model + binding identity + full base query shape.
+    # ``ModelBinding`` is a frozen dataclass with List fields (not
+    # hashable), so we key on id(). The plan shape is required because
+    # the same model/binding can appear multiple times with different
+    # columns, slices, aliases, or groupings in one compose tree.
+    cache_key = (plan.model, id(binding), plan_hash(plan))
     build_result = governance_cache.get(cache_key) if governance_cache is not None else None
     if build_result is None:
         request = _build_request(plan, binding)
