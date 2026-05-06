@@ -41,3 +41,19 @@ def test_query_model_prompt_guides_date_bucket_boundaries() -> None:
     assert "salesDate$year" in prompt_text
     assert "salesDate$month" in prompt_text
     assert "dataset.describe_model_internal" in prompt_text
+
+
+def test_query_model_prompt_guides_date_difference_cutoff_filters() -> None:
+    loader = get_tool_config_loader()
+    tool = loader.get_tool("dataset.query_model")
+
+    assert tool is not None
+
+    prompt_text = tool.description
+
+    assert "Foggy 表达式 DSL" in prompt_text
+    assert "DATEDIFF(...)" in prompt_text
+    assert "older than N days" in prompt_text
+    assert "dateMaturity" in prompt_text
+    assert "2026-04-06" in prompt_text
+    assert "overdueDays" in prompt_text
