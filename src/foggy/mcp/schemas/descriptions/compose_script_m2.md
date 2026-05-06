@@ -48,7 +48,11 @@ const top = sales.query({
 return { plans: top };
 ```
 
-常用字段：`model`、`columns`、`slice`、`having`、`groupBy`、`orderBy`、`limit`、`start`、`distinct`、`calculatedFields`、`timeWindow`。字段语法与 `dataset.query_model` 一致。`model` 只接收查询模型名字符串；不得传已有 plan 或 join 结果。已有 plan 的二阶段处理使用 `previousPlan.query({...})`，内核形式是 `dsl({ source: previousPlan, ... })`。
+基础 `dsl({...})` 常用字段：`model`、`columns`、`slice`、`having`、`groupBy`、`orderBy`、`limit`、`start`、`distinct`、`calculatedFields`、`timeWindow`。字段语法与 `dataset.query_model` 一致。`model` 只接收查询模型名字符串；不得传已有 plan 或 join 结果。
+
+已有 plan 的二阶段处理使用 `previousPlan.query({...})`，内核形式是 `dsl({ source: previousPlan, ... })`。`plan.query({...})` 只接收 `columns`、`slice`、`groupBy`、`orderBy`、`limit`、`start`、`distinct`；不接收 `having`。对上一阶段输出做后置过滤时使用 `slice`。
+
+如果某个 `plan.query({...})` 同时新建聚合别名（如 `count(month) AS month_count`）并要过滤该别名，不要在同一个 `.query({...})` 的 `slice` / `having` 里引用它；先生成聚合 plan，再追加一层 `.query({ slice: [{ field: "month_count", ... }] })` 过滤。
 
 基础 `dsl({...})` 的 `slice` 是语义过滤：明细/维度字段下推为 WHERE，预定义或已选聚合 measure（如 `{"field": "arOverdueAmount", "op": ">", "value": 0}`）会由引擎提升为 HAVING。不要在同一个 `$or` / `$and` 逻辑组里混合明细字段和聚合 measure；需要对 Join/Union/上一阶段输出继续过滤时，使用聚合后的 plan `.query({ slice: [...] })`。
 
