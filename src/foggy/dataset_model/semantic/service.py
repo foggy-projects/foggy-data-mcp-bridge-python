@@ -1084,6 +1084,8 @@ class SemanticQueryService(SemanticServiceResolver):
         """
         from foggy.dataset_model.impl.model import DimensionJoinDef
 
+        model = self._with_unique_dimension_join_aliases(model, request)
+
         warnings: List[str] = []
         columns_info: List[Dict[str, Any]] = []
 
@@ -1490,6 +1492,147 @@ class SemanticQueryService(SemanticServiceResolver):
         return QueryBuildResult(
             sql=sql, params=params, warnings=warnings, columns=columns_info,
         )
+
+    def _with_unique_dimension_join_aliases(
+        self,
+        model: DbTableModelImpl,
+        request: SemanticQueryRequest,
+    ) -> DbTableModelImpl:
+        """Return a per-query model copy when dimension JOIN aliases collide.
+
+        DimensionJoinDef.get_alias() derives aliases from table names when
+        the TM does not declare one. Tables such as res_company and
+        res_currency both derive to "rc"; a single query can need both joins
+        through columns, slices, or system slices. Resolve those collisions at
+        build time so field resolution and JOIN emission use the same alias
+        map without mutating the registered model.
+        """
+        used = {
+            alias
+            for alias in model.model_alias_map.values()
+            if isinstance(alias, str) and alias
+        }
+        used.add(model.get_table_alias_for_model(model.name))
+
+        needed_join_names = self._dimension_join_names_needed_by_request(
+            model,
+            request,
+        )
+        assigned: Dict[str, str] = {}
+        changed = False
+        for join_def in model.dimension_joins:
+            if join_def.name not in needed_join_names:
+                continue
+            alias = join_def.get_alias()
+            if alias in used:
+                alias = self._unique_dimension_join_alias(join_def.name, used)
+                changed = True
+            used.add(alias)
+            assigned[join_def.name] = alias
+
+        if not changed:
+            return model
+
+        copied = model.model_copy(deep=True)
+        for join_def in copied.dimension_joins:
+            alias = assigned.get(join_def.name)
+            if alias:
+                join_def.alias = alias
+        return copied
+
+    def _unique_dimension_join_alias(self, join_name: str, used: set[str]) -> str:
+        sanitized = re.sub(r"[^0-9A-Za-z_]+", "_", join_name).strip("_")
+        if not sanitized:
+            sanitized = "dimension"
+        if sanitized[0].isdigit():
+            sanitized = f"d_{sanitized}"
+
+        base = f"j_{sanitized}"
+        alias = base
+        suffix = 2
+        while alias in used:
+            alias = f"{base}_{suffix}"
+            suffix += 1
+        return alias
+
+    def _dimension_join_names_needed_by_request(
+        self,
+        model: DbTableModelImpl,
+        request: SemanticQueryRequest,
+    ) -> set[str]:
+        join_defs = {join_def.name: join_def for join_def in model.dimension_joins}
+        needed: set[str] = set()
+
+        def add_field_ref(value: Any) -> None:
+            if not isinstance(value, str) or not value:
+                return
+            try:
+                value = parse_column_with_alias(value).base_expr
+            except Exception:
+                pass
+            if value in join_defs:
+                needed.add(value)
+            for match in re.finditer(r"\b([A-Za-z_][0-9A-Za-z_]*)\$", value):
+                dim_name = match.group(1)
+                if dim_name in join_defs:
+                    needed.add(dim_name)
+
+        def add_condition_refs(items: Optional[List[Any]]) -> None:
+            for item in items or []:
+                refs: set[str] = set()
+                self._collect_condition_field_refs(item, refs)
+                for ref in refs:
+                    add_field_ref(ref)
+
+        for column in request.columns or []:
+            add_field_ref(column)
+        for group_field in request.group_by or []:
+            add_field_ref(group_field)
+        for order_item in request.order_by or []:
+            if isinstance(order_item, dict):
+                add_field_ref(order_item.get("field") or order_item.get("column"))
+            else:
+                add_field_ref(order_item)
+        for calc_field in request.calculated_fields or []:
+            if isinstance(calc_field, dict):
+                add_field_ref(calc_field.get("expression"))
+                add_field_ref(calc_field.get("field"))
+                add_field_ref(calc_field.get("name"))
+            else:
+                add_field_ref(getattr(calc_field, "expression", None))
+                add_field_ref(getattr(calc_field, "field", None))
+                add_field_ref(getattr(calc_field, "name", None))
+
+        add_condition_refs(request.slice)
+        add_condition_refs(request.system_slice)
+        add_condition_refs(request.having)
+
+        if request.time_window:
+            tw = request.time_window
+            if isinstance(tw, dict):
+                for key in ("field", "dateField", "timeField", "orderByField"):
+                    add_field_ref(tw.get(key))
+                for key in ("targetMetrics", "partitionBy", "groupBy"):
+                    values = tw.get(key)
+                    if isinstance(values, list):
+                        for value in values:
+                            add_field_ref(value)
+            else:
+                for key in ("field", "date_field", "time_field", "order_by_field"):
+                    add_field_ref(getattr(tw, key, None))
+
+        plan = getattr(request, "domain_transport_plan", None)
+        for column in getattr(plan, "columns", []) or []:
+            add_field_ref(column)
+
+        pending = list(needed)
+        while pending:
+            join_def = join_defs.get(pending.pop())
+            if join_def and join_def.join_to and join_def.join_to not in needed:
+                needed.add(join_def.join_to)
+                pending.append(join_def.join_to)
+
+        return needed
 
     def _build_time_window_query(
         self,
