@@ -25,7 +25,29 @@ from ..compilation.compiler import compile_plan_to_sql
 from ..plan.plan import QueryPlan
 
 
-__all__ = ["execute_plan", "pick_route_model"]
+__all__ = ["ComposeExecutionRows", "execute_plan", "pick_route_model"]
+
+
+class ComposeExecutionRows(list):
+    """Rows returned by a compose query, carrying optional SQL evidence.
+
+    The class intentionally behaves like a plain list for script/runtime
+    callers. MCP output layers may inspect the ``foggy_*`` attributes to
+    expose execution evidence without changing the script-visible value.
+    """
+
+    def __init__(
+        self,
+        rows: List[Dict[str, Any]],
+        *,
+        sql: Optional[str] = None,
+        params: Optional[List[Any]] = None,
+        route_model: Optional[str] = None,
+    ):
+        super().__init__(rows)
+        self.foggy_sql = sql
+        self.foggy_params = list(params or [])
+        self.foggy_route_model = route_model
 
 
 def pick_route_model(plan: QueryPlan) -> Optional[str]:
@@ -88,9 +110,15 @@ def execute_plan(
     route_model = pick_route_model(plan)
 
     try:
-        return semantic_service.execute_sql(
+        rows = semantic_service.execute_sql(
             composed.sql,
             composed.params,
+            route_model=route_model,
+        )
+        return ComposeExecutionRows(
+            list(rows or []),
+            sql=composed.sql,
+            params=list(composed.params or []),
             route_model=route_model,
         )
     except Exception as exc:

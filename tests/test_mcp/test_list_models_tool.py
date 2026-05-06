@@ -6,10 +6,13 @@ the expected Markdown table format with model routing information.
 
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
+from foggy.dataset_model.semantic.service import SemanticQueryService
+from foggy.demo.models.ecommerce_models import create_fact_order_model, create_fact_sales_model
 from foggy.mcp.routers.mcp_rpc import (
     create_mcp_router,
     McpJsonRpcRequest,
 )
+from foggy.mcp_spi.semantic import DeniedColumn
 
 
 class MockDimension:
@@ -190,6 +193,13 @@ class TestListModelsToolClass:
 
         assert ListModelsTool.tool_category == ToolCategory.METADATA
 
+    def test_tool_has_no_public_parameters(self):
+        """ListModelsTool should remain a no-parameter discovery entry."""
+        from foggy.mcp.tools.metadata_tool import ListModelsTool
+
+        tool = ListModelsTool()
+        assert tool.get_parameters() == []
+
     @pytest.mark.asyncio
     async def test_execute_without_service_returns_error(self):
         """Execute without query_service should return error."""
@@ -215,3 +225,74 @@ class TestListModelsToolClass:
         assert result.data["count"] == 2
         assert "ModelA" in result.data["models"]
         assert "ModelB" in result.data["models"]
+        assert "items" in result.data
+
+
+class TestModelCatalogService:
+    """Service-level tests for the rich list_models catalog contract."""
+
+    @pytest.fixture
+    def catalog_service(self):
+        svc = SemanticQueryService()
+        svc.register_model(create_fact_sales_model())
+        svc.register_model(create_fact_order_model())
+        return svc
+
+    def test_catalog_empty_models(self):
+        svc = SemanticQueryService()
+        catalog = svc.get_model_catalog()
+        assert catalog == {
+            "models": [],
+            "count": 0,
+            "recommendedNext": "dataset.describe_model_internal",
+            "items": [],
+        }
+        assert "No data models available" in svc.render_model_catalog_markdown(catalog)
+
+    def test_catalog_json_shape_for_multiple_models(self, catalog_service):
+        catalog = catalog_service.get_model_catalog(field_limit=3)
+        assert catalog["count"] == 2
+        assert catalog["models"] == ["FactSalesModel", "FactOrderModel"]
+        assert len(catalog["items"]) == 2
+        first = catalog["items"][0]
+        assert set(first) >= {
+            "model",
+            "caption",
+            "description",
+            "physicalTables",
+            "recommendedNext",
+            "fieldPreview",
+            "fieldCount",
+        }
+        assert len(first["fieldPreview"]) <= 3
+
+    def test_catalog_field_preview_is_permission_filtered(self, catalog_service):
+        catalog = catalog_service.get_model_catalog(
+            model_names=["FactSalesModel"],
+            denied_columns=[DeniedColumn(table="fact_sales", column="sales_amount")],
+            field_limit=100,
+        )
+        item = catalog["items"][0]
+        assert "salesAmount" not in item["fieldPreview"]
+        assert item["fieldCount"] == len(item["fieldPreview"])
+
+    def test_catalog_markdown_rendered_from_json_shape(self, catalog_service):
+        catalog = catalog_service.get_model_catalog(
+            model_names=["FactSalesModel"],
+            llm_hints={
+                "FactSalesModel": {
+                    "recommendedFor": ["sales analysis"],
+                    "notRecommendedFor": ["AR aging"],
+                    "keyFields": ["salesAmount"],
+                    "businessDateNote": "Use salesDate$id.",
+                }
+            },
+            field_limit=2,
+        )
+        markdown = catalog_service.render_model_catalog_markdown(catalog)
+        assert "FactSalesModel" in markdown
+        assert "RecommendedFor: sales analysis" in markdown
+        assert "NotRecommendedFor: AR aging" in markdown
+        assert "KeyFields: salesAmount" in markdown
+        assert "Business date: Use salesDate$id." in markdown
+        assert catalog["items"][0]["fieldPreview"][0] in markdown

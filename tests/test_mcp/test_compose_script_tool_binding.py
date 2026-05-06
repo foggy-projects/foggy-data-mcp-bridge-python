@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 from typing import Any
+from types import SimpleNamespace
 
 from foggy.mcp.tools.compose_script_tool import ComposeScriptTool
 from foggy.mcp_spi.context import ToolExecutionContext
@@ -39,7 +40,7 @@ class _DummyExecutor:
         self.sql = None
     async def execute(self, sql, params, **kwargs):
         self.sql = sql
-        return [{"id": 1}]
+        return SimpleNamespace(rows=[{"id": 1}], error=None)
 
 @pytest.fixture
 def tool():
@@ -82,7 +83,28 @@ async def test_odoo_remote_compose_normal_path(tool):
     sql = tool.executor.sql
     assert sql is not None
     assert "42" in sql or "customer_key" in sql.lower() or "customer" in sql.lower()
+    assert result.data["sql"] == sql
+    assert result.data["executionEvidence"]["hasSql"] is True
+    assert result.data["executionEvidence"]["rowCount"] == 1
+    assert result.data["executionEvidence"]["queries"][0]["routeModel"] == "FactSalesModel"
+    assert "semantic" not in result.data
     assert "__foggyAuthorityBinding" not in arguments
+
+@pytest.mark.asyncio
+async def test_compose_script_literal_result_does_not_require_sql(tool):
+    arguments = {"script": "return { ok: true };"}
+    ctx = _tool_ctx(remote_compose="0")
+
+    result = await tool.execute(arguments, ctx)
+
+    assert result.success is True
+    assert result.data["value"] == {"ok": True}
+    assert result.data["executionEvidence"] == {
+        "source": "dataset.compose_script",
+        "entryType": "orchestration_or_literal",
+        "hasSql": False,
+    }
+    assert "semantic" not in result.data
 
 @pytest.mark.asyncio
 async def test_odoo_remote_compose_denied_columns_blocks_query(tool):

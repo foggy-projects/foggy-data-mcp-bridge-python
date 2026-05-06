@@ -232,7 +232,7 @@ async def test_happy_path_returns_value():
 
 
 @pytest.mark.asyncio
-async def test_empty_plans_return_semantic_marker():
+async def test_empty_plans_do_not_add_semantic_marker():
     tool = ComposeScriptTool(
         authority_resolver_factory=_resolver_factory,
         semantic_service=_StubSemanticService(),
@@ -240,10 +240,11 @@ async def test_empty_plans_return_semantic_marker():
     result = await tool.execute({"script": "return { plans: [] }"}, _tool_ctx())
     assert result.success is True
     assert result.data["value"]["plans"] == []
-    assert result.data["value"]["semantic"] == {
-        "emptyResult": True,
-        "emptyReason": "NO_MATCHING_ROWS_AFTER_COMPOSE",
-        "shouldAnswerDirectly": True,
+    assert "semantic" not in result.data["value"]
+    assert result.data["executionEvidence"] == {
+        "source": "dataset.compose_script",
+        "entryType": "orchestration_or_literal",
+        "hasSql": False,
     }
 
 

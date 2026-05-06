@@ -12,6 +12,7 @@
 |------|------|------|
 | `P0-BUG-F3` `_resolve_effective_visible` 跨模型 denied 泄漏修复 | `in-progress` | **Python 侧已修（2430 passed / M2-M6 完成）** · **Java 侧同步修复待启动（M7）** · Odoo Pro 撤 xfail + vendored sync 待联调 |
 | `P1-BUG-timeRole` `timeRole/recommendedUse` 元数据未进入 LLM 可见契约 | `ready-for-review` | Python source 已渲染 `timeRole/recommendedUse` 并识别 property-level timeWindow；Odoo vendored sync 已完成，benchmark 待跑 |
+| `P1-list_models-discovery-catalog` 模型发现目录契约 | `ready-for-review` | Java/Python 对齐 `models/count/items` shape；MCP public schema 保持无参；host 参数化调用走 `POST /semantic/v3/list-models`；不新增 `describe_models`；Python `tests/test_mcp` 205 passed |
 
 ## 功能清单
 
@@ -20,6 +21,7 @@
 | `P0-BUG-F3-resolve-effective-visible-cross-model-denied-leak-需求.md` | 正式修复需求、根因分析、方案、测试计划、验收 |
 | `P0-BUG-F3-progress.md` | 执行进度骨架（M0-M12） |
 | `P1-BUG-time-role-recommended-use-contract-gap-需求.md` | 记录 `timeRole/recommendedUse` 未渲染、property-level timeWindow 未识别的契约缺口 |
+| `P1-list-models-rich-catalog-contract-需求.md` | 记录 `dataset.list_models` 作为唯一首轮模型发现入口的无参 public schema、`POST /semantic/v3/list-models` host API、轻量 `items` 输出和 Java/Python parity 口径 |
 
 ## 关联文档
 

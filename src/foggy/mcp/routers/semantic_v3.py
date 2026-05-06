@@ -10,7 +10,7 @@ All request/response field names use camelCase, matching Java exactly.
 """
 
 from typing import Any, Dict, Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Body, HTTPException, Query
 from fastapi.responses import JSONResponse
 import json
 import logging
@@ -22,6 +22,7 @@ from foggy.mcp_spi import (
     SemanticQueryResponse,
     MetadataFormat,
 )
+from foggy.mcp_spi.semantic import DeniedColumn
 from foggy.dataset_model.semantic import SemanticQueryService
 
 
@@ -41,6 +42,60 @@ def _json_serializable(obj):
     if isinstance(obj, (list, tuple)):
         return [_json_serializable(i) for i in obj]
     return obj
+
+
+def _normalize_denied_columns(raw_denied_columns: Any) -> Optional[list[dict[str, Any]]]:
+    if not isinstance(raw_denied_columns, list):
+        return None
+
+    normalized: list[dict[str, Any]] = []
+    for item in raw_denied_columns:
+        if not isinstance(item, dict):
+            continue
+
+        table = item.get("table")
+        schema = item.get("schema")
+        column = item.get("column")
+        if table and column:
+            entry = {"table": table, "column": column}
+            if schema:
+                entry["schema"] = schema
+            normalized.append(entry)
+            continue
+
+        columns = item.get("columns")
+        if not table or not isinstance(columns, list):
+            continue
+        for col in columns:
+            if not col:
+                continue
+            entry = {"table": table, "column": col}
+            if schema:
+                entry["schema"] = schema
+            normalized.append(entry)
+
+    return normalized
+
+
+def _build_denied_column_models(raw_denied_columns: Any) -> Optional[list[DeniedColumn]]:
+    normalized = _normalize_denied_columns(raw_denied_columns)
+    if normalized is None:
+        return None
+    return [DeniedColumn(**item) for item in normalized]
+
+
+def _optional_string_list(value: Any) -> Optional[list[str]]:
+    if not isinstance(value, list):
+        return None
+    result = [str(item) for item in value if item is not None and str(item)]
+    return result or None
+
+
+def _optional_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def create_semantic_v3_router(
@@ -171,5 +226,70 @@ def create_semantic_v3_router(
 
         models = svc.get_all_model_names()
         return {"models": models, "count": len(models)}
+
+    @router.post("/list-models")
+    async def list_models_catalog(
+        request: Dict[str, Any] = Body(default_factory=dict),
+    ):
+        """Build a host-facing model catalog.
+
+        This is the programmatic counterpart of the no-parameter MCP
+        dataset.list_models tool. Hosts may pass fixed arguments such as
+        format=markdown, fieldLimit, modelNames, visibleFields and
+        deniedColumns without exposing those knobs to the LLM tool schema.
+        """
+        svc = _get_service()
+        if not svc:
+            raise HTTPException(status_code=503, detail="Service not initialized")
+
+        model_names = _optional_string_list(
+            request.get("modelNames") or request.get("models")
+        )
+        visible_fields = _optional_string_list(request.get("visibleFields"))
+        denied_columns = _build_denied_column_models(request.get("deniedColumns"))
+        llm_hints = request.get("llmHints") if isinstance(request.get("llmHints"), dict) else None
+        field_limit = max(0, _optional_int(request.get("fieldLimit"), 10))
+        fmt = str(request.get("format", MetadataFormat.JSON.value)).lower()
+
+        if hasattr(svc, "get_model_catalog"):
+            catalog = svc.get_model_catalog(
+                model_names=model_names,
+                visible_fields=visible_fields,
+                denied_columns=denied_columns,
+                llm_hints=llm_hints,
+                field_limit=field_limit,
+            )
+        else:
+            models = svc.get_all_model_names()
+            if model_names:
+                allowed = set(model_names)
+                models = [model for model in models if model in allowed]
+            catalog = {
+                "models": models,
+                "count": len(models),
+                "recommendedNext": "dataset.describe_model_internal",
+                "items": [
+                    {
+                        "model": model,
+                        "caption": model,
+                        "recommendedNext": "dataset.describe_model_internal",
+                        "fieldPreview": [],
+                        "fieldCount": 0,
+                    }
+                    for model in models
+                ],
+            }
+
+        markdown = (
+            svc.render_model_catalog_markdown(catalog)
+            if hasattr(svc, "render_model_catalog_markdown")
+            else json.dumps(catalog, ensure_ascii=False, indent=2)
+        )
+        content = markdown if fmt == MetadataFormat.MARKDOWN else json.dumps(catalog, ensure_ascii=False)
+        return JSONResponse(content={
+            "format": fmt,
+            "content": content,
+            "data": catalog,
+        })
 
     return router

@@ -129,14 +129,7 @@ class ListModelsTool(BaseMcpTool):
 
     def get_parameters(self) -> List[Dict[str, Any]]:
         """Get parameter definitions."""
-        return [
-            {
-                "name": "filter",
-                "type": "string",
-                "required": False,
-                "description": "Filter pattern for model names (supports wildcards)"
-            },
-        ]
+        return []
 
     async def execute(
         self,
@@ -150,16 +143,21 @@ class ListModelsTool(BaseMcpTool):
         try:
             models = await self._query_service.get_available_models()
 
-            # Apply filter if provided
-            filter_pattern = arguments.get("filter")
-            if filter_pattern:
-                import fnmatch
-                models = [m for m in models if fnmatch.fnmatch(m, filter_pattern)]
-
             return self._success_result(
                 data={
                     "models": models,
                     "count": len(models),
+                    "recommendedNext": "dataset.describe_model_internal",
+                    "items": [
+                        {
+                            "model": model,
+                            "caption": model,
+                            "recommendedNext": "dataset.describe_model_internal",
+                            "fieldPreview": [],
+                            "fieldCount": 0,
+                        }
+                        for model in models
+                    ],
                 },
                 message=f"Found {len(models)} available models"
             )

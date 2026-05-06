@@ -269,32 +269,90 @@ class ComposeScriptTool(BaseMcpTool):
             )
 
         # 4. Success — shape the result for MCP callers.
-        data: Dict[str, Any] = {"value": self._with_empty_result_semantic(result.value)}
+        value = result.value
+        data: Dict[str, Any] = {"value": value}
         if result.sql is not None:
             data["sql"] = result.sql
             data["params"] = list(result.params or [])
+        self._attach_execution_evidence(data, value)
         if result.warnings:
             data["warnings"] = list(result.warnings)
         return self._success_result(
             data=data, message="Compose script executed",
         )
 
-    @staticmethod
-    def _with_empty_result_semantic(value: Any) -> Any:
-        if not isinstance(value, dict):
-            return value
-        plans = value.get("plans")
-        if not isinstance(plans, list) or plans:
-            return value
-        if "semantic" in value:
-            return value
-        enriched = dict(value)
-        enriched["semantic"] = {
-            "emptyResult": True,
-            "emptyReason": "NO_MATCHING_ROWS_AFTER_COMPOSE",
-            "shouldAnswerDirectly": True,
+    @classmethod
+    def _attach_execution_evidence(cls, data: Dict[str, Any], value: Any) -> None:
+        queries = cls._collect_query_evidence(value)
+        top_level_sql = data.get("sql")
+        if top_level_sql:
+            queries.insert(0, {
+                "sql": top_level_sql,
+                "params": list(data.get("params") or []),
+                "rowCount": cls._row_count(value),
+            })
+
+        evidence: Dict[str, Any] = {
+            "source": "dataset.compose_script",
+            "entryType": "query" if queries else "orchestration_or_literal",
+            "hasSql": bool(queries),
         }
-        return enriched
+        if queries:
+            evidence["queries"] = queries
+            row_counts = [
+                item["rowCount"] for item in queries
+                if isinstance(item.get("rowCount"), int)
+            ]
+            if row_counts:
+                evidence["rowCount"] = sum(row_counts)
+            if len(queries) == 1 and "sql" not in data:
+                data["sql"] = queries[0]["sql"]
+                data["params"] = list(queries[0].get("params") or [])
+
+        data["executionEvidence"] = evidence
+
+    @classmethod
+    def _collect_query_evidence(cls, value: Any) -> List[Dict[str, Any]]:
+        queries: List[Dict[str, Any]] = []
+
+        def visit(node: Any, name: Optional[str] = None) -> None:
+            attrs = getattr(node, "__dict__", {})
+            sql = attrs.get("foggy_sql") if isinstance(attrs, dict) else None
+            if sql:
+                item: Dict[str, Any] = {
+                    "sql": sql,
+                    "params": list(attrs.get("foggy_params") or []),
+                    "rowCount": cls._row_count(node),
+                }
+                route_model = attrs.get("foggy_route_model")
+                if route_model:
+                    item["routeModel"] = route_model
+                if name:
+                    item["name"] = name
+                queries.append(item)
+                return
+
+            if isinstance(node, dict):
+                for key, item in node.items():
+                    if key in {"metadata", "semantic", "executionEvidence"}:
+                        continue
+                    visit(item, str(key))
+            elif isinstance(node, list):
+                for item in node:
+                    attrs = getattr(item, "__dict__", {})
+                    if (
+                        isinstance(item, (dict, list))
+                        and isinstance(attrs, dict)
+                        and attrs.get("foggy_sql")
+                    ):
+                        visit(item, name)
+
+        visit(value)
+        return queries
+
+    @staticmethod
+    def _row_count(value: Any) -> Optional[int]:
+        return len(value) if isinstance(value, list) else None
 
     # ------------------------------------------------------------------
     # Error payload helper

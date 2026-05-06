@@ -4247,6 +4247,132 @@ class SemanticQueryService(SemanticServiceResolver):
                 target_models, per_model_visible=per_model_visible,
             )
 
+    def get_model_catalog(
+        self,
+        model_names: Optional[List[str]] = None,
+        visible_fields: Optional[List[str]] = None,
+        denied_columns: Optional[List[DeniedColumn]] = None,
+        llm_hints: Optional[Dict[str, Dict[str, Any]]] = None,
+        field_limit: int = 10,
+    ) -> Dict[str, Any]:
+        """Build a bridge-ready model catalog from structured metadata.
+
+        The canonical contract is JSON. Markdown, when needed, is rendered from
+        this DTO by :meth:`render_model_catalog_markdown` so callers do not need
+        to parse prompt text to apply permissions.
+        """
+        target_names = model_names or list(self._models.keys())
+        metadata = self.get_metadata_v3(
+            model_names=target_names,
+            visible_fields=visible_fields,
+            denied_columns=denied_columns,
+        )
+        fields = metadata.get("fields") or {}
+        model_info = metadata.get("models") or {}
+        hints_by_model = llm_hints or {}
+        preview_limit = max(0, int(field_limit or 0))
+
+        items: List[Dict[str, Any]] = []
+        visible_models: List[str] = []
+        for model_name in target_names:
+            model = self._models.get(model_name)
+            if not model or model_name not in model_info:
+                continue
+
+            visible_models.append(model_name)
+            info = model_info.get(model_name) or {}
+            field_names = [
+                field_name
+                for field_name, field_info in fields.items()
+                if model_name in ((field_info or {}).get("models") or {})
+            ]
+
+            physical_tables: List[str] = []
+            mapping = self.get_physical_column_mapping(model_name)
+            if mapping:
+                physical_tables = [
+                    entry["table"]
+                    for entry in mapping.get_physical_tables()
+                    if entry.get("table")
+                ]
+            elif getattr(model, "source_table", None):
+                physical_tables = [model.source_table]
+
+            item: Dict[str, Any] = {
+                "model": model_name,
+                "caption": info.get("name") or model.alias or model_name,
+                "description": (
+                    getattr(model, "ai_description", None)
+                    or model.description
+                    or info.get("purpose")
+                    or ""
+                ),
+                "recommendedNext": "dataset.describe_model_internal",
+                "fieldPreview": field_names[:preview_limit],
+                "fieldCount": len(field_names),
+            }
+            namespace = self._infer_catalog_namespace(model_name)
+            if namespace:
+                item["namespace"] = namespace
+            if physical_tables:
+                item["physicalTables"] = physical_tables
+            model_hints = hints_by_model.get(model_name)
+            if model_hints:
+                item["llmHints"] = dict(model_hints)
+            items.append(item)
+
+        return {
+            "models": visible_models,
+            "count": len(visible_models),
+            "recommendedNext": "dataset.describe_model_internal",
+            "items": items,
+        }
+
+    @staticmethod
+    def _infer_catalog_namespace(model_name: str) -> Optional[str]:
+        if ":" in model_name:
+            return model_name.split(":", 1)[0]
+        if model_name.startswith("Odoo"):
+            return "odoo"
+        return None
+
+    @staticmethod
+    def render_model_catalog_markdown(catalog: Dict[str, Any]) -> str:
+        """Render model catalog markdown from the canonical JSON DTO."""
+        lines = ["# Model Catalog", ""]
+        items = catalog.get("items") or []
+        if not items:
+            lines.append("No data models available.")
+            return "\n".join(lines)
+
+        for item in items:
+            model = item.get("model", "")
+            caption = item.get("caption") or model
+            description = item.get("description") or ""
+            lines.append(f"- **{caption}** (`{model}`)")
+            if description:
+                lines.append(f"  - Description: {description}")
+            physical_tables = item.get("physicalTables") or []
+            if physical_tables:
+                lines.append(f"  - Physical tables: {', '.join(physical_tables)}")
+            hints = item.get("llmHints") or {}
+            for key in ("recommendedFor", "notRecommendedFor", "keyFields"):
+                values = hints.get(key) or []
+                if values:
+                    label = key[0].upper() + key[1:]
+                    lines.append(f"  - {label}: {', '.join(values)}")
+            if hints.get("businessDateNote"):
+                lines.append(f"  - Business date: {hints['businessDateNote']}")
+            field_preview = item.get("fieldPreview") or []
+            if field_preview:
+                suffix = ""
+                field_count = item.get("fieldCount") or len(field_preview)
+                if field_count > len(field_preview):
+                    suffix = f" ... ({field_count} fields total)"
+                lines.append(f"  - Field preview: {', '.join(field_preview)}{suffix}")
+            lines.append(f"  - Recommended next: {item.get('recommendedNext') or catalog.get('recommendedNext')}")
+        return "\n".join(lines)
+
     # ---------- Phase 2: formula permission helpers ----------
 
     @staticmethod

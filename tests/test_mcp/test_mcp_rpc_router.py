@@ -15,6 +15,7 @@ class _FakeSemanticService:
     def __init__(self):
         self.metadata_v3_calls = []
         self.metadata_markdown_calls = []
+        self.model_catalog_calls = []
 
     def get_metadata_v3(self, model_names=None, visible_fields=None, denied_columns=None):
         self.metadata_v3_calls.append({
@@ -47,6 +48,34 @@ class _FakeSemanticService:
             "denied_columns": denied_columns,
         })
         return "# OdooResCompanyQueryModel - Company Directory"
+
+    def get_model_catalog(self, model_names=None, visible_fields=None, denied_columns=None, llm_hints=None, field_limit=10):
+        self.model_catalog_calls.append({
+            "model_names": model_names,
+            "visible_fields": visible_fields,
+            "denied_columns": denied_columns,
+            "llm_hints": llm_hints,
+            "field_limit": field_limit,
+        })
+        return {
+            "models": ["OdooResCompanyQueryModel"],
+            "count": 1,
+            "recommendedNext": "dataset.describe_model_internal",
+            "items": [{
+                "model": "OdooResCompanyQueryModel",
+                "caption": "Company Directory",
+                "description": "Companies",
+                "namespace": "odoo",
+                "physicalTables": ["res_company"],
+                "recommendedNext": "dataset.describe_model_internal",
+                "fieldPreview": ["id"],
+                "fieldCount": 1,
+            }],
+        }
+
+    @staticmethod
+    def render_model_catalog_markdown(catalog):
+        return "\n".join(item["model"] for item in catalog.get("items", []))
 
 
 class _FakeAccessor:
@@ -142,6 +171,70 @@ def test_llm_visible_schema_does_not_expose_format():
     assert "format" not in metadata_properties, (
         "AI Chat 契约：get_metadata 不得向 LLM 暴露 format 参数"
     )
+
+
+def test_list_models_returns_markdown_without_public_arguments():
+    service = _FakeSemanticService()
+    client = _make_client(semantic_service=service)
+
+    response = client.post(
+        "/mcp/analyst/rpc",
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "dataset.list_models",
+                "arguments": {},
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    text = response.json()["result"]["content"][0]["text"]
+    assert text == "OdooResCompanyQueryModel"
+    assert service.model_catalog_calls == [{
+        "model_names": None,
+        "visible_fields": None,
+        "denied_columns": None,
+        "llm_hints": None,
+        "field_limit": 10,
+    }]
+
+
+def test_list_models_mcp_ignores_arguments_programmatic_callers_use_controller():
+    service = _FakeSemanticService()
+    client = _make_client(semantic_service=service)
+
+    response = client.post(
+        "/mcp/analyst/rpc",
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "dataset.list_models",
+                "arguments": {
+                    "format": "markdown",
+                    "visibleFields": ["id"],
+                    "deniedColumns": [{"table": "res_company", "column": "secret_code"}],
+                    "fieldLimit": 20,
+                    "modelNames": ["OdooResCompanyQueryModel"],
+                },
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    text = response.json()["result"]["content"][0]["text"]
+    assert text == "OdooResCompanyQueryModel"
+    assert service.model_catalog_calls == [{
+        "model_names": None,
+        "visible_fields": None,
+        "denied_columns": None,
+        "llm_hints": None,
+        "field_limit": 10,
+    }]
 
 
 def test_describe_model_internal_honors_explicit_json_from_internal_callers():
