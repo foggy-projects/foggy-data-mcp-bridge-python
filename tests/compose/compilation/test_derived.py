@@ -18,6 +18,8 @@ import pytest
 from foggy.dataset_model.engine.compose.compilation import (
     compile_plan_to_sql,
 )
+from foggy.dataset_model.engine.compose.schema import error_codes as schema_error_codes
+from foggy.dataset_model.engine.compose.schema.errors import ComposeSchemaError
 from foggy.dataset_model.engine.compose.plan import from_
 
 
@@ -216,3 +218,43 @@ class TestDerivedEdgeCases:
             derived, ctx, semantic_service=svc, dialect="mysql8"
         )
         assert "shipped" in composed.params
+
+    def test_compile_rejects_same_stage_calculated_alias_slice(
+        self, svc, ctx, base_sales
+    ):
+        """Compilation must not let same-stage SELECT aliases reach SQL."""
+        derived = base_sales.query(
+            columns=[
+                "orderStatus$caption",
+                "salesAmount - 10 as decrease_amount",
+            ],
+            slice=[{"field": "decrease_amount", "op": ">", "value": 100}],
+        )
+
+        with pytest.raises(ComposeSchemaError) as exc_info:
+            compile_plan_to_sql(derived, ctx, semantic_service=svc, dialect="mysql8")
+
+        err = exc_info.value
+        assert err.code == schema_error_codes.DERIVED_QUERY_SAME_STAGE_ALIAS
+        assert err.offending_field == "decrease_amount"
+
+    def test_two_stage_calculated_alias_slice_still_compiles(
+        self, svc, ctx, base_sales
+    ):
+        first_stage = base_sales.query(
+            columns=[
+                "orderStatus$caption",
+                "salesAmount - 10 as decrease_amount",
+            ],
+        )
+        second_stage = first_stage.query(
+            columns=["orderStatus$caption", "decrease_amount"],
+            slice=[{"field": "decrease_amount", "op": ">", "value": 100}],
+        )
+
+        composed = compile_plan_to_sql(
+            second_stage, ctx, semantic_service=svc, dialect="mysql8"
+        )
+
+        assert "decrease_amount" in composed.sql
+        assert 100 in composed.params

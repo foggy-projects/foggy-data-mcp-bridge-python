@@ -484,6 +484,7 @@ def _compile_derived(plan: DerivedQueryPlan, state: _CompileState) -> CteUnit:
     assert isinstance(inner, CteUnit)
     source_columns = _source_output_columns_for_derived(plan.source, inner)
     _validate_derived_output_refs_for_union_source(plan, source_columns)
+    _validate_derived_slice_not_same_stage_alias(plan, source_columns)
 
     outer_sql, outer_params = _render_outer_select(
         plan=plan,
@@ -801,6 +802,58 @@ def _validate_derived_output_refs_for_union_source(
                     plan_path="DerivedQueryPlan",
                     offending_field=ident,
                 )
+
+
+def _validate_derived_slice_not_same_stage_alias(
+    plan: DerivedQueryPlan,
+    source_columns: List[str],
+) -> None:
+    """Reject filtering a SELECT alias in the same derived stage.
+
+    ``DerivedQueryPlan.slice_`` renders as a WHERE clause against the
+    source subquery. Aliases created by this plan's own ``columns`` only
+    exist in the outer SELECT list, so filtering them in the same stage
+    produces invalid SQL such as ``cte_0.decrease_amount does not exist``.
+    """
+    if not plan.slice_:
+        return
+
+    source_names = set(source_columns)
+    current_stage_aliases = {
+        parts.output_name
+        for parts in (extract_column_alias(column) for column in plan.columns)
+        if parts.has_alias and parts.output_name not in source_names
+    }
+    if not current_stage_aliases:
+        return
+
+    for entry in plan.slice_:
+        field_name = _slice_field_name(entry)
+        if field_name in current_stage_aliases:
+            raise ComposeSchemaError(
+                code=schema_error_codes.DERIVED_QUERY_SAME_STAGE_ALIAS,
+                message=(
+                    f"field {field_name!r} is created by this derived "
+                    f"query's SELECT and cannot be filtered in the same "
+                    f"stage; add another .query({{ slice: "
+                    f"[{{field: {field_name!r}, ...}}] }}) stage"
+                ),
+                phase=schema_error_codes.PHASE_SCHEMA_DERIVE,
+                plan_path="DerivedQueryPlan",
+                offending_field=field_name,
+            )
+
+
+def _slice_field_name(entry: object) -> Optional[str]:
+    if not isinstance(entry, dict):
+        return None
+    field_name = entry.get("field")
+    if isinstance(field_name, str):
+        return field_name
+    if field_name is not None or len(entry) != 1:
+        return None
+    key = next(iter(entry.keys()))
+    return key if isinstance(key, str) else None
 
 
 def _iter_unquoted_identifiers(expression: str) -> List[str]:
