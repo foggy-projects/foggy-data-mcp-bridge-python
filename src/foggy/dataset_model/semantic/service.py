@@ -96,6 +96,12 @@ from foggy.dataset_model.semantic.inline_expression import (
 logger = logging.getLogger(__name__)
 
 
+class QueryBuildResultCteStage(BaseModel):
+    alias: str
+    sql: str
+    params: List[Any] = []
+    select_columns: Optional[List[str]] = None
+
 class QueryBuildResult(BaseModel):
     """Result of building a query.
 
@@ -106,6 +112,7 @@ class QueryBuildResult(BaseModel):
     params: List[Any] = []
     warnings: List[str] = []
     columns: List[Dict[str, Any]] = []
+    cte_stages: List[QueryBuildResultCteStage] = []
 
 
 class SemanticQueryService(SemanticServiceResolver):
@@ -1305,26 +1312,42 @@ class SemanticQueryService(SemanticServiceResolver):
                 )
 
         # 2.5 Process calculatedFields (aggregated calculations + window functions)
-        #
-        # v1.5 Phase 2:
-        # 1. Topologically sort so calc B referring to calc A compiles
-        #    after A.  Cycles raise CircularCalcFieldError (subclass of
-        #    ValueError).
-        # 2. Initialize ``compiled_calcs`` per-query so subsequent
-        #    slice/orderBy/having/etc. can reference calc fields by name.
         calc_field_defs = self._request_calculated_field_defs(request)
         if calc_field_defs:
             calc_field_defs = sort_calc_fields_by_dependencies(calc_field_defs)
         aggregate_calc_fields = self._aggregate_calc_field_names(calc_field_defs)
+        
+        needs_cte_wrapping = False
+        inner_cfs = []
+        outer_cfs = []
+        outer_names = set()
+        
+        if calc_field_defs:
+            for cf in calc_field_defs:
+                if cf.is_window_function():
+                    needs_cte_wrapping = True
+                    break
+            
+            if needs_cte_wrapping:
+                from foggy.dataset_model.semantic.formula_field_extractor import extract_formula_fields
+                for cf in calc_field_defs:
+                    alias = cf.alias or cf.name
+                    expr = str(cf.expression or "")
+                    deps = extract_formula_fields(expr)
+                    depends_on_outer = any(on in expr for on in outer_names)
+                    if cf.is_window_function() or depends_on_outer:
+                        outer_cfs.append(cf)
+                        outer_names.add(alias)
+                    else:
+                        inner_cfs.append(cf)
+            else:
+                inner_cfs = list(calc_field_defs)
+
         compiled_calcs: Dict[str, str] = {}
-        # v1.4 M4 Step 4.1: parallel dict holding FormulaCompiler bind_params
-        # per calc name.  When a calc is referenced by slice / having /
-        # groupBy / orderBy, its params travel together with the inlined SQL
-        # fragment so the final positional `?` binding stays consistent.
         compiled_calcs_params: Dict[str, List[Any]] = {}
         calculate_context = self._build_calculate_query_context(request)
 
-        for cf in calc_field_defs:
+        for cf in inner_cfs:
             select_sql, select_params = self._build_calculated_field_sql(
                 cf, model, ensure_join, compiled_calcs, compiled_calcs_params,
                 calculate_context=calculate_context,
@@ -1426,39 +1449,6 @@ class SemanticQueryService(SemanticServiceResolver):
                 # emitted SQL left-to-right.
                 builder.having(f"{col_sql} {op} ?", params=calc_params + [val])
 
-        # 6. ORDER BY
-        selected_order_aliases = self._build_selected_order_aliases(columns_info)
-        for order_item in request.order_by:
-            column, direction = self._normalize_order_by_item(order_item)
-            if column:
-                selected_alias = selected_order_aliases.get(column)
-                if selected_alias:
-                    builder.order_by(selected_alias, direction)
-                    continue
-                resolved = model.resolve_field(column)
-                if resolved:
-                    ensure_runtime_joins(column)
-                    if resolved["is_measure"]:
-                        builder.order_by(self._qi(resolved['alias_label']), direction)
-                    else:
-                        builder.order_by(resolved["sql_expr"], direction)
-                elif compiled_calcs and column in compiled_calcs:
-                    # v1.5 Phase 2: calc field not in SELECT, but ORDER BY
-                    # references it by name — inline the expression.
-                    builder.order_by(
-                        f"({compiled_calcs[column]})",
-                        direction,
-                        params=compiled_calcs_params.get(column) or None,
-                    )
-                else:
-                    builder.order_by(column, direction)
-
-        # 7. LIMIT/OFFSET
-        limit = min(request.limit or self._default_limit, self._max_limit)
-        builder.limit(limit)
-        if request.start:
-            builder.offset(request.start)
-
         plan = getattr(request, "domain_transport_plan", None)
         if plan and plan.tuples:
             from foggy.dataset_model.semantic.pivot.domain_transport import PIVOT_DOMAIN_TRANSPORT_REFUSED
@@ -1488,7 +1478,110 @@ class SemanticQueryService(SemanticServiceResolver):
                 if or_conditions:
                     builder.where("(" + " OR ".join(or_conditions) + ")", params=or_params)
 
-        sql, params = builder.build()
+        # 6. ORDER BY and LIMIT (Deferred to outer query if CTE wrapping)
+        if not needs_cte_wrapping:
+            selected_order_aliases = self._build_selected_order_aliases(columns_info)
+            for order_item in request.order_by:
+                column, direction = self._normalize_order_by_item(order_item)
+                if column:
+                    selected_alias = selected_order_aliases.get(column)
+                    if selected_alias:
+                        builder.order_by(selected_alias, direction)
+                        continue
+                    resolved = model.resolve_field(column)
+                    if resolved:
+                        ensure_runtime_joins(column)
+                        if resolved["is_measure"]:
+                            builder.order_by(self._qi(resolved['alias_label']), direction)
+                        else:
+                            builder.order_by(resolved["sql_expr"], direction)
+                    elif compiled_calcs and column in compiled_calcs:
+                        # v1.5 Phase 2: calc field not in SELECT, but ORDER BY
+                        # references it by name — inline the expression.
+                        builder.order_by(
+                            f"({compiled_calcs[column]})",
+                            direction,
+                            params=compiled_calcs_params.get(column) or None,
+                        )
+                    else:
+                        builder.order_by(column, direction)
+
+            # 7. LIMIT/OFFSET
+            limit = min(request.limit or self._default_limit, self._max_limit)
+            builder.limit(limit)
+            if request.start:
+                builder.offset(request.start)
+
+        inner_sql, inner_params = builder.build()
+        cte_stages = []
+
+        if needs_cte_wrapping:
+            inner_alias = "__STAGE_1__"
+            inner_stage = QueryBuildResultCteStage(
+                alias=inner_alias,
+                sql=inner_sql,
+                params=inner_params,
+                select_columns=[c["name"] for c in columns_info]
+            )
+            cte_stages.append(inner_stage)
+
+            outer_builder = SqlQueryBuilder(dialect=self._dialect)
+            outer_builder.from_table(inner_alias)
+            outer_columns_info = list(columns_info)
+            
+            for col in columns_info:
+                outer_builder.select(self._qi(col["name"]))
+                
+            outer_compiled_calcs = {c["name"]: self._qi(c["name"]) for c in columns_info}
+            outer_compiled_calcs_params = {}
+            for cf in outer_cfs:
+                select_sql, select_params = self._build_calculated_field_sql(
+                    cf, model, lambda x: None, outer_compiled_calcs, outer_compiled_calcs_params,
+                    calculate_context=calculate_context,
+                )
+                alias = cf.alias or cf.name
+                outer_builder.select(
+                    f"{select_sql} AS {self._qi(alias)}",
+                    params=select_params or None,
+                )
+                outer_columns_info.append({
+                    "name": alias, "fieldName": cf.name,
+                    "expression": cf.expression, "aggregation": cf.agg,
+                    "window": cf.is_window_function(),
+                })
+                outer_compiled_calcs[alias] = self._qi(alias)
+                
+            columns_info = outer_columns_info
+            
+            selected_order_aliases = self._build_selected_order_aliases(columns_info)
+            for order_item in request.order_by:
+                column, direction = self._normalize_order_by_item(order_item)
+                if column:
+                    selected_alias = selected_order_aliases.get(column)
+                    if selected_alias:
+                        outer_builder.order_by(selected_alias, direction)
+                    else:
+                        outer_builder.order_by(self._qi(column), direction)
+                        
+            limit = min(request.limit or self._default_limit, self._max_limit)
+            outer_builder.limit(limit)
+            if request.start:
+                outer_builder.offset(request.start)
+                
+            sql, params = outer_builder.build()
+            
+            outer_stage = QueryBuildResultCteStage(
+                alias="outer_stage",
+                sql=sql,
+                params=params,
+                select_columns=[c["name"] for c in columns_info]
+            )
+            cte_stages.append(outer_stage)
+            
+            sql = f"WITH {inner_alias} AS (\n{self._indent_sql(inner_sql)}\n)\n{sql}"
+            params = inner_params + params
+        else:
+            sql, params = inner_sql, inner_params
 
         # 8. P3-C: Inject domain transport relation if requested and threshold exceeded
         if plan and plan.tuples and len(plan.tuples) > plan.threshold:
@@ -1516,7 +1609,7 @@ class SemanticQueryService(SemanticServiceResolver):
             )
 
         return QueryBuildResult(
-            sql=sql, params=params, warnings=warnings, columns=columns_info,
+            sql=sql, params=params, warnings=warnings, columns=columns_info, cte_stages=cte_stages
         )
 
     def _with_unique_dimension_join_aliases(
@@ -2710,10 +2803,12 @@ class SemanticQueryService(SemanticServiceResolver):
             raise ValueError(
                 "UNSUPPORTED_HAVING_CONDITION: having leaf requires field/op/value."
             )
+        # Check for $field value reference
+        is_field_ref = False
+        ref_field = None
         if isinstance(value, dict) and "$field" in value:
-            raise ValueError(
-                "UNSUPPORTED_HAVING_CONDITION: field-to-field HAVING is not supported."
-            )
+            is_field_ref = True
+            ref_field = value["$field"]
 
         aggregate_calc_fields = aggregate_calc_fields or set()
         selected_aggregate_sql = selected_aggregate_sql or {}
@@ -2746,14 +2841,41 @@ class SemanticQueryService(SemanticServiceResolver):
                 col_expr = f"{agg}({resolved['sql_expr']})"
 
         condition_params: List[Any] = []
-        condition = self._formula_registry.build_condition(
-            col_expr, operator, value, condition_params,
-        )
-        if not condition:
-            raise ValueError(
-                "UNSUPPORTED_HAVING_CONDITION: unsupported HAVING operator "
-                f"{operator!r}."
+        if is_field_ref:
+            if compiled_calcs and ref_field in compiled_calcs:
+                if ref_field not in aggregate_calc_fields:
+                    raise ValueError(f"HAVING_REQUIRES_AGGREGATE_FIELD: having field {ref_field!r} is not an aggregate calculated field.")
+                ref_expr = f"({compiled_calcs[ref_field]})"
+                condition_params.extend(list((compiled_calcs_params or {}).get(ref_field, [])))
+            elif ref_field in selected_aggregate_sql:
+                ref_expr = selected_aggregate_sql[ref_field]
+            else:
+                ref_resolved = model.resolve_field(ref_field)
+                if not ref_resolved or not ref_resolved.get("is_measure") or not ref_resolved.get("aggregation"):
+                    raise ValueError(f"HAVING_REQUIRES_AGGREGATE_FIELD: having field {ref_field!r} must be a predefined aggregate measure or aggregate alias.")
+                if ref_resolved["join_def"] and ensure_join:
+                    ensure_join(ref_resolved["join_def"])
+                agg_ref = str(ref_resolved["aggregation"]).upper()
+                if agg_ref == "COUNT_DISTINCT":
+                    ref_expr = f"COUNT(DISTINCT {ref_resolved['sql_expr']})"
+                else:
+                    ref_expr = f"{agg_ref}({ref_resolved['sql_expr']})"
+            
+            op_map = {"=": "=", "eq": "=", "!=": "<>", "<>": "<>", "neq": "<>",
+                       ">": ">", "gt": ">", ">=": ">=", "gte": ">=",
+                       "<": "<", "lt": "<", "<=": "<=", "lte": "<=",
+                       "===": "=", "force_eq": "="}
+            sql_op = op_map.get(operator, operator)
+            condition = f"{col_expr} {sql_op} {ref_expr}"
+        else:
+            condition = self._formula_registry.build_condition(
+                col_expr, operator, value, condition_params,
             )
+            if not condition:
+                raise ValueError(
+                    "UNSUPPORTED_HAVING_CONDITION: unsupported HAVING operator "
+                    f"{operator!r}."
+                )
         return condition, params + condition_params
 
     def _build_selected_order_aliases(
@@ -2976,12 +3098,10 @@ class SemanticQueryService(SemanticServiceResolver):
         A window ``ORDER BY`` field must resolve to a real QM column (measure,
         dimension, or dimension property) or to a *previously compiled* scalar
         calc field available in ``compiled_calcs``.  Inline aggregate aliases
-        from a sibling ``calculatedFields`` entry (e.g. ``totalSales`` emitted
-        as ``SUM(sales_amount) AS totalSales`` in the same SELECT) and raw SQL
-        expressions (e.g. ``sum(salesAmount)``) cannot be used — they either
-        don't exist yet in the OVER clause scope or produce identifiers that
-        PostgreSQL cannot resolve, causing ``column "totalsales" does not exist``
-        with a physical-column HINT that leaks internal schema details.
+        from a sibling ``calculatedFields`` entry and raw SQL expressions cannot
+        be used — they produce identifiers that PostgreSQL cannot resolve,
+        causing ``column \"totalsales\" does not exist`` with a physical-column
+        HINT that leaks internal schema details.
 
         Raises
         ------
@@ -3013,8 +3133,6 @@ class SemanticQueryService(SemanticServiceResolver):
             return
 
         # Guard 4: unresolvable — reject with a clear diagnostic.
-        # Do NOT include model.resolve_field SQL expressions in the message
-        # (that would leak physical column names).
         raise ValueError(
             f"COMPOSE_WINDOW_ORDER_BY_UNRESOLVABLE: "
             f"calculatedFields[{calc_field_name!r}].windowOrderBy field "
@@ -3025,7 +3143,6 @@ class SemanticQueryService(SemanticServiceResolver):
             f"stage. Use a base model measure field or wrap the aggregation in a "
             f"preceding query stage before applying the window function."
         )
-
 
     @staticmethod
     def _normalize_string_literal_for_sql(raw: str) -> str:

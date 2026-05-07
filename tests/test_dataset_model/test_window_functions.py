@@ -302,7 +302,12 @@ class TestCalculatedFieldIntegration:
         assert "RANK()" in sql
         # The group by clause should reference the dimension column, not RANK
         group_idx = sql_upper.index("GROUP BY")
-        group_clause = sql_upper[group_idx:]
+        # With CTE wrapping, GROUP BY is inside the CTE ending with )
+        if ")" in sql_upper[group_idx:]:
+            group_end = sql_upper.index(")", group_idx)
+            group_clause = sql_upper[group_idx:group_end]
+        else:
+            group_clause = sql_upper[group_idx:]
         assert "RANK" not in group_clause
 
     def test_mixed_columns_and_calculated(self, service: SemanticQueryService):

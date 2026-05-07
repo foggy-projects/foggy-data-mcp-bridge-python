@@ -12,7 +12,7 @@ templating; only ``BaseModelPlan`` instances reach the v1.3 engine.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from foggy.dataset_model.engine.compose import CteUnit
 from foggy.dataset_model.engine.compose.compilation import error_codes
@@ -36,6 +36,8 @@ def compile_base_model(
     semantic_service: Any,
     alias: str,
     governance_cache: Optional[Dict[Tuple[str, int, Tuple[Any, ...]], Any]] = None,
+    prerequisite_ctes: Optional[List[CteUnit]] = None,
+    next_alias_fn: Optional[Callable[[], str]] = None,
 ) -> CteUnit:
     """Compile one ``BaseModelPlan`` against its ``ModelBinding``.
 
@@ -124,6 +126,33 @@ def compile_base_model(
 
         if governance_cache is not None:
             governance_cache[cache_key] = build_result
+
+    cte_stages = getattr(build_result, "cte_stages", [])
+    if cte_stages and prerequisite_ctes is not None and next_alias_fn is not None:
+        alias_map = {}
+        for stage in cte_stages[:-1]:
+            unique_alias = next_alias_fn()
+            alias_map[stage.alias] = unique_alias
+            prerequisite_ctes.append(
+                CteUnit(
+                    alias=unique_alias,
+                    sql=stage.sql,
+                    params=stage.params,
+                    select_columns=stage.select_columns,
+                )
+            )
+            
+        final_stage = cte_stages[-1]
+        sql = final_stage.sql
+        for old_alias, new_alias in alias_map.items():
+            sql = sql.replace(old_alias, new_alias)
+            
+        return CteUnit(
+            alias=alias,
+            sql=sql,
+            params=final_stage.params,
+            select_columns=final_stage.select_columns,
+        )
 
     return CteUnit(
         alias=alias,

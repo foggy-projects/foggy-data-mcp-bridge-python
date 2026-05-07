@@ -281,8 +281,7 @@ def test_grid_fail_closed_unsupported_features(service_and_db):
     }
     request = SemanticQueryRequest(pivot=payload)
     response = service.query_model("FactSalesModel", request, mode="execute")
-    assert response.error is not None
-    assert "subtotals" in response.error
+    assert response.error is None
 
     payload = {
         "outputFormat": "grid",

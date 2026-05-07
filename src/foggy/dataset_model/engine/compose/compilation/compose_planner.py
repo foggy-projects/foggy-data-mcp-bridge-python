@@ -223,6 +223,8 @@ class _CompileState:
     # compiler checks that all leaf models in a union / join share the
     # same datasource. ``None`` means "skip check" (backward-compatible).
     datasource_ids: Optional[Dict[str, Optional[str]]] = None
+    # Prerequisite CTEs for two-stage calculated field rendering.
+    prerequisite_ctes: List[CteUnit] = field(default_factory=list)
 
     def next_alias(self) -> str:
         alias = f"cte_{self.alias_counter}"
@@ -278,14 +280,51 @@ def compile_to_composed_sql(
     if state.g10_enabled:
         _run_plan_aware_permission_check(plan, bindings)
     result = _compile_any(plan, state)
+    
+    if state.prerequisite_ctes and not dialect_supports_cte(dialect):
+        raise ComposeCompileError(
+            code=error_codes.RELATION_CTE_HOIST_UNSUPPORTED,
+            phase="plan-lower",
+            message=(
+                f"Dialect {dialect!r} does not support native CTEs, but the query requires "
+                f"multi-stage CTE hoisting for window functions or calculations."
+            ),
+        )
+        
     if isinstance(result, ComposedSql):
-        return result
+        return _prepend_prerequisite_ctes(result, state.prerequisite_ctes)
+    
     # Top-level CteUnit (base / derived) — wrap for dialect-consistent output.
+    all_units = list(state.prerequisite_ctes)
+    all_units.append(result)
     return CteComposer.compose(
-        units=[result],
+        units=all_units,
         join_specs=[],
         use_cte=dialect_supports_cte(dialect),
     )
+
+
+def _prepend_prerequisite_ctes(composed: ComposedSql, prereqs: List[CteUnit]) -> ComposedSql:
+    """Prepend hoisted prerequisite CTEs to an already-composed SQL."""
+    if not prereqs:
+        return composed
+        
+    cte_parts = []
+    all_params = []
+    for unit in prereqs:
+        cte_parts.append(f"{unit.alias} AS (\n{unit.sql}\n)")
+        all_params.extend(unit.params)
+        
+    with_block = "WITH " + ",\n".join(cte_parts)
+    
+    sql = composed.sql
+    if sql.upper().startswith("WITH "):
+        sql = sql[4:].lstrip()
+        final_sql = f"{with_block},\n{sql}"
+    else:
+        final_sql = f"{with_block}\n{sql}"
+        
+    return ComposedSql(sql=final_sql, params=all_params + composed.params)
 
 
 # ---------------------------------------------------------------------------
@@ -390,6 +429,8 @@ def _compile_base(plan: BaseModelPlan, state: _CompileState) -> CteUnit:
         semantic_service=state.semantic_service,
         alias=alias,
         governance_cache=state.governance_cache,
+        prerequisite_ctes=state.prerequisite_ctes,
+        next_alias_fn=state.next_alias,
     )
     return _stabilize_base_output_names(unit, plan=plan, dialect=state.dialect)
 
