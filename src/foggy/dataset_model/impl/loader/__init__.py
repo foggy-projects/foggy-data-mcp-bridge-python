@@ -37,6 +37,11 @@ from foggy.dataset_model.proxy import ColumnRef, DimensionProxy, JoinBuilder, Ta
 logger = logging.getLogger(__name__)
 
 
+def _extra_metadata(definition: Dict[str, Any], consumed_keys: set) -> Dict[str, Any]:
+    """Return definition keys that should survive as Pydantic extras."""
+    return {k: v for k, v in definition.items() if k not in consumed_keys}
+
+
 class _TmRefProxy(dict):
     """Proxy dict returned by loadTableModel() stub.
 
@@ -463,6 +468,19 @@ class JdbcTableModelLoader(TableModelLoader):
             # Use original column name for SQL generation (e.g., 'date_order'),
             # but register under the camelCase prop_name (e.g., 'dateOrder') as dict key.
             source_column = prop_def.get("column", prop_name)
+            prop_extra = _extra_metadata(
+                prop_def,
+                {
+                    "column",
+                    "name",
+                    "caption",
+                    "alias",
+                    "description",
+                    "type",
+                    "nullable",
+                    "primaryKey",
+                },
+            )
 
             column = DbColumnDef(
                 name=source_column,  # SQL column name (snake_case)
@@ -471,6 +489,7 @@ class JdbcTableModelLoader(TableModelLoader):
                 nullable=prop_def.get("nullable", True),
                 primary_key=prop_def.get("primaryKey", False),
                 comment=prop_def.get("description"),
+                **prop_extra,
             )
             model.columns[prop_name] = column
 
