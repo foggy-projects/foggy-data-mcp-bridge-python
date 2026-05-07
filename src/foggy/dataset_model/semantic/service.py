@@ -1512,6 +1512,70 @@ class SemanticQueryService(SemanticServiceResolver):
             if request.start:
                 builder.offset(request.start)
 
+        hidden_dependency_names: List[str] = []
+        hidden_dependency_seen = set()
+        if needs_cte_wrapping:
+            selected_column_names = {
+                value
+                for c in columns_info
+                for value in (c.get("name"), c.get("fieldName"))
+                if value
+            }
+            inner_cf_names = {c.name for c in inner_cfs}
+            for cf in outer_cfs:
+                deps = []
+                if cf.partition_by:
+                    deps.extend(cf.partition_by)
+                if cf.window_order_by:
+                    deps.extend([w.get("field") for w in cf.window_order_by if w.get("field")])
+
+                for dep in deps:
+                    if dep in selected_column_names:
+                        continue
+                    if dep in outer_names or dep in inner_cf_names:
+                        continue
+
+                    dep_is_compiled = bool(compiled_calcs and dep in compiled_calcs)
+                    dep_resolved = model.resolve_field(dep)
+                    dep_dim = model.get_dimension(dep)
+                    dep_measure = model.get_measure(dep)
+                    if (
+                        not dep_is_compiled
+                        and dep_resolved is None
+                        and dep_dim is None
+                        and dep_measure is None
+                    ):
+                        raise ValueError(
+                            f"WINDOW_DEPENDENCY_UNRESOLVABLE: window dependency '{dep}' "
+                            f"cannot be resolved as a QM measure, dimension, dimension property, "
+                            f"or prior calc-field name."
+                        )
+
+                    if has_aggregation:
+                        dep_is_measure = bool(
+                            dep_measure is not None
+                            or (dep_resolved is not None and dep_resolved.get("is_measure"))
+                        )
+                        if not dep_is_measure and (not request.group_by or dep not in request.group_by):
+                            raise ValueError(
+                                f"WINDOW_DEPENDENCY_GROUPING_ERROR: window dependency '{dep}' "
+                                f"must be added to groupBy in an aggregate query."
+                            )
+                    if dep not in hidden_dependency_seen:
+                        hidden_dependency_seen.add(dep)
+                        hidden_dependency_names.append(dep)
+
+            for dep in hidden_dependency_names:
+                dep_sql = self._resolve_single_field(dep, model, ensure_join, compiled_calcs)
+                dep_resolved = model.resolve_field(dep)
+                if has_aggregation and dep_resolved and dep_resolved.get("is_measure") and dep_resolved.get("aggregation"):
+                    agg = dep_resolved["aggregation"]
+                    if agg == "COUNT_DISTINCT":
+                        dep_sql = f"COUNT(DISTINCT {dep_sql})"
+                    else:
+                        dep_sql = f"{agg}({dep_sql})"
+                builder.select(f"{dep_sql} AS {self._qi(dep)}")
+
         inner_sql, inner_params = builder.build()
         cte_stages = []
 
@@ -1521,7 +1585,7 @@ class SemanticQueryService(SemanticServiceResolver):
                 alias=inner_alias,
                 sql=inner_sql,
                 params=inner_params,
-                select_columns=[c["name"] for c in columns_info]
+                select_columns=[c["name"] for c in columns_info] + hidden_dependency_names
             )
             cte_stages.append(inner_stage)
 
@@ -1532,7 +1596,18 @@ class SemanticQueryService(SemanticServiceResolver):
             for col in columns_info:
                 outer_builder.select(self._qi(col["name"]))
                 
-            outer_compiled_calcs = {c["name"]: self._qi(c["name"]) for c in columns_info}
+            outer_compiled_calcs = {}
+            for col in columns_info:
+                col_alias = col["name"]
+                col_ref = self._qi(col_alias)
+                outer_compiled_calcs[col_alias] = col_ref
+                field_name = col.get("fieldName")
+                if field_name:
+                    outer_compiled_calcs[field_name] = col_ref
+                    outer_compiled_calcs[parse_column_with_alias(field_name).base_expr] = col_ref
+            for dep in hidden_dependency_names:
+                outer_compiled_calcs[dep] = self._qi(dep)
+
             outer_compiled_calcs_params = {}
             for cf in outer_cfs:
                 select_sql, select_params = self._build_calculated_field_sql(

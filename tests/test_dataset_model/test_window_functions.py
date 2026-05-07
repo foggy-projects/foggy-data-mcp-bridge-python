@@ -357,10 +357,11 @@ class TestCalculatedFieldIntegration:
             }],
         )
         sql = _build_sql(service, "FactSalesModel", request)
-        # salesAmount should be resolved to t.sales_amount in ORDER BY within OVER
+        # CTE wrapping resolves hidden window dependencies through the outer alias.
         over_idx = sql.upper().index("OVER")
         over_clause = sql[over_idx:]
-        assert "sales_amount" in over_clause.lower()
+        assert '"salesAmount"' in over_clause
+        assert "sales_amount" not in over_clause.lower()
 
 
 # ==================== Payload Passthrough Tests ====================
