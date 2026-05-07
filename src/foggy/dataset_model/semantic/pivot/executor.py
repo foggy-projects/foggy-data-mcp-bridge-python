@@ -70,15 +70,27 @@ def validate_and_translate_pivot(request: SemanticQueryRequest) -> Tuple[Semanti
 
     # Validate metrics
     native_metrics = []
+    parent_share_metrics: list = []
+    native_metric_set: set = set()
     for metric_item in pivot.metrics:
         if isinstance(metric_item, str):
             native_metrics.append(metric_item)
+            native_metric_set.add(metric_item)
         else:
-            if metric_item.type != "native":
+            if metric_item.type == "parentShare":
+                parent_share_metrics.append(metric_item)
+                # Ensure the 'of' base metric is included in SQL even if
+                # not explicitly listed as a standalone metric.
+                if metric_item.of not in native_metric_set:
+                    native_metrics.append(metric_item.of)
+                    native_metric_set.add(metric_item.of)
+            elif metric_item.type == "native":
+                if metric_item.name != metric_item.of:
+                    raise NotImplementedError(f"{PIVOT_FEATURE_NOT_IMPLEMENTED_IN_PYTHON}metric aliasing (name != of)")
+                native_metrics.append(metric_item.of)
+                native_metric_set.add(metric_item.of)
+            else:
                 raise NotImplementedError(f"{PIVOT_FEATURE_NOT_IMPLEMENTED_IN_PYTHON}metric type '{metric_item.type}'")
-            if metric_item.name != metric_item.of:
-                raise NotImplementedError(f"{PIVOT_FEATURE_NOT_IMPLEMENTED_IN_PYTHON}metric aliasing (name != of)")
-            native_metrics.append(metric_item.of)
 
     # Calculate group_by
     group_by = [_extract_field_name(r) for r in pivot.rows] + [_extract_field_name(c) for c in pivot.columns]
@@ -94,4 +106,4 @@ def validate_and_translate_pivot(request: SemanticQueryRequest) -> Tuple[Semanti
     # We do NOT touch slice, system_slice, field_access, denied_columns, start, limit etc.
     # They are preserved.
 
-    return translated_request, want_grand_total
+    return translated_request, want_grand_total, parent_share_metrics

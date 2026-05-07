@@ -841,6 +841,7 @@ class SemanticQueryService(SemanticServiceResolver):
 
         # --- v1.4 Pivot: Validate and Translate Pivot Request ---
         is_pivot = False
+        _pivot_parent_share_metrics = []
         pivot_request = getattr(request, "pivot", None)
         if pivot_request:
             is_pivot = True
@@ -852,7 +853,7 @@ class SemanticQueryService(SemanticServiceResolver):
                 
             from foggy.dataset_model.semantic.pivot.executor import validate_and_translate_pivot
             try:
-                request, _pivot_want_grand_total = validate_and_translate_pivot(request)
+                request, _pivot_want_grand_total, _pivot_parent_share_metrics = validate_and_translate_pivot(request)
             except NotImplementedError as e:
                 return SemanticQueryResponse.from_error(str(e))
 
@@ -967,6 +968,27 @@ class SemanticQueryService(SemanticServiceResolver):
                 grand_rows = _build_grand_totals(response.items, row_keys, col_keys, metric_keys)
                 response.items = response.items + grand_rows
 
+            # --- Phase 2.8: parentShare post-processing ---
+            if _pivot_parent_share_metrics:
+                from foggy.dataset_model.semantic.pivot.parent_share import apply as _apply_parent_share
+                _ps_row_fields = [
+                    _f if isinstance(_f, str) else _f.field
+                    for _f in (pivot_request.rows or [])
+                ]
+                _ps_col_fields = [
+                    _f if isinstance(_f, str) else _f.field
+                    for _f in (pivot_request.columns or [])
+                ]
+                try:
+                    response.items = _apply_parent_share(
+                        response.items, pivot_request,
+                        _ps_row_fields, _ps_col_fields, key_map,
+                    )
+                except (ValueError, IndexError) as e:
+                    return SemanticQueryResponse.from_error(
+                        f"parentShare calculation failed: {e}"
+                    )
+
             if getattr(pivot_request, "output_format", "flat") == "grid":
                 shaper = GridShaper(response.items, pivot_request, key_map)
                 response.items = [shaper.shape()]
@@ -1070,7 +1092,7 @@ class SemanticQueryService(SemanticServiceResolver):
         if pivot_request:
             is_pivot = True
             from foggy.dataset_model.semantic.pivot.executor import validate_and_translate_pivot
-            request, _ = validate_and_translate_pivot(request)
+            request, _, _ps_metrics = validate_and_translate_pivot(request)
 
         if self._auto_case_insensitive_field_resolve:
             ci_result = self._resolve_request_fields_case_insensitive(
