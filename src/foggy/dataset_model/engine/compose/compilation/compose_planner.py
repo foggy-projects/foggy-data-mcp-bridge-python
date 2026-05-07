@@ -295,10 +295,26 @@ def compile_to_composed_sql(
         return _prepend_prerequisite_ctes(result, state.prerequisite_ctes)
     
     # Top-level CteUnit (base / derived) — wrap for dialect-consistent output.
-    all_units = list(state.prerequisite_ctes)
-    all_units.append(result)
+    # When prerequisite CTEs are present (from CTE-wrapped window CFs),
+    # the root unit is the LAST in the chain (the outer window stage),
+    # not the first (which is the inner aggregate stage). We must FROM
+    # the root unit, matching Java's wrapSingleUnit behaviour.
+    if state.prerequisite_ctes:
+        all_params: list = []
+        cte_parts: list = []
+        for prereq in state.prerequisite_ctes:
+            cte_parts.append(f"{prereq.alias} AS ({prereq.sql})")
+            all_params.extend(prereq.params)
+        cte_parts.append(f"{result.alias} AS ({result.sql})")
+        all_params.extend(result.params)
+        with_clause = "WITH " + ",\n".join(cte_parts)
+        # FROM the root unit (the outer window stage), NOT the prerequisite
+        from_clause = f"FROM {result.alias}"
+        sql = f"{with_clause}\nSELECT *\n{from_clause}"
+        return ComposedSql(sql=sql, params=all_params)
+
     return CteComposer.compose(
-        units=all_units,
+        units=[result],
         join_specs=[],
         use_cte=dialect_supports_cte(dialect),
     )
