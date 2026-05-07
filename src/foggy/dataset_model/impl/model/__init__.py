@@ -26,6 +26,14 @@ class DimensionPropertyDef(BaseModel):
     caption: Optional[str] = Field(default=None, description="Display name")
     description: Optional[str] = Field(default=None, description="Description")
     data_type: str = Field(default="STRING", description="Data type: STRING, INTEGER, MONEY, etc.")
+    formula_def_raw: Optional[Any] = Field(
+        default=None, exclude=True,
+        description="Raw formulaDef dict with builder callable for deferred SQL resolution",
+    )
+    dialect_formula_def_raw: Optional[Any] = Field(
+        default=None, exclude=True,
+        description="Raw dialectFormulaDef dict with builder callables for deferred SQL resolution",
+    )
 
     model_config = {"extra": "allow"}
 
@@ -52,7 +60,7 @@ class DimensionJoinDef(BaseModel):
     }
     """
     name: str = Field(..., description="Dimension name (e.g., 'product')")
-    table_name: str = Field(..., description="Dimension table (e.g., 'dim_product')")
+    table_name: Optional[str] = Field(default=None, description="Dimension table (e.g., 'dim_product')")
     foreign_key: str = Field(..., description="FK column on fact table")
     primary_key: str = Field(..., description="PK column on dimension table")
     caption_column: Optional[str] = Field(default=None, description="Display column (e.g., 'product_name')")
@@ -73,6 +81,8 @@ class DimensionJoinDef(BaseModel):
         """Get SQL table alias (e.g., 'dp' for dim_product)."""
         if self.alias:
             return self.alias
+        if not self.table_name:
+            return "t"
         # Generate from table name: dim_product → dp, dim_date → dd
         parts = self.table_name.split("_")
         if len(parts) >= 2:
@@ -261,32 +271,106 @@ class DbModelMeasureImpl(BaseModel):
         return self.aggregation != AggregationType.NONE
 
 
-def _resolve_caption_sql(join_def: "DimensionJoinDef", table_alias: str) -> str:
-    """Resolve caption SQL expression for a dimension join.
-
-    Priority:
-    1. dialectFormulaDef[*].builder — dialect-specific formula (e.g., JSONB extraction)
-    2. formulaDef.builder — universal formula (e.g., COALESCE wrapper)
-    3. caption_column — simple column reference
-    4. primary_key — ultimate fallback
-    """
-    cdr = getattr(join_def, "caption_def_raw", None)
-    if cdr and isinstance(cdr, dict):
-        # 1. Dialect-specific formula
-        dialect_formulas = cdr.get("dialectFormulaDef")
-        if dialect_formulas and isinstance(dialect_formulas, dict):
-            for entry in dialect_formulas.values():
+def _resolve_formula_sql(
+    formula_def: Optional[Any],
+    dialect_formula_def: Optional[Any],
+    table_alias: str,
+    dialect_name: Optional[str] = None,
+) -> Optional[str]:
+    """Resolve formula SQL using the same priority as the Java loader."""
+    if dialect_formula_def and isinstance(dialect_formula_def, dict):
+        if dialect_name:
+            candidates = _dialect_formula_candidates(dialect_name)
+            by_lower_key = {
+                str(key).lower(): value
+                for key, value in dialect_formula_def.items()
+            }
+            for candidate in candidates:
+                entry = by_lower_key.get(candidate)
+                if isinstance(entry, dict) and callable(entry.get("builder")):
+                    return entry["builder"](table_alias)
+        else:
+            for entry in dialect_formula_def.values():
                 if isinstance(entry, dict) and callable(entry.get("builder")):
                     return entry["builder"](table_alias)
 
-        # 2. Universal formula
-        formula_def = cdr.get("formulaDef")
-        if formula_def and isinstance(formula_def, dict) and callable(formula_def.get("builder")):
-            return formula_def["builder"](table_alias)
+    if formula_def and isinstance(formula_def, dict) and callable(formula_def.get("builder")):
+        return formula_def["builder"](table_alias)
 
-    # 3. Fallback to simple column
-    cap_col = join_def.caption_column or join_def.primary_key
+    if dialect_formula_def and isinstance(dialect_formula_def, dict):
+        for entry in dialect_formula_def.values():
+            if isinstance(entry, dict) and callable(entry.get("builder")):
+                return entry["builder"](table_alias)
+
+    return None
+
+
+def _dialect_formula_candidates(dialect_name: str) -> List[str]:
+    raw = (dialect_name or "").strip().lower()
+    candidates = [raw] if raw else []
+    compact = raw.replace("_", "").replace("-", "").replace(".", "")
+    if compact.startswith("mysql"):
+        candidates.append("mysql")
+    if compact.startswith("postgres") or compact.startswith("postgresql"):
+        candidates.extend(["postgresql", "postgres"])
+    if compact.startswith("sqlite"):
+        candidates.append("sqlite")
+    if compact.startswith("sqlserver") or compact.startswith("mssql"):
+        candidates.extend(["sqlserver", "mssql"])
+    result = []
+    for candidate in candidates:
+        if candidate and candidate not in result:
+            result.append(candidate)
+    return result
+
+
+def _resolve_caption_sql(
+    join_def: "DimensionJoinDef",
+    table_alias: str,
+    dialect_name: Optional[str] = None,
+) -> str:
+    """Resolve caption SQL expression for a dimension join."""
+    cdr = getattr(join_def, "caption_def_raw", None)
+    if cdr and isinstance(cdr, dict):
+        sql = _resolve_formula_sql(
+            cdr.get("formulaDef"),
+            cdr.get("dialectFormulaDef"),
+            table_alias,
+            dialect_name,
+        )
+        if sql:
+            return sql
+
+    cap_col = join_def.caption_column or join_def.primary_key or join_def.foreign_key
     return f"{table_alias}.{cap_col}"
+
+
+def _resolve_dimension_property_sql(
+    prop: DimensionPropertyDef,
+    table_alias: str,
+    dialect_name: Optional[str] = None,
+) -> str:
+    sql = _resolve_formula_sql(
+        getattr(prop, "formula_def_raw", None),
+        getattr(prop, "dialect_formula_def_raw", None),
+        table_alias,
+        dialect_name,
+    )
+    if sql:
+        return sql
+    return f"{table_alias}.{prop.column}"
+
+
+def _is_time_dimension_root(
+    model: "DbTableModelImpl",
+    field_name: str,
+) -> bool:
+    dim = model.get_dimension(field_name)
+    return bool(
+        dim
+        and dim.data_type in {ColumnType.DATE, ColumnType.DATETIME, ColumnType.TIMESTAMP}
+        and model.get_dimension_join(field_name)
+    )
 
 
 class DbTableModelImpl(BaseModel):
@@ -478,22 +562,27 @@ class DbTableModelImpl(BaseModel):
         self,
         field_name: str,
         source_model_name: Optional[str] = None,
+        dialect_name: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """Resolve a field against an explicit source model override."""
         if source_model_name is None or source_model_name == self.get_field_model_name(field_name):
-            return self.resolve_field(field_name)
+            return self.resolve_field(field_name, dialect_name=dialect_name)
 
         original = self.field_model_map.get(field_name)
         self.field_model_map[field_name] = source_model_name
         try:
-            return self.resolve_field(field_name)
+            return self.resolve_field(field_name, dialect_name=dialect_name)
         finally:
             if original is None:
                 self.field_model_map.pop(field_name, None)
             else:
                 self.field_model_map[field_name] = original
 
-    def resolve_field(self, field_name: str) -> Optional[Dict[str, Any]]:
+    def resolve_field(
+        self,
+        field_name: str,
+        dialect_name: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
         """Resolve a V3 field name to SQL column expression.
 
         Handles:
@@ -531,27 +620,32 @@ class DbTableModelImpl(BaseModel):
                     }
                 return None
 
-            ta = join_def.get_alias()
+            is_tableless_join = not join_def.table_name
+            ta = table_alias if is_tableless_join else join_def.get_alias()
+            runtime_join_def = None if is_tableless_join else join_def
 
             if suffix == "id":
+                id_column = join_def.primary_key
+                if is_tableless_join:
+                    id_column = join_def.foreign_key or join_def.primary_key
                 return {
-                    "sql_expr": f"{ta}.{join_def.primary_key}",
+                    "sql_expr": f"{ta}.{id_column}",
                     "alias_label": f"{join_def.caption or dim_name}(ID)",
                     "table_alias": ta,
                     "is_measure": False,
                     "aggregation": None,
-                    "join_def": join_def,
+                    "join_def": runtime_join_def,
                     "source_model": source_model_name,
                 }
             elif suffix == "caption":
-                sql_expr = _resolve_caption_sql(join_def, ta)
+                sql_expr = _resolve_caption_sql(join_def, ta, dialect_name)
                 return {
                     "sql_expr": sql_expr,
                     "alias_label": f"{join_def.caption or dim_name}",
                     "table_alias": ta,
                     "is_measure": False,
                     "aggregation": None,
-                    "join_def": join_def,
+                    "join_def": runtime_join_def,
                     "source_model": source_model_name,
                 }
             else:
@@ -559,12 +653,12 @@ class DbTableModelImpl(BaseModel):
                 prop = join_def.get_property(suffix)
                 if prop:
                     return {
-                        "sql_expr": f"{ta}.{prop.column}",
+                        "sql_expr": _resolve_dimension_property_sql(prop, ta, dialect_name),
                         "alias_label": prop.caption or prop.get_name(),
                         "table_alias": ta,
                         "is_measure": False,
                         "aggregation": None,
-                        "join_def": join_def,
+                        "join_def": runtime_join_def,
                         "source_model": source_model_name,
                     }
                 return None
@@ -580,6 +674,23 @@ class DbTableModelImpl(BaseModel):
                 "is_measure": True,
                 "aggregation": agg,
                 "join_def": None,
+                "source_model": source_model_name,
+            }
+
+        # Time dimension root (for absolute date filtering/timeWindow).
+        # Ordinary bare join dimensions remain non-projectable in strict mode.
+        join_def = self.get_dimension_join(field_name)
+        if join_def and _is_time_dimension_root(self, field_name):
+            is_tableless_join = not join_def.table_name
+            ta = table_alias if is_tableless_join else join_def.get_alias()
+            runtime_join_def = None if is_tableless_join else join_def
+            return {
+                "sql_expr": _resolve_caption_sql(join_def, ta, dialect_name),
+                "alias_label": join_def.caption or field_name,
+                "table_alias": ta,
+                "is_measure": False,
+                "aggregation": None,
+                "join_def": runtime_join_def,
                 "source_model": source_model_name,
             }
 
@@ -611,7 +722,11 @@ class DbTableModelImpl(BaseModel):
 
         return None
 
-    def resolve_field_strict(self, field_name: str) -> Optional[Dict[str, Any]]:
+    def resolve_field_strict(
+        self,
+        field_name: str,
+        dialect_name: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
         """Strict variant of :meth:`resolve_field` aligned to the Foggy
         QM public contract: dimensions are not directly projectable.
 
@@ -639,40 +754,46 @@ class DbTableModelImpl(BaseModel):
             # Try join-attached dimension first
             join_def = self.get_dimension_join(dim_name)
             if join_def:
+                source_alias = self.get_table_alias_for_model(
+                    self.get_field_model_name(field_name)
+                )
+                is_tableless_join = not join_def.table_name
+                table_alias_join = source_alias if is_tableless_join else join_def.get_alias()
+                runtime_join_def = None if is_tableless_join else join_def
                 if suffix == "id":
-                    table_alias_id = join_def.get_alias()
+                    id_column = join_def.primary_key
+                    if is_tableless_join:
+                        id_column = join_def.foreign_key or join_def.primary_key
                     return {
-                        "sql_expr": f"{table_alias_id}.{join_def.primary_key}",
+                        "sql_expr": f"{table_alias_join}.{id_column}",
                         "alias_label": f"{join_def.caption or dim_name}(ID)",
-                        "table_alias": table_alias_id,
+                        "table_alias": table_alias_join,
                         "is_measure": False,
                         "aggregation": None,
-                        "join_def": join_def,
+                        "join_def": runtime_join_def,
                         "source_model": self.get_field_model_name(field_name),
                     }
                 if suffix == "caption":
-                    table_alias_cap = join_def.get_alias()
-                    sql_expr = _resolve_caption_sql(join_def, table_alias_cap)
+                    sql_expr = _resolve_caption_sql(join_def, table_alias_join, dialect_name)
                     return {
                         "sql_expr": sql_expr,
                         "alias_label": f"{join_def.caption or dim_name}",
-                        "table_alias": table_alias_cap,
+                        "table_alias": table_alias_join,
                         "is_measure": False,
                         "aggregation": None,
-                        "join_def": join_def,
+                        "join_def": runtime_join_def,
                         "source_model": self.get_field_model_name(field_name),
                     }
                 # Custom property — must be declared
                 prop = join_def.get_property(suffix)
                 if prop:
-                    table_alias_prop = join_def.get_alias()
                     return {
-                        "sql_expr": f"{table_alias_prop}.{prop.column}",
+                        "sql_expr": _resolve_dimension_property_sql(prop, table_alias_join, dialect_name),
                         "alias_label": prop.caption or prop.get_name(),
-                        "table_alias": table_alias_prop,
+                        "table_alias": table_alias_join,
                         "is_measure": False,
                         "aggregation": None,
-                        "join_def": join_def,
+                        "join_def": runtime_join_def,
                         "source_model": self.get_field_model_name(field_name),
                     }
                 # Unknown suffix on a join-attached dimension → reject
@@ -711,6 +832,24 @@ class DbTableModelImpl(BaseModel):
                 "aggregation": agg,
                 "join_def": None,
                 "source_model": self.get_field_model_name(field_name),
+            }
+
+        # Time dimension root (for absolute date filtering/timeWindow).
+        join_def = self.get_dimension_join(field_name)
+        if join_def and _is_time_dimension_root(self, field_name):
+            source_model = self.get_field_model_name(field_name)
+            source_alias = self.get_table_alias_for_model(source_model)
+            is_tableless_join = not join_def.table_name
+            table_alias_join = source_alias if is_tableless_join else join_def.get_alias()
+            runtime_join_def = None if is_tableless_join else join_def
+            return {
+                "sql_expr": _resolve_caption_sql(join_def, table_alias_join, dialect_name),
+                "alias_label": join_def.caption or field_name,
+                "table_alias": table_alias_join,
+                "is_measure": False,
+                "aggregation": None,
+                "join_def": runtime_join_def,
+                "source_model": source_model,
             }
 
         col_def = self.columns.get(field_name)

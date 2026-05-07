@@ -381,31 +381,35 @@ class JdbcTableModelLoader(TableModelLoader):
             )
             model.add_dimension(dimension)
 
-            # Create DimensionJoinDef if dimension has a foreign table (star-schema JOIN)
-            if dim_def.get("tableName"):
-                # Build dimension properties
-                join_props = []
-                for prop in dim_def.get("properties", []):
-                    if isinstance(prop, dict):
-                        join_props.append(DimensionPropertyDef(
+            # Create DimensionJoinDef for physical joins and for tableless
+            # self dimensions that expose property paths such as dateOrder$month.
+            dim_props = dim_def.get("properties", [])
+            if dim_def.get("tableName") or dim_props:
+                join_def = DimensionJoinDef(
+                    name=dim_name,
+                    table_name=dim_def.get("tableName"),
+                    foreign_key=dim_def.get("column", dim_name),
+                    join_to=dim_def.get("joinTo"),
+                    primary_key=dim_def.get("primaryKey") or dim_def.get("column", dim_name),
+                    caption_column=dim_def.get("captionColumn") or (
+                        dim_def.get("column") if not dim_def.get("tableName") else None
+                    ),
+                    caption=dim_def.get("alias"),
+                    description=dim_def.get("description"),
+                    key_description=dim_def.get("keyDescription"),
+                    properties=[
+                        DimensionPropertyDef(
                             column=prop.get("column", ""),
                             name=prop.get("name"),
                             caption=prop.get("caption") or prop.get("alias"),
                             description=prop.get("description"),
                             data_type=prop.get("type", "STRING"),
-                        ))
-
-                join_def = DimensionJoinDef(
-                    name=dim_name,
-                    table_name=dim_def["tableName"],
-                    foreign_key=dim_def.get("column", dim_name),
-                    join_to=dim_def.get("joinTo"),
-                    primary_key=dim_def.get("primaryKey", "id"),
-                    caption_column=dim_def.get("captionColumn"),
-                    caption=dim_def.get("alias"),
-                    description=dim_def.get("description"),
-                    key_description=dim_def.get("keyDescription"),
-                    properties=join_props,
+                            formula_def_raw=prop.get("formulaDef"),
+                            dialect_formula_def_raw=prop.get("dialectFormulaDef"),
+                        )
+                        for prop in dim_props
+                        if isinstance(prop, dict)
+                    ],
                 )
                 # Attach raw captionDef for formula-based caption resolution
                 raw_cdef = dim_def.get("_captionDefRaw")

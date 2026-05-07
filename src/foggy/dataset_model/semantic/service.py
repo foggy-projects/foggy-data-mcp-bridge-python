@@ -27,6 +27,7 @@ from foggy.dataset_model.engine.hierarchy import (
     get_default_hierarchy_registry,
 )
 from foggy.dataset_model.engine.join import JoinGraph, JoinEdge, JoinType
+from foggy.dataset_model.definitions.base import ColumnType
 from foggy.dataset_model.definitions.query_request import CalculatedFieldDef
 from foggy.dataset_model.semantic.formula_field_extractor import extract_formula_fields, resolve_base_column_references
 from foggy.mcp_spi import (
@@ -322,6 +323,9 @@ class SemanticQueryService(SemanticServiceResolver):
             return str(value) if value else default
         except Exception:
             return default
+
+    def _field_formula_dialect_name(self) -> Optional[str]:
+        return self._dialect_name_or_default("") or None
 
     @classmethod
     def _collect_condition_fields(cls, items: Any) -> set[str]:
@@ -1152,6 +1156,8 @@ class SemanticQueryService(SemanticServiceResolver):
         # Build JoinGraph from model's dimension_joins (supports multi-hop in future)
         join_graph = JoinGraph(root="t")
         for dj in model.dimension_joins:
+            if not dj.table_name:
+                continue
             ta = dj.get_alias()
             join_graph.add_edge(
                 from_alias="t", to_alias=ta,
@@ -1167,6 +1173,8 @@ class SemanticQueryService(SemanticServiceResolver):
 
         def ensure_join(join_def: DimensionJoinDef):
             """Add LEFT JOIN if not already added."""
+            if not join_def.table_name:
+                return
             if join_def.name not in joined_dims:
                 ensure_explicit_joins_for_field(join_def.name)
                 joined_dims[join_def.name] = join_def
@@ -1201,10 +1209,12 @@ class SemanticQueryService(SemanticServiceResolver):
                     left_resolved = model.resolve_field_for_model(
                         condition.left_field,
                         condition.left_model,
+                        dialect_name=self._field_formula_dialect_name(),
                     )
                     right_resolved = model.resolve_field_for_model(
                         condition.right_field,
                         condition.right_model,
+                        dialect_name=self._field_formula_dialect_name(),
                     )
                     if left_resolved is None or right_resolved is None:
                         raise ValueError(
@@ -1234,7 +1244,7 @@ class SemanticQueryService(SemanticServiceResolver):
 
         def ensure_runtime_joins(field_name: str) -> None:
             ensure_explicit_joins_for_field(field_name)
-            resolved = model.resolve_field(field_name)
+            resolved = model.resolve_field(field_name, dialect_name=self._field_formula_dialect_name())
             if resolved and resolved["join_def"]:
                 ensure_join(resolved["join_def"])
 
@@ -1289,7 +1299,7 @@ class SemanticQueryService(SemanticServiceResolver):
                 if base_expr in calc_field_names:
                     continue
 
-                resolved = model.resolve_field_strict(base_expr)
+                resolved = model.resolve_field_strict(base_expr, dialect_name=self._field_formula_dialect_name())
                 if resolved:
                     ensure_runtime_joins(base_expr)
                     label = user_alias or resolved["alias_label"]
@@ -1422,7 +1432,7 @@ class SemanticQueryService(SemanticServiceResolver):
                         params=compiled_calcs_params.get(col_name) or None,
                     )
                     continue
-                resolved = model.resolve_field(col_name)
+                resolved = model.resolve_field(col_name, dialect_name=self._field_formula_dialect_name())
                 if resolved:
                     ensure_runtime_joins(col_name)
                     builder.group_by(resolved["sql_expr"])
@@ -1484,7 +1494,7 @@ class SemanticQueryService(SemanticServiceResolver):
                 for tup in plan.tuples:
                     and_conditions = []
                     for i, col in enumerate(plan.columns):
-                        resolved = model.resolve_field_strict(col)
+                        resolved = model.resolve_field_strict(col, dialect_name=self._field_formula_dialect_name())
                         if not resolved:
                             raise ValueError(f"{PIVOT_DOMAIN_TRANSPORT_REFUSED}: cannot resolve domain column {col!r}")
                         sql_expr = resolved["sql_expr"]
@@ -1510,7 +1520,7 @@ class SemanticQueryService(SemanticServiceResolver):
                     if selected_alias:
                         builder.order_by(selected_alias, direction)
                         continue
-                    resolved = model.resolve_field(column)
+                    resolved = model.resolve_field(column, dialect_name=self._field_formula_dialect_name())
                     if resolved:
                         ensure_runtime_joins(column)
                         if resolved["is_measure"]:
@@ -1558,7 +1568,7 @@ class SemanticQueryService(SemanticServiceResolver):
                         continue
 
                     dep_is_compiled = bool(compiled_calcs and dep in compiled_calcs)
-                    dep_resolved = model.resolve_field(dep)
+                    dep_resolved = model.resolve_field(dep, dialect_name=self._field_formula_dialect_name())
                     dep_dim = model.get_dimension(dep)
                     dep_measure = model.get_measure(dep)
                     if (
@@ -1589,7 +1599,7 @@ class SemanticQueryService(SemanticServiceResolver):
 
             for dep in hidden_dependency_names:
                 dep_sql = self._resolve_single_field(dep, model, ensure_join, compiled_calcs)
-                dep_resolved = model.resolve_field(dep)
+                dep_resolved = model.resolve_field(dep, dialect_name=self._field_formula_dialect_name())
                 if has_aggregation and dep_resolved and dep_resolved.get("is_measure") and dep_resolved.get("aggregation"):
                     agg = dep_resolved["aggregation"]
                     if agg == "COUNT_DISTINCT":
@@ -1690,7 +1700,7 @@ class SemanticQueryService(SemanticServiceResolver):
 
             field_sql_map = {}
             for col in plan.columns:
-                resolved = model.resolve_field_strict(col)
+                resolved = model.resolve_field_strict(col, dialect_name=self._field_formula_dialect_name())
                 if not resolved:
                     raise ValueError(
                         f"{PIVOT_DOMAIN_TRANSPORT_REFUSED}: cannot resolve domain column {col!r}"
@@ -2397,10 +2407,12 @@ class SemanticQueryService(SemanticServiceResolver):
                     left_resolved = model.resolve_field_for_model(
                         condition.left_field,
                         condition.left_model,
+                        dialect_name=self._field_formula_dialect_name(),
                     )
                     right_resolved = model.resolve_field_for_model(
                         condition.right_field,
                         condition.right_model,
+                        dialect_name=self._field_formula_dialect_name(),
                     )
                     if left_resolved is None or right_resolved is None:
                         raise ValueError(
@@ -2429,6 +2441,8 @@ class SemanticQueryService(SemanticServiceResolver):
                 explicit_joins_added.add(key)
 
         def ensure_join(join_def: DimensionJoinDef) -> None:
+            if not join_def.table_name:
+                return
             if join_def.name in joined_dims:
                 return
             ensure_explicit_joins_for_field(join_def.name)
@@ -2450,12 +2464,12 @@ class SemanticQueryService(SemanticServiceResolver):
                 ensure_join(field_name)
                 return
             ensure_explicit_joins_for_field(field_name)
-            resolved = model.resolve_field(field_name)
+            resolved = model.resolve_field(field_name, dialect_name=self._field_formula_dialect_name())
             if resolved and resolved["join_def"]:
                 ensure_join(resolved["join_def"])
 
         for field in group_fields:
-            resolved = model.resolve_field_strict(field)
+            resolved = model.resolve_field_strict(field, dialect_name=self._field_formula_dialect_name())
             if not resolved:
                 raise ValueError(
                     f"TIMEWINDOW_FIELD_NOT_FOUND: base field {field!r} "
@@ -2466,7 +2480,7 @@ class SemanticQueryService(SemanticServiceResolver):
             builder.group_by(resolved["sql_expr"])
 
         for metric in metric_fields:
-            resolved = model.resolve_field_strict(metric)
+            resolved = model.resolve_field_strict(metric, dialect_name=self._field_formula_dialect_name())
             if not resolved or not resolved["is_measure"]:
                 raise ValueError(
                     f"TIMEWINDOW_TARGET_NOT_AGGREGATE: metric {metric!r} "
@@ -2763,7 +2777,7 @@ class SemanticQueryService(SemanticServiceResolver):
     ) -> bool:
         if field_name in aggregate_calc_fields:
             return True
-        resolved = model.resolve_field(field_name)
+        resolved = model.resolve_field(field_name, dialect_name=self._field_formula_dialect_name())
         return bool(resolved and resolved.get("is_measure") and resolved.get("aggregation"))
 
     def _reject_aggregate_conditions_in_slice(
@@ -2922,7 +2936,7 @@ class SemanticQueryService(SemanticServiceResolver):
         elif column in selected_aggregate_sql:
             col_expr = selected_aggregate_sql[column]
         else:
-            resolved = model.resolve_field(column)
+            resolved = model.resolve_field(column, dialect_name=self._field_formula_dialect_name())
             if not resolved or not resolved.get("is_measure") or not resolved.get("aggregation"):
                 raise ValueError(
                     "HAVING_REQUIRES_AGGREGATE_FIELD: having field "
@@ -2947,7 +2961,7 @@ class SemanticQueryService(SemanticServiceResolver):
             elif ref_field in selected_aggregate_sql:
                 ref_expr = selected_aggregate_sql[ref_field]
             else:
-                ref_resolved = model.resolve_field(ref_field)
+                ref_resolved = model.resolve_field(ref_field, dialect_name=self._field_formula_dialect_name())
                 if not ref_resolved or not ref_resolved.get("is_measure") or not ref_resolved.get("aggregation"):
                     raise ValueError(f"HAVING_REQUIRES_AGGREGATE_FIELD: having field {ref_field!r} must be a predefined aggregate measure or aggregate alias.")
                 if ref_resolved["join_def"] and ensure_join:
@@ -3168,7 +3182,7 @@ class SemanticQueryService(SemanticServiceResolver):
         if compiled_calcs and field_name in compiled_calcs:
             return f"({compiled_calcs[field_name]})"
 
-        resolved = model.resolve_field(field_name)
+        resolved = model.resolve_field(field_name, dialect_name=self._field_formula_dialect_name())
         if resolved:
             if resolved["join_def"] and ensure_join:
                 ensure_join(resolved["join_def"])
@@ -3222,7 +3236,7 @@ class SemanticQueryService(SemanticServiceResolver):
             return
 
         # Guard 3: model-resolvable field (measure / dimension / property) — allow.
-        if model.resolve_field(field_name) is not None:
+        if model.resolve_field(field_name, dialect_name=self._field_formula_dialect_name()) is not None:
             return
         if model.get_dimension(field_name) is not None:
             return
@@ -3711,7 +3725,7 @@ class SemanticQueryService(SemanticServiceResolver):
                             params=_calc_params_for(k) + [v],
                         )
                         return
-                    resolved = model.resolve_field(k)
+                    resolved = model.resolve_field(k, dialect_name=self._field_formula_dialect_name())
                     if resolved:
                         if resolved["join_def"] and ensure_join:
                             ensure_join(resolved["join_def"])
@@ -3729,7 +3743,7 @@ class SemanticQueryService(SemanticServiceResolver):
             inline_calc_params.extend(_calc_params_for(column))
         else:
             # Resolve column through model field resolver
-            resolved = model.resolve_field(column)
+            resolved = model.resolve_field(column, dialect_name=self._field_formula_dialect_name())
             if resolved:
                 col_expr = resolved["sql_expr"]
                 if resolved["join_def"] and ensure_join:
@@ -3749,7 +3763,7 @@ class SemanticQueryService(SemanticServiceResolver):
                 ref_expr = f"({compiled_calcs[ref_field]})"
                 inline_calc_params.extend(_calc_params_for(ref_field))
             else:
-                ref_resolved = model.resolve_field(ref_field)
+                ref_resolved = model.resolve_field(ref_field, dialect_name=self._field_formula_dialect_name())
                 if ref_resolved:
                     ref_expr = ref_resolved["sql_expr"]
                     if ref_resolved["join_def"] and ensure_join:
@@ -4399,6 +4413,30 @@ class SemanticQueryService(SemanticServiceResolver):
                 # Check hierarchy support from the corresponding dimension object
                 dim_obj = model.dimensions.get(dim_name)
                 is_hier = dim_obj is not None and dim_obj.supports_hierarchy_operators()
+                is_time_dim_root = (
+                    dim_obj is not None
+                    and dim_obj.data_type in {ColumnType.DATE, ColumnType.DATETIME, ColumnType.TIMESTAMP}
+                    and bool(join_def.caption_column)
+                )
+
+                if is_time_dim_root and dim_name not in fields:
+                    fields[dim_name] = {
+                        "name": dim_caption,
+                        "fieldName": dim_name,
+                        "meta": f"Time Dimension Root | {dim_obj.data_type.value}",
+                        "type": dim_obj.data_type.value.upper(),
+                        "filterType": "date",
+                        "filterable": True,
+                        "measure": False,
+                        "aggregatable": False,
+                        "sourceColumn": join_def.caption_column,
+                        "models": {},
+                    }
+                if is_time_dim_root:
+                    fields[dim_name]["models"][model_name] = {
+                        "description": join_def.description or f"{dim_caption} business date",
+                        "usage": "Used for absolute date filtering and timeWindow",
+                    }
 
                 # dim$id
                 id_fn = f"{dim_name}$id"

@@ -25,6 +25,16 @@ from foggy.demo.models.ecommerce_models import (
 )
 from foggy.mcp_spi import SemanticQueryRequest
 from foggy.dataset_model.impl.loader import load_models_from_directory
+from foggy.dataset_model.semantic.time_window import (
+    TimeWindowDef,
+    TimeWindowValidator,
+    collect_time_window_field_sets,
+)
+from foggy.dataset_model.engine.compose.compilation import compile_plan_to_sql
+from foggy.dataset_model.engine.compose.context.compose_query_context import ComposeQueryContext
+from foggy.dataset_model.engine.compose.context.principal import Principal
+from foggy.dataset_model.engine.compose.plan import from_
+from foggy.dataset_model.engine.compose.security import AuthorityResolution, ModelBinding
 
 
 # ==================== Fixtures ====================
@@ -95,6 +105,13 @@ def _build_response(service: SemanticQueryService, model_name: str, request: Sem
     assert response.error is None, f"Query build failed: {response.error}"
     assert response.sql is not None
     return response
+
+
+class _AllowAllAuthorityResolver:
+    def resolve(self, request):
+        return AuthorityResolution(
+            bindings={mq.model: ModelBinding() for mq in request.models}
+        )
 
 
 class TestOdooAggregateHaving:
@@ -792,6 +809,161 @@ class TestInvalidFieldRecovery:
         assert "column t.move$movetype does not exist" not in response.error.lower()
         assert "column t.move$state does not exist" not in response.error.lower()
         assert "column t.parent$state does not exist" not in response.error.lower()
+
+
+class TestOdooTablelessDateOrderDimension:
+    def test_loader_and_resolver_keep_date_order_grains_on_fact_table(self, odoo_service):
+        model = odoo_service.get_model("OdooSaleOrderModel")
+        join = model.get_dimension_join("dateOrder")
+        assert join is not None
+        assert join.table_name is None
+        assert {prop.get_name() for prop in join.properties} >= {
+            "year",
+            "month",
+            "yearMonth",
+        }
+        assert "dateOrder" not in model.columns
+        assert "dateOrder$year" not in model.columns
+
+        root = model.resolve_field_strict("dateOrder")
+        assert root["join_def"] is None
+        assert root["sql_expr"] == "t.date_order"
+
+        resolved = model.resolve_field_strict("dateOrder$year")
+        assert resolved["join_def"] is None
+        assert resolved["sql_expr"] == "CAST(strftime('%Y', t.date_order) AS INTEGER)"
+
+        assert model.resolve_field_strict(
+            "dateOrder$year",
+            dialect_name="mysql",
+        )["sql_expr"] == "YEAR(t.date_order)"
+        assert model.resolve_field_strict(
+            "dateOrder$yearMonth",
+            dialect_name="postgresql",
+        )["sql_expr"] == "TO_CHAR(t.date_order, 'YYYY-MM')"
+        assert model.resolve_field_strict(
+            "dateOrder$month",
+            dialect_name="sqlserver",
+        )["sql_expr"] == "DATEPART(month, t.date_order)"
+
+    def test_query_model_uses_formula_columns_without_dim_date_join(self, odoo_service):
+        request = SemanticQueryRequest(
+            columns=["dateOrder$year", "dateOrder$month", "amountTotal"],
+            groupBy=["dateOrder$year", "dateOrder$month"],
+            orderBy=[{"field": "dateOrder$year", "direction": "asc"}],
+            slice=[{
+                "field": "dateOrder",
+                "op": "[)",
+                "value": ["2024-01-01", "2025-01-01"],
+            }],
+            limit=10,
+        )
+
+        sql = _build_sql(odoo_service, "OdooSaleOrderQueryModel", request)
+
+        assert "CAST(strftime('%Y', t.date_order) AS INTEGER)" in sql
+        assert "CAST(strftime('%m', t.date_order) AS INTEGER)" in sql
+        assert "FROM sale_order AS t" in sql
+        assert "dim_date" not in sql.lower()
+        assert "JOIN" not in sql
+        assert "t.date_order >= ?" in sql
+        assert "t.date_order < ?" in sql
+
+    def test_self_dimension_grain_properties_can_filter_without_dim_date_join(self, odoo_service):
+        request = SemanticQueryRequest(
+            columns=["dateOrder$yearMonth", "amountTotal"],
+            groupBy=["dateOrder$yearMonth"],
+            slice=[
+                {"field": "dateOrder$year", "op": "=", "value": 2024},
+                {"field": "dateOrder$month", "op": "in", "value": [1, 2]},
+                {"field": "dateOrder$yearMonth", "op": "=", "value": "2024-01"},
+            ],
+            limit=10,
+        )
+
+        sql = _build_sql(odoo_service, "OdooSaleOrderQueryModel", request)
+
+        assert "CAST(strftime('%Y', t.date_order) AS INTEGER) = ?" in sql
+        assert "CAST(strftime('%m', t.date_order) AS INTEGER) IN (?, ?)" in sql
+        assert "strftime('%Y-%m', t.date_order) = ?" in sql
+        assert "dim_date" not in sql.lower()
+        assert "JOIN" not in sql
+
+    def test_metadata_and_time_window_field_sets_expose_executable_grains(self, odoo_service):
+        meta = odoo_service.get_metadata_v3(model_names=["OdooSaleOrderQueryModel"])
+        fields = meta["fields"]
+        assert fields["dateOrder"]["filterType"] == "date"
+        for field in ("dateOrder$year", "dateOrder$month", "dateOrder$yearMonth"):
+            assert field in fields
+            assert fields[field]["models"]["OdooSaleOrderQueryModel"]
+
+        model = odoo_service.get_model("OdooSaleOrderQueryModel")
+        available, time_fields, measure_fields = collect_time_window_field_sets(model)
+        assert {"dateOrder$year", "dateOrder$month", "dateOrder$yearMonth"} <= available
+        assert "dateOrder" in time_fields
+
+        tw = TimeWindowDef(
+            field="dateOrder",
+            grain="month",
+            comparison="mom",
+            target_metrics=("amountTotal",),
+        )
+        assert TimeWindowValidator.validate(tw, available, time_fields, measure_fields) is None
+
+    def test_time_window_mom_uses_self_grain_keys_without_dim_date_join(self, odoo_service):
+        request = SemanticQueryRequest(
+            timeWindow={
+                "field": "dateOrder",
+                "grain": "month",
+                "comparison": "mom",
+                "range": "[)",
+                "value": ["2024-01-01", "2025-01-01"],
+                "targetMetrics": ["amountTotal"],
+            },
+            limit=10,
+        )
+
+        sql = _build_sql(odoo_service, "OdooSaleOrderQueryModel", request)
+
+        assert "CAST(strftime('%Y', t.date_order) AS INTEGER)" in sql
+        assert "CAST(strftime('%m', t.date_order) AS INTEGER)" in sql
+        assert "dim_date" not in sql.lower()
+
+    def test_pivot_and_compose_reuse_same_tableless_field_resolution(self, odoo_service):
+        pivot_request = SemanticQueryRequest(
+            pivot={
+                "rows": ["dateOrder$year"],
+                "columns": ["dateOrder$month"],
+                "metrics": ["amountTotal"],
+                "outputFormat": "flat",
+            },
+            limit=10,
+        )
+
+        pivot_sql = _build_sql(odoo_service, "OdooSaleOrderQueryModel", pivot_request)
+        assert "CAST(strftime('%Y', t.date_order) AS INTEGER)" in pivot_sql
+        assert "CAST(strftime('%m', t.date_order) AS INTEGER)" in pivot_sql
+        assert "dim_date" not in pivot_sql.lower()
+
+        plan = from_(
+            model="OdooSaleOrderQueryModel",
+            columns=["dateOrder$year", "dateOrder$month", "amountTotal"],
+            limit=10,
+        )
+        ctx = ComposeQueryContext(
+            principal=Principal(user_id="u1"),
+            namespace="odoo",
+            authority_resolver=_AllowAllAuthorityResolver(),
+        )
+        composed = compile_plan_to_sql(
+            plan,
+            ctx,
+            semantic_service=odoo_service,
+            dialect="sqlite",
+        )
+        assert "CAST(strftime('%Y', t.date_order) AS INTEGER)" in composed.sql
+        assert "CAST(strftime('%m', t.date_order) AS INTEGER)" in composed.sql
+        assert "dim_date" not in composed.sql.lower()
 
 
 # ==================== TestMetadataV3 ====================

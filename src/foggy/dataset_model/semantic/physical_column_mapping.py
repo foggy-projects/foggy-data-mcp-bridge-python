@@ -22,6 +22,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Dict, List, Optional, Set
 
+from foggy.dataset_model.definitions.base import ColumnType
+
 if TYPE_CHECKING:
     from foggy.dataset_model.impl.model import DbTableModelImpl
     from foggy.mcp_spi.semantic import DeniedColumn
@@ -151,24 +153,33 @@ def build_physical_column_mapping(model: DbTableModelImpl) -> PhysicalColumnMapp
     # 3. Dimension JOINs (star schema)
     for jd in model.dimension_joins:
         dim_table = jd.table_name
-        _add_table(dim_table, "dimension")
+        dim_obj = model.dimensions.get(jd.name)
+        if dim_table:
+            _add_table(dim_table, "dimension")
 
         # dim$id -> FK on fact table + PK on dimension table
         id_field = f"{jd.name}$id"
-        _add_mapping(id_field, fact_table, jd.foreign_key)
+        if jd.foreign_key:
+            _add_mapping(id_field, fact_table, jd.foreign_key)
         if jd.primary_key and dim_table:
             _add_mapping(id_field, dim_table, jd.primary_key)
 
-        # dim$caption -> caption column on dimension table
-        if jd.caption_column and dim_table:
+        # dim$caption -> caption column on dimension table, or fact table for tableless/self dimensions.
+        caption_table = dim_table or fact_table
+        if jd.caption_column:
             cap_field = f"{jd.name}$caption"
-            _add_mapping(cap_field, dim_table, jd.caption_column)
+            _add_mapping(cap_field, caption_table, jd.caption_column)
+            if (
+                dim_obj
+                and dim_obj.data_type in {ColumnType.DATE, ColumnType.DATETIME, ColumnType.TIMESTAMP}
+            ):
+                _add_mapping(jd.name, caption_table, jd.caption_column)
 
         # dim$property -> property column on dimension table
         for prop in jd.properties:
             prop_name = prop.get_name()
             prop_field = f"{jd.name}${prop_name}"
-            _add_mapping(prop_field, dim_table, prop.column)
+            _add_mapping(prop_field, dim_table or fact_table, prop.column)
 
     # 4. Fact table properties (model.columns dict)
     for col_name, col_def in model.columns.items():
