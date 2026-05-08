@@ -28,6 +28,24 @@ def test_query_model_prompt_guides_calculate_scope_and_timewindow() -> None:
     assert "不要使用 CALCULATE" in prompt_text or "不要用 `CALCULATE`" in prompt_text
 
 
+def test_query_model_prompt_guides_native_parent_share_usage() -> None:
+    loader = get_tool_config_loader()
+    tool = loader.get_tool("dataset.query_model")
+
+    assert tool is not None
+
+    prompt_text = tool.description
+
+    assert "salesTeam$caption" in prompt_text
+    assert "salesperson$caption" in prompt_text
+    assert "teamShare" in prompt_text
+    assert "amountTotal" in prompt_text
+    assert "sum(amountTotal)" in prompt_text
+    assert "calculatedFields" in prompt_text
+    assert "inline formula" in prompt_text
+    assert "CALCULATE" in prompt_text
+
+
 def test_query_model_prompt_guides_date_bucket_boundaries() -> None:
     loader = get_tool_config_loader()
     tool = loader.get_tool("dataset.query_model")

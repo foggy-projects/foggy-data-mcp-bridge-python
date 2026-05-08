@@ -233,7 +233,31 @@
 
 > 普通 pivot 能力边界：`grandTotal: true` 支持（度量须为可加聚合）；`rowSubtotals: true` 静默忽略（单层行轴小计无实际意义）；`columnSubtotals: true` 拒绝并报错。
 
-**二层 cascade pivot（支持 rowSubtotals / grandTotal）：**
+**父级占比 parentShare（rows 相邻层级）：**
+```json
+{
+  "pivot": {
+    "rows": [{"field": "salesTeam$caption"}, {"field": "salesperson$caption"}],
+    "metrics": [
+      "amountTotal",
+      {
+        "name": "teamShare",
+        "type": "parentShare",
+        "of": "amountTotal",
+        "axis": "rows",
+        "level": "salesperson$caption",
+        "parentLevel": "salesTeam$caption"
+      }
+    ],
+    "outputFormat": "flat",
+    "options": {"grandTotal": true}
+  }
+}
+```
+
+> `parentShare.of` 必须引用同一 `metrics` 中的原生可加度量，例如 Odoo 销售用 `amountTotal`；不要写 `sum(amountTotal)`、`CALCULATE`、inline formula 或 `calculatedFields` 来手工重算父级占比。
+
+**二层 cascade pivot（rowSubtotals + grandTotal）：**
 ```json
 {
   "pivot": {
@@ -241,12 +265,8 @@
       {"field": "salesTeam$caption", "orderBy": ["-salesAmount"], "limit": 3},
       {"field": "salesperson$caption", "orderBy": ["-salesAmount"], "limit": 5}
     ],
-    "metrics": [
-      "salesAmount",
-      {"name": "share", "type": "parentShare", "of": "salesAmount"},
-      {"name": "index", "type": "baselineRatio", "of": "salesAmount", "axis": "columns", "baseline": "first"}
-    ],
-    "outputFormat": "grid",
+    "metrics": ["salesAmount"],
+    "outputFormat": "flat",
     "options": {"rowSubtotals": true, "grandTotal": true}
   }
 }
@@ -271,4 +291,4 @@
 4. **GROUP BY 错误**：移除未分组明细列，或把该普通字段加入 `groupBy`；预定义聚合 measure 与维度一起使用时，只保留分组维度和 measure。
 5. **语法错误**：检查 JSON 结构是否闭合，特别是 `slice` 中的 `$or` 是否正确嵌套。
 6. **Pivot 互斥或边界错误**：移除 `columns` 或 `timeWindow`；tree 错误时移除 `crossjoin`/`rowSubtotals`/`columnSubtotals`/`grandTotal`；派生指标错误时移除 `parentShare`/`baselineRatio` 或改为普通 pivot。
-7. **Pivot 小计/总计被拒绝**：普通 pivot 不支持 `rowSubtotals`/`columnSubtotals`/`grandTotal`。从 `pivot.options` 中移除这些字段后重试。`rowSubtotals`/`grandTotal` 仅在 rows 两层 cascade 且度量为可加聚合时支持。
+7. **Pivot 小计/总计被拒绝**：`columnSubtotals` 在任何情况下都不支持，移除后重试。普通 pivot 的 `rowSubtotals` 会静默忽略；`grandTotal` 在普通 pivot 和二层 cascade 下均支持（度量须为可加聚合）。
