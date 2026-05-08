@@ -188,6 +188,32 @@ class TestOdooAggregateHaving:
         where_part = response.sql.split("HAVING")[0]
         assert "WHERE SUM(CASE" not in where_part
 
+    def test_compose_grouped_predefined_ratio_formula_aggregates_dependencies(
+        self, odoo_service
+    ):
+        ctx = ComposeQueryContext(
+            principal=Principal(user_id="test-user"),
+            namespace="odoo",
+            authority_resolver=_AllowAllAuthorityResolver(),
+        )
+        plan = from_(
+            model="OdooAccountMoveQueryModel",
+            columns=["partner$id", "partner$caption", "collectionRate"],
+            group_by=["partner$id", "partner$caption"],
+        )
+
+        composed = compile_plan_to_sql(
+            plan,
+            ctx,
+            semantic_service=odoo_service,
+            dialect="postgres",
+        )
+
+        assert "GROUP BY rp.id, rp.name" in composed.sql
+        assert "SUM(t.amount_total)" in composed.sql
+        assert "SUM(t.amount_residual)" in composed.sql
+        assert "t.amount_total - t.amount_residual" not in composed.sql
+
     def test_predefined_formula_measure_case_variant_resolves_before_injection(self, odoo_service):
         request = SemanticQueryRequest(
             columns=["aroverdueamount AS overdue_amount"],

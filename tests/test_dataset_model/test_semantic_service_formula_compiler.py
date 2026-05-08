@@ -26,7 +26,7 @@ import pytest
 from pydantic import ValidationError
 
 from foggy.dataset.db.executor import SQLiteExecutor
-from foggy.dataset_model.definitions.base import AggregationType
+from foggy.dataset_model.definitions.base import AggregationType, DbColumnDef
 from foggy.dataset_model.impl.model import (
     DbModelDimensionImpl,
     DbModelMeasureImpl,
@@ -45,7 +45,7 @@ from foggy.mcp_spi import SemanticQueryRequest
 def model():
     """Minimal fact-table model exercising the three production formulas."""
     m = DbTableModelImpl(name="OrderFact", source_table="t_order")
-    m.add_dimension(DbModelDimensionImpl(name="name", column="name"))
+    m.columns["name"] = DbColumnDef(name="name")
     m.add_measure(DbModelMeasureImpl(
         name="amountTotal", column="amount_total", aggregation=AggregationType.SUM,
     ))
@@ -138,6 +138,24 @@ class TestProductionFormulas:
         assert "* ?" in r.sql
         # The literal ``100`` is parameterised — this is the security win.
         assert 100 in (r.params or [])
+
+    def test_grouped_predefined_ratio_formula_aggregates_measure_dependencies(self, svc, model):
+        model.predefined_calculated_fields = [{
+            "name": "collectionRate",
+            "expression": "(amountTotal - amountResidual) / amountTotal * 100",
+        }]
+
+        req = SemanticQueryRequest(
+            columns=["name", "collectionRate"],
+            group_by=["name"],
+        )
+        r = svc.query_model("OrderFact", req, mode="validate")
+
+        assert r.error is None, r.error
+        assert "GROUP BY t.name" in r.sql
+        assert "SUM(t.amount_total)" in r.sql
+        assert "SUM(t.amount_residual)" in r.sql
+        assert "t.amount_total - t.amount_residual" not in r.sql
 
     def test_predefined_formula_with_now_is_not_validated_as_field(self, svc, model):
         model.predefined_calculated_fields = [{

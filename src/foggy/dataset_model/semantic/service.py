@@ -1347,7 +1347,11 @@ class SemanticQueryService(SemanticServiceResolver):
         calc_field_defs = self._request_calculated_field_defs(request)
         if calc_field_defs:
             calc_field_defs = sort_calc_fields_by_dependencies(calc_field_defs)
-        aggregate_calc_fields = self._aggregate_calc_field_names(calc_field_defs)
+        aggregate_calc_fields = self._aggregate_calc_field_names(
+            calc_field_defs,
+            model,
+            grouped=bool(request.group_by),
+        )
         
         needs_cte_wrapping = False
         inner_cfs = []
@@ -1380,9 +1384,15 @@ class SemanticQueryService(SemanticServiceResolver):
         calculate_context = self._build_calculate_query_context(request)
 
         for cf in inner_cfs:
+            aggregate_measure_formula = self._is_grouped_measure_formula(
+                cf,
+                model,
+                grouped=bool(request.group_by),
+            )
             select_sql, select_params = self._build_calculated_field_sql(
                 cf, model, ensure_join, compiled_calcs, compiled_calcs_params,
                 calculate_context=calculate_context,
+                aggregate_measure_formula=aggregate_measure_formula,
             )
             alias = cf.alias or cf.name
             builder.select(
@@ -1394,7 +1404,12 @@ class SemanticQueryService(SemanticServiceResolver):
                 "expression": cf.expression, "aggregation": cf.agg,
                 "window": cf.is_window_function(),
             })
-            if cf.agg or cf.is_window_function() or parse_inline_aggregate(str(cf.expression or "")):
+            if (
+                cf.agg
+                or cf.is_window_function()
+                or parse_inline_aggregate(str(cf.expression or ""))
+                or aggregate_measure_formula
+            ):
                 has_aggregation = True
 
         # 3. WHERE clause. Pure aggregate slice conditions are semantic
@@ -2739,15 +2754,54 @@ class SemanticQueryService(SemanticServiceResolver):
     def _aggregate_calc_field_names(
         self,
         calc_field_defs: List[CalculatedFieldDef],
+        model: Optional[DbTableModelImpl] = None,
+        *,
+        grouped: bool = False,
     ) -> set[str]:
         names: set[str] = set()
         for cf in calc_field_defs or []:
-            if cf.agg or parse_inline_aggregate(str(cf.expression or "")):
+            if (
+                cf.agg
+                or parse_inline_aggregate(str(cf.expression or ""))
+                or (model is not None and self._is_grouped_measure_formula(cf, model, grouped=grouped))
+            ):
                 if cf.name:
                     names.add(cf.name)
                 if cf.alias:
                     names.add(cf.alias)
         return names
+
+    _FORMULA_AGG_CALL_RE = re.compile(
+        r"\b(sum|avg|count|countd|count_distinct|min|max|stddev_pop|stddev_samp|var_pop|var_samp)\s*\(",
+        re.IGNORECASE,
+    )
+
+    def _formula_contains_aggregate_call(self, expression: str) -> bool:
+        return bool(self._FORMULA_AGG_CALL_RE.search(expression or ""))
+
+    def _is_grouped_measure_formula(
+        self,
+        cf: CalculatedFieldDef,
+        model: DbTableModelImpl,
+        *,
+        grouped: bool,
+    ) -> bool:
+        if not grouped or cf.agg or cf.is_window_function():
+            return False
+        expression = str(cf.expression or "")
+        if not expression or self._formula_contains_aggregate_call(expression):
+            return False
+        for ref in extract_field_dependencies(expression):
+            resolved = model.resolve_field(ref, dialect_name=self._field_formula_dialect_name())
+            if resolved and resolved.get("is_measure") and resolved.get("aggregation"):
+                return True
+        return False
+
+    def _aggregate_measure_sql(self, aggregation: str, sql_expr: str) -> str:
+        agg = str(aggregation).upper()
+        if agg == "COUNT_DISTINCT":
+            return f"COUNT(DISTINCT {sql_expr})"
+        return f"{agg}({sql_expr})"
 
     def _selected_aggregate_sql(
         self,
@@ -3164,6 +3218,7 @@ class SemanticQueryService(SemanticServiceResolver):
         model: DbTableModelImpl,
         ensure_join=None,
         compiled_calcs: Optional[Dict[str, str]] = None,
+        aggregate_measure_refs: bool = False,
     ) -> str:
         """Resolve a semantic field name to SQL column expression.
 
@@ -3186,6 +3241,15 @@ class SemanticQueryService(SemanticServiceResolver):
         if resolved:
             if resolved["join_def"] and ensure_join:
                 ensure_join(resolved["join_def"])
+            if (
+                aggregate_measure_refs
+                and resolved.get("is_measure")
+                and resolved.get("aggregation")
+            ):
+                return self._aggregate_measure_sql(
+                    resolved["aggregation"],
+                    resolved["sql_expr"],
+                )
             return resolved["sql_expr"]
         dim = model.get_dimension(field_name)
         if dim:
@@ -3194,7 +3258,10 @@ class SemanticQueryService(SemanticServiceResolver):
         measure = model.get_measure(field_name)
         if measure:
             alias = model.get_table_alias_for_model(model.get_field_model_name(field_name))
-            return f"{alias}.{measure.column or measure.name}"
+            sql_expr = f"{alias}.{measure.column or measure.name}"
+            if aggregate_measure_refs and measure.aggregation:
+                return self._aggregate_measure_sql(str(measure.aggregation), sql_expr)
+            return sql_expr
         return field_name
 
     def _validate_window_order_by_field(
@@ -3501,6 +3568,7 @@ class SemanticQueryService(SemanticServiceResolver):
         compiled_calcs: Optional[Dict[str, str]] = None,
         compiled_calcs_params: Optional[Dict[str, List[Any]]] = None,
         calculate_context: Optional[CalculateQueryContext] = None,
+        aggregate_measure_formula: bool = False,
     ) -> Tuple[str, List[Any]]:
         """Build SQL expression for a calculated field, including OVER() for window functions.
 
@@ -3557,7 +3625,13 @@ class SemanticQueryService(SemanticServiceResolver):
             )
         else:
             def _resolver(name: str):
-                sql = self._resolve_single_field(name, model, ensure_join, compiled_calcs)
+                sql = self._resolve_single_field(
+                    name,
+                    model,
+                    ensure_join,
+                    compiled_calcs,
+                    aggregate_measure_refs=aggregate_measure_formula,
+                )
                 # v1.4 M4 Step 4.1: when the resolved fragment originated
                 # from a previously-compiled calc-field that carries bind
                 # params, forward them to the current compiler context so
