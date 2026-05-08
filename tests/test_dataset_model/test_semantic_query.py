@@ -349,6 +349,26 @@ class TestOdooAggregateHaving:
         assert "SUM(t.amount_residual)" in composed.sql
         assert "t.amount_total - t.amount_residual" not in composed.sql
 
+    def test_global_predefined_ratio_formula_aggregates_dependencies(self, odoo_service):
+        request = SemanticQueryRequest(
+            columns=["collectionRate"],
+            slice=[
+                {"field": "moveType", "op": "=", "value": "out_invoice"},
+                {"field": "state", "op": "=", "value": "posted"},
+                {"field": "invoiceDate$year", "op": "=", "value": 2026},
+                {"field": "invoiceDate$month", "op": "=", "value": 5},
+            ],
+            systemSlice=[{"field": "company$id", "op": "in", "value": [2, 1]}],
+        )
+
+        response = _build_response(odoo_service, "OdooAccountMoveQueryModel", request)
+
+        assert response.error is None, response.error
+        assert "SUM(t.amount_total)" in response.sql
+        assert "SUM(t.amount_residual)" in response.sql
+        assert "t.amount_total - t.amount_residual" not in response.sql
+        assert "GROUP BY" not in response.sql
+
     def test_predefined_formula_measure_case_variant_resolves_before_injection(self, odoo_service):
         request = SemanticQueryRequest(
             columns=["aroverdueamount AS overdue_amount"],

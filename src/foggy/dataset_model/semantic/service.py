@@ -1414,7 +1414,7 @@ class SemanticQueryService(SemanticServiceResolver):
 
         for cf in inner_cfs:
             alias = cf.alias or cf.name
-            aggregate_measure_formula = self._is_grouped_measure_formula(
+            aggregate_measure_formula = self._is_measure_formula(
                 cf,
                 model,
                 grouped=bool(request.group_by),
@@ -2996,7 +2996,7 @@ class SemanticQueryService(SemanticServiceResolver):
             if (
                 cf.agg
                 or parse_inline_aggregate(str(cf.expression or ""))
-                or (model is not None and self._is_grouped_measure_formula(cf, model, grouped=grouped))
+                or (model is not None and self._is_measure_formula(cf, model, grouped=grouped))
             ):
                 if cf.name:
                     names.add(cf.name)
@@ -3080,14 +3080,14 @@ class SemanticQueryService(SemanticServiceResolver):
     def _formula_contains_aggregate_call(self, expression: str) -> bool:
         return bool(self._FORMULA_AGG_CALL_RE.search(expression or ""))
 
-    def _is_grouped_measure_formula(
+    def _is_measure_formula(
         self,
         cf: CalculatedFieldDef,
         model: DbTableModelImpl,
         *,
         grouped: bool,
     ) -> bool:
-        if not grouped or cf.agg or cf.is_window_function():
+        if cf.agg or cf.is_window_function():
             return False
         expression = str(cf.expression or "")
         if not expression or self._formula_contains_aggregate_call(expression):
