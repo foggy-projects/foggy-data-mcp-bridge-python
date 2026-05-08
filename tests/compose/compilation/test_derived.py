@@ -238,6 +238,23 @@ class TestDerivedEdgeCases:
         assert err.code == schema_error_codes.DERIVED_QUERY_SAME_STAGE_ALIAS
         assert err.offending_field == "decrease_amount"
 
+    def test_compile_rejects_unknown_derived_order_by_before_sql(
+        self, svc, ctx, base_sales
+    ):
+        """Derived order_by must not leak unresolved aliases to SQL."""
+        derived = base_sales.query(
+            columns=["orderStatus$caption", "salesAmount"],
+            order_by=["collection_rate ASC"],
+        )
+
+        with pytest.raises(ComposeSchemaError) as exc_info:
+            compile_plan_to_sql(derived, ctx, semantic_service=svc, dialect="postgres")
+
+        err = exc_info.value
+        assert err.code == schema_error_codes.DERIVED_QUERY_UNKNOWN_FIELD
+        assert err.offending_field == "collection_rate"
+        assert "order_by" in str(err)
+
     def test_compile_rejects_unknown_dollar_field_before_sql(
         self, svc, ctx, base_sales
     ):

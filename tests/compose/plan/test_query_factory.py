@@ -64,3 +64,16 @@ class TestQueryFactory:
         assert grouped.group_by == ("partnerId",)
         assert selected.columns == ("partnerId", "SUM(amountTotal) AS total")
         assert ordered.order_by == ("-total",)
+
+    def test_derived_query_rejects_calculated_fields_option(self):
+        """Derived QueryPlan.query does not support request-level calculatedFields."""
+        from_method = getattr(Query, "from")
+        sales = from_method("SaleOrderQM").select("partnerId", "amountTotal")
+
+        with pytest.raises(ValueError, match="calculatedFields"):
+            sales.query({
+                "columns": ["partnerId", "amountTotal"],
+                "calculatedFields": [
+                    {"name": "rate", "expression": "amountTotal / 100"}
+                ],
+            })

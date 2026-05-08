@@ -897,6 +897,11 @@ def _validate_derived_output_refs(
     if not source_columns:
         return
     source_names = set(source_columns)
+    current_output_names = {
+        extract_column_alias(column).output_name
+        for column in plan.columns
+    }
+    order_by_names = source_names | current_output_names
     for column in plan.columns:
         parts = extract_column_alias(column)
         for ident in _iter_unquoted_identifiers(parts.expression):
@@ -911,9 +916,24 @@ def _validate_derived_output_refs(
                         f"(available: {sorted(source_names)!r})"
                     ),
                     phase=schema_error_codes.PHASE_SCHEMA_DERIVE,
-                    plan_path="DerivedQueryPlan",
-                    offending_field=ident,
-                )
+                        plan_path="DerivedQueryPlan",
+                        offending_field=ident,
+                    )
+    for entry in plan.order_by or []:
+        field_name = normalize_order_by_item(entry).field
+        if field_name not in order_by_names:
+            raise ComposeSchemaError(
+                code=schema_error_codes.DERIVED_QUERY_UNKNOWN_FIELD,
+                message=(
+                    f"derived query order_by references unknown field "
+                    f"{field_name!r} not present in source output schema "
+                    f"or this derived query's output columns "
+                    f"(available: {sorted(order_by_names)!r})"
+                ),
+                phase=schema_error_codes.PHASE_SCHEMA_DERIVE,
+                plan_path="DerivedQueryPlan",
+                offending_field=field_name,
+            )
     for entry in _iter_slice_entries(plan.slice_ or []):
         field_name = _slice_field_name(entry)
         if field_name:

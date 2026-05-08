@@ -142,6 +142,18 @@ class TestSpecExample3JoinThenFilter:
             {"field": "arOverdueAmount", "dir": "desc"},
         )
 
+    def test_from_source_rejects_calculated_fields(self):
+        base = from_(model="SaleOrderQM", columns=["partner$id", "amountTotal"])
+
+        with pytest.raises(ValueError, match="calculatedFields"):
+            from_(
+                source=base,
+                columns=["partner$id", "amountTotal"],
+                calculated_fields=[
+                    {"name": "rate", "expression": "amountTotal / 100"}
+                ],
+            )
+
 
 class TestMultiLevelDerivation:
     def test_three_level_derivation_chain(self):

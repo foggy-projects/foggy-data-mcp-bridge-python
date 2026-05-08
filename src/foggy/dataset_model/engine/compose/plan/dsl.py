@@ -139,6 +139,12 @@ def from_(
             "from_(source=...) does not accept having; use "
             "source.query(slice=[...]) for derived-plan post-result filters."
         )
+    if calculated_fields_tuple:
+        raise ValueError(
+            "from_(source=...) does not accept calculatedFields; project "
+            "derived expressions in columns with AS aliases, then add "
+            "another .query(...) stage for post-result filtering or ordering."
+        )
     return DerivedQueryPlan(
         source=source,
         columns=cols,

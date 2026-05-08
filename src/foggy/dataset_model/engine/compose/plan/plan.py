@@ -384,6 +384,13 @@ class QueryPlan(ABC):
             limit = options_dict.get("limit", limit)
             start = options_dict.get("start", start)
             distinct = options_dict.get("distinct", distinct)
+            if options_dict.get("calculatedFields"):
+                raise ValueError(
+                    "QueryPlan.query() does not accept calculatedFields; "
+                    "project derived expressions in columns with AS aliases, "
+                    "then add another .query(...) stage for post-result "
+                    "filtering or ordering."
+                )
 
         from ..sandbox import validate_derived_columns, validate_slice
         from .column_normalizer import normalize_columns_to_strings
