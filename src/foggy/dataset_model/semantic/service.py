@@ -1347,6 +1347,7 @@ class SemanticQueryService(SemanticServiceResolver):
         calc_field_defs = self._request_calculated_field_defs(request)
         if calc_field_defs:
             calc_field_defs = sort_calc_fields_by_dependencies(calc_field_defs)
+        self._reject_window_calculated_field_slice(request, calc_field_defs)
         aggregate_calc_fields = self._aggregate_calc_field_names(
             calc_field_defs,
             model,
@@ -2770,6 +2771,39 @@ class SemanticQueryService(SemanticServiceResolver):
                 if cf.alias:
                     names.add(cf.alias)
         return names
+
+    def _reject_window_calculated_field_slice(
+        self,
+        request: SemanticQueryRequest,
+        calc_field_defs: List[CalculatedFieldDef],
+    ) -> None:
+        """Reject same-request filters over window calculated-field aliases."""
+        if not calc_field_defs or not request.slice:
+            return
+
+        window_names = {
+            name
+            for cf in calc_field_defs
+            if cf.is_window_function()
+            for name in (cf.name, cf.alias)
+            if name
+        }
+        if not window_names:
+            return
+
+        matched = sorted(self._collect_condition_fields(request.slice) & window_names)
+        if not matched:
+            return
+
+        joined = ", ".join(repr(name) for name in matched)
+        raise ValueError(
+            "WINDOW_CALCULATED_FIELD_SLICE_NOT_SUPPORTED: query_model "
+            f"slice cannot reference window calculated field alias {joined} "
+            "from the same request. Return the window field and filter the "
+            "result rows, or use compose_script with a base dsl(...) window "
+            "calculatedFields query followed by a derived .query({slice:[...]}) "
+            "stage."
+        )
 
     _FORMULA_AGG_CALL_RE = re.compile(
         r"\b(sum|avg|count|countd|count_distinct|min|max|stddev_pop|stddev_samp|var_pop|var_samp)\s*\(",

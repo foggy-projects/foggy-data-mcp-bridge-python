@@ -134,6 +134,44 @@ class TestOdooAggregateHaving:
             "arOverdueAmount",
         ]
 
+    def test_window_calculated_field_slice_rejected_before_sql(self, odoo_service):
+        request = SemanticQueryRequest(
+            columns=[
+                "salesTeam$id",
+                "salesTeam$caption",
+                "salesperson$id",
+                "salesperson$caption",
+                "sum(amountTotal) as totalSales",
+                "salesRank",
+            ],
+            group_by=[
+                "salesTeam$id",
+                "salesTeam$caption",
+                "salesperson$id",
+                "salesperson$caption",
+            ],
+            calculated_fields=[
+                {
+                    "name": "salesRank",
+                    "expression": "RANK()",
+                    "partitionBy": ["salesTeam$id"],
+                    "windowOrderBy": [{"field": "totalSales", "dir": "desc"}],
+                }
+            ],
+            slice=[{"field": "salesRank", "op": "=", "value": 1}],
+            order_by=["salesTeam$caption"],
+            limit=100,
+        )
+
+        response = odoo_service.query_model(
+            "OdooSaleOrderQueryModel", request, mode="validate",
+        )
+
+        assert response.sql is None
+        assert response.error is not None
+        assert "WINDOW_CALCULATED_FIELD_SLICE_NOT_SUPPORTED" in response.error
+        assert "salesRank" in response.error
+
     def test_predefined_formula_measure_alias_can_be_used_in_having(self, odoo_service):
         request = SemanticQueryRequest(
             columns=["partner$caption", "arOverdueAmount AS overdue_amount"],
