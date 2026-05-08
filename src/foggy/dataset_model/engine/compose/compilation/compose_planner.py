@@ -556,7 +556,7 @@ def _compile_derived(plan: DerivedQueryPlan, state: _CompileState) -> CteUnit:
         alias=derived_alias,
         sql=outer_sql,
         params=list(inner.params) + list(outer_params),
-        select_columns=list(plan.columns),
+        select_columns=_derived_output_columns(plan, source_columns),
     )
 
 
@@ -808,6 +808,18 @@ def _base_declared_output_names(plan: BaseModelPlan) -> List[str]:
             if isinstance(name, str) and name.strip():
                 names.append(name.strip())
     return names
+
+
+def _derived_output_columns(
+    plan: DerivedQueryPlan,
+    source_columns: List[str],
+) -> List[str]:
+    if not plan.columns:
+        return list(source_columns)
+    return [
+        extract_column_alias(column).output_name
+        for column in plan.columns
+    ]
 
 
 _DERIVED_EXPR_RESERVED_TOKENS: frozenset = frozenset({

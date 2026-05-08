@@ -390,6 +390,31 @@ class TestDerivedEdgeCases:
         assert exc_info.value.code == schema_error_codes.DERIVED_QUERY_UNKNOWN_FIELD
         assert exc_info.value.offending_field == "priorOrders"
 
+    def test_derived_alias_output_schema_uses_alias_in_join_projection(self, svc, ctx):
+        left = from_(
+            model="FactSalesModel",
+            columns=["orderStatus$caption as status"],
+            group_by=["orderStatus$caption"],
+        )
+        right = from_(
+            model="FactSalesModel",
+            columns=["orderStatus$caption"],
+            group_by=["orderStatus$caption"],
+        ).query(columns=["orderStatus$caption as prior_status"])
+
+        joined = left.join(
+            right,
+            type="left",
+            on=[{"left": "status", "op": "=", "right": "prior_status"}],
+        )
+
+        composed = compile_plan_to_sql(
+            joined, ctx, semantic_service=svc, dialect="postgres"
+        )
+
+        assert 'cte_2."orderStatus$caption as prior_status"' not in composed.sql
+        assert "cte_2.prior_status" in composed.sql
+
     def test_derived_slice_nested_or_with_is_null(self, svc, ctx):
         left = from_(
             model="FactSalesModel",
