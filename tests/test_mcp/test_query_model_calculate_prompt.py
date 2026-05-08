@@ -75,3 +75,21 @@ def test_query_model_prompt_guides_date_difference_cutoff_filters() -> None:
     assert "dateMaturity" in prompt_text
     assert "2026-04-06" in prompt_text
     assert "overdueDays" in prompt_text
+
+
+def test_query_model_prompt_guides_aggregate_threshold_alias_filters() -> None:
+    loader = get_tool_config_loader()
+    tool = loader.get_tool("dataset.query_model")
+
+    assert tool is not None
+
+    prompt_text = tool.description
+
+    assert "分组后的聚合阈值" in prompt_text
+    assert "Pivot 轴成员阈值" in prompt_text
+    assert "pivot.rows[*].having" in prompt_text
+    assert "顶层 `slice` 只用于聚合前的数据域过滤" in prompt_text
+    assert "sum(amountTotal) as totalSales" in prompt_text
+    assert "totalSales > 10000" in prompt_text
+    assert "amountTotal > 10000" in prompt_text
+    assert "明细字段" in prompt_text
