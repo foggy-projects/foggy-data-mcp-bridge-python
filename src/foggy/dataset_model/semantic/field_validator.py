@@ -73,7 +73,7 @@ _EXPR_KEYWORDS: frozenset[str] = frozenset({
     "first_value", "last_value",
     # Common scalar functions
     "coalesce", "ifnull", "nvl", "nullif", "calculate", "remove", "cast", "convert",
-    "concat", "substring", "left", "right",
+    "concat", "substring", "left", "right", "ratio_to_total", "ratiototal",
     "floor", "ceil", "ceiling", "mod", "power", "sqrt",
     # Date/time helpers supported by the formula compiler.
     "now", "today", "date_diff", "date_add", "date_sub",
@@ -615,6 +615,12 @@ def validate_query_fields(model: Any, request: Any) -> Optional[InvalidQueryFiel
         if expr:
             calc_exprs.append((name, expr))
     calc_map = dict(calc_exprs)
+
+    for pac in getattr(request, "post_aggregate_calculations", None) or []:
+        name = pac.get("name") if isinstance(pac, dict) else getattr(pac, "name", None)
+        if name:
+            schema_fields.add(name)
+            dynamic_fields.add(name)
 
     time_window = getattr(request, "time_window", None)
     if isinstance(time_window, dict):

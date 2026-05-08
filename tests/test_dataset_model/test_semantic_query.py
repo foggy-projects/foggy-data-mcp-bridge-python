@@ -172,6 +172,103 @@ class TestOdooAggregateHaving:
         assert "WINDOW_CALCULATED_FIELD_SLICE_NOT_SUPPORTED" in response.error
         assert "salesRank" in response.error
 
+    def test_post_aggregate_calculated_field_alias_slice_rejected_before_sql(self, odoo_service):
+        request = SemanticQueryRequest(
+            columns=[
+                "salesTeam$id",
+                "salesTeam$caption",
+                "sum(amountTotal) as teamSales",
+                "salesShare",
+            ],
+            group_by=["salesTeam$id", "salesTeam$caption"],
+            calculated_fields=[
+                {
+                    "name": "salesShare",
+                    "expression": (
+                        "teamSales / NULLIF("
+                        "CALCULATE(SUM(amountTotal), REMOVE(salesTeam$id)), 0)"
+                    ),
+                }
+            ],
+            slice=[{"field": "salesShare", "op": ">", "value": 0.2}],
+            order_by=["-teamSales"],
+            limit=10,
+        )
+
+        response = odoo_service.query_model(
+            "OdooSaleOrderQueryModel", request, mode="validate",
+        )
+
+        assert response.sql is None
+        assert response.error is not None
+        assert "POST_AGGREGATE_CALCULATED_FIELD_UNSUPPORTED" in response.error
+        assert "teamSales" in response.error
+        assert 'column "teamsales"' not in response.error.lower()
+
+    def test_post_aggregate_ratio_to_total_builds_outer_filter_stage(self, odoo_service):
+        request = SemanticQueryRequest(
+            columns=[
+                "salesTeam$id",
+                "salesTeam$caption",
+                "sum(amountTotal) as teamSales",
+                "salesShare",
+            ],
+            group_by=["salesTeam$id", "salesTeam$caption"],
+            post_aggregate_calculations=[
+                {
+                    "name": "salesShare",
+                    "kind": "ratioToTotal",
+                    "measure": "teamSales",
+                    "scope": "grandTotal",
+                    "format": "ratio",
+                }
+            ],
+            slice=[{"field": "salesShare", "op": ">", "value": 0.2}],
+            order_by=["-teamSales", "-salesShare"],
+            limit=10,
+        )
+
+        response = _build_response(
+            odoo_service, "OdooSaleOrderQueryModel", request,
+        )
+
+        assert "WITH __STAGE_1__ AS" in response.sql
+        assert "__POST_AGG_STAGE__ AS" in response.sql
+        assert '"teamSales" / NULLIF(SUM("teamSales") OVER (), 0) AS "salesShare"' in response.sql
+        assert 'FROM __POST_AGG_STAGE__' in response.sql
+        assert 'WHERE "salesShare" > ?' in response.sql
+        assert 'ORDER BY "teamSales" DESC, "salesShare" DESC' in response.sql
+        assert response.params[-1] == 0.2
+
+    def test_calculated_fields_ratio_to_total_sugar_normalizes_to_post_aggregate(self, odoo_service):
+        request = SemanticQueryRequest(
+            columns=[
+                "salesTeam$id",
+                "salesTeam$caption",
+                "sum(amountTotal) as teamSales",
+                "salesShare",
+            ],
+            group_by=["salesTeam$id", "salesTeam$caption"],
+            calculated_fields=[
+                {
+                    "name": "salesShare",
+                    "expression": "ratio_to_total(teamSales)",
+                }
+            ],
+            slice=[{"field": "salesShare", "op": ">", "value": 0.2}],
+            order_by=["-salesShare"],
+            limit=10,
+        )
+
+        response = _build_response(
+            odoo_service, "OdooSaleOrderQueryModel", request,
+        )
+
+        assert "__POST_AGG_STAGE__ AS" in response.sql
+        assert '"teamSales" / NULLIF(SUM("teamSales") OVER (), 0) AS "salesShare"' in response.sql
+        assert 'WHERE "salesShare" > ?' in response.sql
+        assert 'POST_AGGREGATE_CALCULATED_FIELD_UNSUPPORTED' not in response.sql
+
     def test_predefined_formula_measure_alias_can_be_used_in_having(self, odoo_service):
         request = SemanticQueryRequest(
             columns=["partner$caption", "arOverdueAmount AS overdue_amount"],

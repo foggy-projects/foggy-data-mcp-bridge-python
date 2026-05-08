@@ -1461,6 +1461,16 @@ def _render_slice_value(
                 ),
             )
         return _render_qualified_ref(inner_alias, ref, dialect), []
+    if isinstance(value, dict):
+        raise ComposeCompileError(
+            code=error_codes.UNSUPPORTED_PLAN_SHAPE,
+            phase="plan-lower",
+            message=(
+                "Derived slice object values are unsupported except "
+                "{'$field': '<output_field>'}; raw expression objects such "
+                "as {'$expr': ...} are not a public DSL feature."
+            ),
+        )
     op_upper = _normalize_slice_op(op)
     if op_upper in {"IS NULL", "IS NOT NULL"}:
         return "", []
@@ -1482,6 +1492,16 @@ def _render_slice_value(
                 message=(
                     f"Derived slice operator {op_upper!r} requires at "
                     "least one value."
+                ),
+            )
+        if any(isinstance(item, dict) for item in values):
+            raise ComposeCompileError(
+                code=error_codes.UNSUPPORTED_PLAN_SHAPE,
+                phase="plan-lower",
+                message=(
+                    f"Derived slice operator {op_upper!r} does not support "
+                    "object values; raw expression objects such as "
+                    "{'$expr': ...} are not a public DSL feature."
                 ),
             )
         return "(" + ", ".join("?" for _ in values) + ")", values

@@ -130,6 +130,10 @@ class SemanticQueryService(SemanticServiceResolver):
         >>> service.register_model(my_table_model)
         >>> response = service.query_model("sales_qm", request)
     """
+    _RATIO_TO_TOTAL_SUGAR_RE = re.compile(
+        r"^\s*(?:ratio_to_total|ratioToTotal)\s*\(\s*([A-Za-z_][\w$]*)\s*\)\s*$",
+        re.IGNORECASE,
+    )
 
     def __init__(
         self,
@@ -1281,6 +1285,7 @@ class SemanticQueryService(SemanticServiceResolver):
                 for cf in (request.calculated_fields or [])
             }
             calc_field_names.discard(None)
+            calc_field_names.update(self._request_post_aggregate_calculation_names(request))
             for col_name in request.columns:
                 # Inline aggregate path keeps its own AS-parser; check it
                 # first so non-aggregate alias parsing doesn't run for
@@ -1347,7 +1352,27 @@ class SemanticQueryService(SemanticServiceResolver):
         calc_field_defs = self._request_calculated_field_defs(request)
         if calc_field_defs:
             calc_field_defs = sort_calc_fields_by_dependencies(calc_field_defs)
+        post_aggregate_defs, post_aggregate_sugar_names = self._request_post_aggregate_calculation_defs(
+            request,
+            calc_field_defs,
+        )
+        if post_aggregate_sugar_names:
+            calc_field_defs = [
+                cf for cf in calc_field_defs
+                if (cf.alias or cf.name) not in post_aggregate_sugar_names
+                and cf.name not in post_aggregate_sugar_names
+            ]
         self._reject_window_calculated_field_slice(request, calc_field_defs)
+        selected_aggregate_aliases = set(self._selected_aggregate_sql(columns_info).keys())
+        self._validate_post_aggregate_calculations(
+            post_aggregate_defs,
+            selected_aggregate_aliases,
+        )
+        self._reject_post_aggregate_calculated_fields(
+            request,
+            calc_field_defs,
+            selected_aggregate_aliases,
+        )
         aggregate_calc_fields = self._aggregate_calc_field_names(
             calc_field_defs,
             model,
@@ -1358,44 +1383,49 @@ class SemanticQueryService(SemanticServiceResolver):
         inner_cfs = []
         outer_cfs = []
         outer_names = set()
+        post_aggregate_names = self._post_aggregate_alias_names(post_aggregate_defs)
         
         if calc_field_defs:
             for cf in calc_field_defs:
                 if cf.is_window_function():
                     needs_cte_wrapping = True
                     break
-            
-            if needs_cte_wrapping:
-                from foggy.dataset_model.semantic.formula_field_extractor import extract_formula_fields
-                for cf in calc_field_defs:
-                    alias = cf.alias or cf.name
-                    expr = str(cf.expression or "")
-                    deps = extract_formula_fields(expr)
-                    depends_on_outer = any(on in expr for on in outer_names)
-                    if cf.is_window_function() or depends_on_outer:
-                        outer_cfs.append(cf)
-                        outer_names.add(alias)
-                    else:
-                        inner_cfs.append(cf)
-            else:
-                inner_cfs = list(calc_field_defs)
+        if post_aggregate_defs:
+            needs_cte_wrapping = True
+
+        if needs_cte_wrapping:
+            from foggy.dataset_model.semantic.formula_field_extractor import extract_formula_fields
+            for cf in calc_field_defs:
+                alias = cf.alias or cf.name
+                expr = str(cf.expression or "")
+                deps = extract_formula_fields(expr)
+                depends_on_outer = any(on in expr for on in outer_names)
+                if cf.is_window_function() or depends_on_outer:
+                    outer_cfs.append(cf)
+                    outer_names.add(alias)
+                else:
+                    inner_cfs.append(cf)
+        else:
+            inner_cfs = list(calc_field_defs)
 
         compiled_calcs: Dict[str, str] = {}
         compiled_calcs_params: Dict[str, List[Any]] = {}
         calculate_context = self._build_calculate_query_context(request)
 
         for cf in inner_cfs:
+            alias = cf.alias or cf.name
             aggregate_measure_formula = self._is_grouped_measure_formula(
                 cf,
                 model,
                 grouped=bool(request.group_by),
             )
+            if alias in (request.group_by or []) or cf.name in (request.group_by or []):
+                aggregate_measure_formula = False
             select_sql, select_params = self._build_calculated_field_sql(
                 cf, model, ensure_join, compiled_calcs, compiled_calcs_params,
                 calculate_context=calculate_context,
                 aggregate_measure_formula=aggregate_measure_formula,
             )
-            alias = cf.alias or cf.name
             builder.select(
                 f"{select_sql} AS {self._qi(alias)}",
                 params=select_params or None,
@@ -1417,9 +1447,16 @@ class SemanticQueryService(SemanticServiceResolver):
         # post-aggregate filters and are emitted as HAVING by default.
         effective_slice = list(request.slice or [])
         effective_having = list(request.having or [])
+        post_aggregate_slice: List[Any] = []
         
         # Ensure inline aggregate aliases are recognized as aggregate fields
         all_aggregate_fields = aggregate_calc_fields | set(self._selected_aggregate_sql(columns_info).keys())
+
+        if post_aggregate_names:
+            effective_slice, post_aggregate_slice = self._partition_slice_for_post_aggregate(
+                effective_slice,
+                post_aggregate_names,
+            )
 
         if self._auto_lift_aggregate_slice_to_having:
             effective_slice, lifted_having = self._partition_slice_for_aggregate_lift(
@@ -1673,36 +1710,97 @@ class SemanticQueryService(SemanticServiceResolver):
                     "window": cf.is_window_function(),
                 })
                 outer_compiled_calcs[alias] = self._qi(alias)
-                
+
+            for pac in post_aggregate_defs:
+                alias = str(pac.get("name") or "")
+                select_sql = self._build_post_aggregate_calculation_sql(pac, outer_compiled_calcs)
+                outer_builder.select(f"{select_sql} AS {self._qi(alias)}")
+                outer_columns_info.append({
+                    "name": alias,
+                    "fieldName": alias,
+                    "expression": f"ratio_to_total({pac.get('measure')})",
+                    "aggregation": None,
+                    "postAggregate": True,
+                    "kind": pac.get("kind"),
+                })
+                outer_compiled_calcs[alias] = self._qi(alias)
+
             columns_info = outer_columns_info
-            
-            selected_order_aliases = self._build_selected_order_aliases(columns_info)
-            for order_item in request.order_by:
-                column, direction = self._normalize_order_by_item(order_item)
-                if column:
-                    selected_alias = selected_order_aliases.get(column)
-                    if selected_alias:
-                        outer_builder.order_by(selected_alias, direction)
-                    else:
-                        outer_builder.order_by(self._qi(column), direction)
-                        
-            limit = min(request.limit or self._default_limit, self._max_limit)
-            outer_builder.limit(limit)
-            if request.start:
-                outer_builder.offset(request.start)
-                
-            sql, params = outer_builder.build()
-            
-            outer_stage = QueryBuildResultCteStage(
-                alias="outer_stage",
-                sql=sql,
-                params=params,
-                select_columns=[c["name"] for c in columns_info]
-            )
-            cte_stages.append(outer_stage)
-            
-            sql = f"WITH {inner_alias} AS (\n{self._indent_sql(inner_sql)}\n)\n{sql}"
-            params = inner_params + params
+
+            if post_aggregate_defs:
+                post_alias = "__POST_AGG_STAGE__"
+                post_sql, post_params = outer_builder.build()
+                cte_stages.append(QueryBuildResultCteStage(
+                    alias=post_alias,
+                    sql=post_sql,
+                    params=post_params,
+                    select_columns=[c["name"] for c in columns_info],
+                ))
+
+                final_builder = SqlQueryBuilder(dialect=self._dialect)
+                final_builder.from_table(post_alias)
+                for col in columns_info:
+                    final_builder.select(self._qi(col["name"]))
+
+                final_aliases = self._build_selected_order_aliases(columns_info)
+                for filter_item in post_aggregate_slice:
+                    fragment, filter_params = self._build_outer_alias_filter_condition(
+                        filter_item,
+                        final_aliases,
+                    )
+                    if fragment:
+                        final_builder.where(fragment, params=filter_params or None)
+
+                selected_order_aliases = final_aliases
+                for order_item in request.order_by:
+                    column, direction = self._normalize_order_by_item(order_item)
+                    if column:
+                        selected_alias = selected_order_aliases.get(column)
+                        if selected_alias:
+                            final_builder.order_by(selected_alias, direction)
+                        else:
+                            final_builder.order_by(self._qi(column), direction)
+
+                limit = min(request.limit or self._default_limit, self._max_limit)
+                final_builder.limit(limit)
+                if request.start:
+                    final_builder.offset(request.start)
+
+                final_sql, final_params = final_builder.build()
+                sql = (
+                    f"WITH {inner_alias} AS (\n{self._indent_sql(inner_sql)}\n),\n"
+                    f"{post_alias} AS (\n{self._indent_sql(post_sql)}\n)\n"
+                    f"{final_sql}"
+                )
+                params = inner_params + post_params + final_params
+            else:
+                selected_order_aliases = self._build_selected_order_aliases(columns_info)
+                for order_item in request.order_by:
+                    column, direction = self._normalize_order_by_item(order_item)
+                    if column:
+                        selected_alias = selected_order_aliases.get(column)
+                        if selected_alias:
+                            outer_builder.order_by(selected_alias, direction)
+                        else:
+                            outer_builder.order_by(self._qi(column), direction)
+
+                limit = min(request.limit or self._default_limit, self._max_limit)
+                outer_builder.limit(limit)
+                if request.start:
+                    outer_builder.offset(request.start)
+
+                sql, params = outer_builder.build()
+
+                outer_stage = QueryBuildResultCteStage(
+                    alias="outer_stage",
+                    sql=sql,
+                    params=params,
+                    select_columns=[c["name"] for c in columns_info]
+                )
+                cte_stages.append(outer_stage)
+
+                sql = f"WITH {inner_alias} AS (\n{self._indent_sql(inner_sql)}\n)\n{sql}"
+                params = inner_params + params
         else:
             sql, params = inner_sql, inner_params
 
@@ -2388,6 +2486,140 @@ class SemanticQueryService(SemanticServiceResolver):
             calc_fields.append(cf)
         return calc_fields
 
+    @staticmethod
+    def _request_post_aggregate_calculation_names(
+        request: SemanticQueryRequest,
+    ) -> set[str]:
+        names: set[str] = set()
+        for item in getattr(request, "post_aggregate_calculations", None) or []:
+            name = item.get("name") if isinstance(item, dict) else getattr(item, "name", None)
+            if name:
+                names.add(str(name))
+        return names
+
+    def _request_post_aggregate_calculation_defs(
+        self,
+        request: SemanticQueryRequest,
+        calc_field_defs: List[CalculatedFieldDef],
+    ) -> Tuple[List[Dict[str, Any]], set[str]]:
+        """Normalize explicit postAggregateCalculations and ratio_to_total sugar."""
+        result: List[Dict[str, Any]] = []
+        sugar_names: set[str] = set()
+        seen: set[str] = set()
+
+        for item in getattr(request, "post_aggregate_calculations", None) or []:
+            if not isinstance(item, dict):
+                raise ValueError(
+                    "POST_AGGREGATE_CALCULATION_INVALID: postAggregateCalculations "
+                    "entries must be objects."
+                )
+            payload = dict(item)
+            name = str(payload.get("name") or "")
+            if not name:
+                raise ValueError(
+                    "POST_AGGREGATE_CALCULATION_INVALID: postAggregateCalculations "
+                    "entries require a non-empty name."
+                )
+            if name in seen:
+                raise ValueError(
+                    f"POST_AGGREGATE_CALCULATION_DUPLICATE: duplicate postAggregateCalculations name {name!r}."
+                )
+            seen.add(name)
+            result.append(payload)
+
+        for cf in calc_field_defs or []:
+            measure = self._extract_ratio_to_total_measure(str(cf.expression or ""))
+            if not measure:
+                continue
+            alias = cf.alias or cf.name
+            if alias in seen:
+                raise ValueError(
+                    f"POST_AGGREGATE_CALCULATION_DUPLICATE: duplicate postAggregateCalculations name {alias!r}."
+                )
+            seen.add(alias)
+            sugar_names.add(alias)
+            result.append({
+                "name": alias,
+                "kind": "ratioToTotal",
+                "measure": measure,
+                "scope": "grandTotal",
+                "format": "ratio",
+                "source": "calculatedFields",
+            })
+
+        return result, sugar_names
+
+    def _extract_ratio_to_total_measure(self, expression: str) -> Optional[str]:
+        match = self._RATIO_TO_TOTAL_SUGAR_RE.match(expression or "")
+        if not match:
+            return None
+        return match.group(1)
+
+    @staticmethod
+    def _post_aggregate_alias_names(items: List[Dict[str, Any]]) -> set[str]:
+        return {str(item.get("name")) for item in items or [] if item.get("name")}
+
+    def _validate_post_aggregate_calculations(
+        self,
+        items: List[Dict[str, Any]],
+        selected_aggregate_aliases: set[str],
+    ) -> None:
+        for item in items or []:
+            name = str(item.get("name") or "")
+            kind = str(item.get("kind") or "")
+            measure = str(item.get("measure") or "")
+            scope = str(item.get("scope") or "grandTotal")
+            fmt = str(item.get("format") or "ratio")
+            if kind != "ratioToTotal":
+                raise ValueError(
+                    "POST_AGGREGATE_CALCULATION_UNSUPPORTED: only "
+                    f"kind='ratioToTotal' is supported in v1.6; got {kind!r} "
+                    f"for {name!r}."
+                )
+            if scope != "grandTotal":
+                raise ValueError(
+                    "POST_AGGREGATE_CALCULATION_UNSUPPORTED: only "
+                    f"scope='grandTotal' is supported in v1.6; got {scope!r} "
+                    f"for {name!r}."
+                )
+            if fmt not in {"ratio", "percent"}:
+                raise ValueError(
+                    "POST_AGGREGATE_CALCULATION_UNSUPPORTED: format must be "
+                    f"'ratio' or 'percent'; got {fmt!r} for {name!r}."
+                )
+            if not measure:
+                raise ValueError(
+                    f"POST_AGGREGATE_MEASURE_REQUIRED: ratioToTotal {name!r} requires measure."
+                )
+            if measure not in selected_aggregate_aliases:
+                raise ValueError(
+                    "POST_AGGREGATE_MEASURE_NOT_FOUND: ratioToTotal "
+                    f"{name!r} measure {measure!r} must reference a selected "
+                    "aggregate alias from columns[]."
+                )
+
+    def _build_post_aggregate_calculation_sql(
+        self,
+        item: Dict[str, Any],
+        alias_refs: Dict[str, str],
+    ) -> str:
+        kind = str(item.get("kind") or "")
+        if kind != "ratioToTotal":
+            raise ValueError(
+                f"POST_AGGREGATE_CALCULATION_UNSUPPORTED: unsupported kind {kind!r}."
+            )
+        measure = str(item.get("measure") or "")
+        measure_ref = alias_refs.get(measure)
+        if not measure_ref:
+            raise ValueError(
+                "POST_AGGREGATE_MEASURE_NOT_FOUND: ratioToTotal measure "
+                f"{measure!r} is not available in the grouped result."
+            )
+        expr = f"{measure_ref} / NULLIF(SUM({measure_ref}) OVER (), 0)"
+        if str(item.get("format") or "ratio") == "percent":
+            expr = f"({expr}) * 100"
+        return expr
+
     def _build_time_window_base_sql(
         self,
         model: DbTableModelImpl,
@@ -2805,6 +3037,41 @@ class SemanticQueryService(SemanticServiceResolver):
             "stage."
         )
 
+    def _reject_post_aggregate_calculated_fields(
+        self,
+        request: SemanticQueryRequest,
+        calc_field_defs: List[CalculatedFieldDef],
+        selected_aggregate_aliases: set[str],
+    ) -> None:
+        """Reject aggregate-context calculated fields that need an outer stage.
+
+        Free-form calculatedFields still run in the current query layer. A
+        calculated field that references a selected aggregate alias requires a
+        post-aggregate outer relation stage; supported share-of-total cases
+        should use postAggregateCalculations or ratio_to_total(...) sugar.
+        """
+        if not calc_field_defs or not request.group_by:
+            return
+
+        for cf in calc_field_defs:
+            alias = cf.alias or cf.name
+            expression = str(cf.expression or "")
+            deps = extract_field_dependencies(expression) | set(extract_formula_fields(expression))
+            matched_aliases = sorted(deps & selected_aggregate_aliases)
+            if matched_aliases:
+                joined = ", ".join(repr(name) for name in matched_aliases)
+                raise ValueError(
+                    "POST_AGGREGATE_CALCULATED_FIELD_UNSUPPORTED: query_model "
+                    f"calculatedFields entry {alias!r} references selected "
+                    f"aggregate alias {joined} from the same grouped query. "
+                    "Free-form post-aggregate expressions are not supported "
+                    "in v1.6. For share-of-total metrics use "
+                    "postAggregateCalculations kind='ratioToTotal' or "
+                    "calculatedFields expression ratio_to_total(<aggregateAlias>); "
+                    "otherwise return grouped aggregate rows and compute the "
+                    "expression outside SQL."
+                )
+
     _FORMULA_AGG_CALL_RE = re.compile(
         r"\b(sum|avg|count|countd|count_distinct|min|max|stddev_pop|stddev_samp|var_pop|var_samp)\s*\(",
         re.IGNORECASE,
@@ -2953,6 +3220,130 @@ class SemanticQueryService(SemanticServiceResolver):
         ):
             return "aggregate"
         return "row"
+
+    def _partition_slice_for_post_aggregate(
+        self,
+        items: List[Any],
+        post_aggregate_fields: set[str],
+    ) -> Tuple[List[Any], List[Any]]:
+        inner_filters: List[Any] = []
+        post_filters: List[Any] = []
+        for item in items or []:
+            phase = self._classify_post_aggregate_slice_phase(item, post_aggregate_fields)
+            if phase == "post":
+                post_filters.append(item)
+            else:
+                inner_filters.append(item)
+        return inner_filters, post_filters
+
+    def _classify_post_aggregate_slice_phase(
+        self,
+        item: Any,
+        post_aggregate_fields: set[str],
+    ) -> str:
+        if not isinstance(item, dict):
+            return "inner"
+
+        for group_key in ("$or", "or", "$and", "and", "conditions", "children", "filters"):
+            nested = item.get(group_key)
+            if not isinstance(nested, list):
+                continue
+            phase: Optional[str] = None
+            for child in nested:
+                child_phase = self._classify_post_aggregate_slice_phase(
+                    child,
+                    post_aggregate_fields,
+                )
+                if phase is None:
+                    phase = child_phase
+                elif phase != child_phase:
+                    raise ValueError(
+                        "MIXED_INNER_AND_POST_AGGREGATE_SLICE: a single "
+                        "logical slice group cannot mix base/aggregate fields "
+                        "and postAggregateCalculations aliases because it "
+                        "cannot be safely split across query stages."
+                    )
+            return phase or "inner"
+
+        field = item.get("field") or item.get("column")
+        if isinstance(field, str) and field in post_aggregate_fields:
+            return "post"
+        return "inner"
+
+    def _build_outer_alias_filter_condition(
+        self,
+        item: Dict[str, Any],
+        alias_refs: Dict[str, str],
+    ) -> Tuple[str, List[Any]]:
+        if not isinstance(item, dict):
+            raise ValueError(
+                "UNSUPPORTED_POST_AGGREGATE_SLICE: slice entries must be objects."
+            )
+
+        for group_key, joiner in (("$or", " OR "), ("or", " OR "), ("$and", " AND "), ("and", " AND ")):
+            nested = item.get(group_key)
+            if isinstance(nested, list):
+                fragments: List[str] = []
+                params: List[Any] = []
+                for child in nested:
+                    fragment, child_params = self._build_outer_alias_filter_condition(
+                        child,
+                        alias_refs,
+                    )
+                    if fragment:
+                        fragments.append(fragment)
+                        params.extend(child_params)
+                if not fragments:
+                    return "", []
+                joined = joiner.join(fragments)
+                if len(fragments) > 1:
+                    joined = f"({joined})"
+                return joined, params
+
+        column = item.get("field") or item.get("column")
+        operator = item.get("op") or item.get("operator") or "="
+        value = item.get("value")
+        if not column:
+            raise ValueError(
+                "UNSUPPORTED_POST_AGGREGATE_SLICE: slice leaf requires field/op/value."
+            )
+        col_expr = alias_refs.get(column)
+        if not col_expr:
+            raise ValueError(
+                "POST_AGGREGATE_SLICE_FIELD_NOT_SELECTED: slice field "
+                f"{column!r} is not available in the post-aggregate stage."
+            )
+
+        condition_params: List[Any] = []
+        if isinstance(value, dict) and "$field" in value:
+            ref_field = value["$field"]
+            ref_expr = alias_refs.get(ref_field)
+            if not ref_expr:
+                raise ValueError(
+                    "POST_AGGREGATE_SLICE_FIELD_NOT_SELECTED: slice field "
+                    f"{ref_field!r} is not available in the post-aggregate stage."
+                )
+            op_map = {
+                "=": "=", "eq": "=", "!=": "<>", "<>": "<>", "neq": "<>",
+                ">": ">", "gt": ">", ">=": ">=", "gte": ">=",
+                "<": "<", "lt": "<", "<=": "<=", "lte": "<=",
+                "===": "=", "force_eq": "=",
+            }
+            sql_op = op_map.get(operator, operator)
+            return f"{col_expr} {sql_op} {ref_expr}", []
+
+        condition = self._formula_registry.build_condition(
+            col_expr,
+            operator,
+            value,
+            condition_params,
+        )
+        if not condition:
+            raise ValueError(
+                "UNSUPPORTED_POST_AGGREGATE_SLICE: unsupported slice operator "
+                f"{operator!r}."
+            )
+        return condition, condition_params
 
     def _build_having_condition(
         self,

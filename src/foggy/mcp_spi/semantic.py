@@ -555,6 +555,7 @@ class SemanticQueryRequest(BaseModel):
             "distinct": false,
             "withSubtotals": false,
             "timeWindow": {...},
+            "postAggregateCalculations": [...],
             "pivot": {...},
             "captionMatchMode": "EXACT",
             "mismatchHandleStrategy": "ABORT"
@@ -582,6 +583,11 @@ class SemanticQueryRequest(BaseModel):
         None,
         alias="timeWindow",
         description="SemanticDSL timeWindow intent. Kept as structured payload for Java parity.",
+    )
+    post_aggregate_calculations: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        alias="postAggregateCalculations",
+        description="Post-aggregate calculated aliases computed from grouped result aliases.",
     )
     pivot: Optional[PivotRequest] = Field(
         None,

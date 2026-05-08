@@ -1,6 +1,7 @@
 """Query request definitions for semantic layer queries."""
 
 from enum import Enum
+import re
 from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, Field, model_validator
 
@@ -77,6 +78,10 @@ class SelectColumnDef(BaseModel):
 # minimal, and reused across all calc-field constructions (thread-safe —
 # FormulaCompiler's ``validate_syntax`` is stateless).
 _SHARED_SYNTAX_COMPILER: Optional[Any] = None
+_RATIO_TO_TOTAL_SUGAR_RE = re.compile(
+    r"^\s*(?:ratio_to_total|ratioToTotal)\s*\(\s*([A-Za-z_][\w$]*)\s*\)\s*$",
+    re.IGNORECASE,
+)
 
 
 def _get_shared_syntax_compiler() -> Any:
@@ -168,6 +173,8 @@ class CalculatedFieldDef(BaseModel):
         if not self.expression:
             return self
         if self.is_window_function():
+            return self
+        if _RATIO_TO_TOTAL_SUGAR_RE.match(self.expression):
             return self
 
         # Local import keeps QM deserialisation cheap for callers that
