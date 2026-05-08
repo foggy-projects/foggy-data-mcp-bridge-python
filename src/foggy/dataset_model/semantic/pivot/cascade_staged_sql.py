@@ -7,6 +7,7 @@ Does not permit memory fallback.
 from typing import Any, List
 
 from foggy.mcp_spi.semantic import (
+    DebugInfo,
     SemanticQueryRequest,
     SemanticQueryResponse,
     PivotRequest,
@@ -299,4 +300,5 @@ INNER JOIN _child_domain c ON {_null_safe_eq(f'b.{_quote(p_alias)}', f'c.{_quote
     return SemanticQueryResponse(
         items=result,
         schema_info=base_resp.schema_info,
+        debug=DebugInfo(extra={"sql": staged_sql, "params": params}),
     )

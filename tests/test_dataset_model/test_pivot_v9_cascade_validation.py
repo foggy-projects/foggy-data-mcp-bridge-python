@@ -91,6 +91,11 @@ def _query(svc: SemanticQueryService, pivot_payload: dict) -> str | None:
     return resp.error
 
 
+def _execute(svc: SemanticQueryService, pivot_payload: dict):
+    req = SemanticQueryRequest(pivot=pivot_payload)
+    return svc.query_model("FactSalesModel", req, mode="execute")
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Rejection tests (P1 cascade fail-closed)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -273,6 +278,28 @@ class TestCascadeRejected:
         err = _query(svc, payload)
         assert err is not None
         assert PIVOT_CASCADE_NON_ADDITIVE_REJECTED in err
+
+
+class TestCascadeSqlEvidence:
+    def test_successful_cascade_result_exposes_staged_sql_debug_evidence(self, svc):
+        payload = {
+            "outputFormat": "flat",
+            "rows": [
+                {"field": "product$categoryName", "limit": 2, "orderBy": ["-salesAmount"]},
+                {"field": "salesDate$year", "limit": 1, "orderBy": ["-salesAmount"]},
+            ],
+            "metrics": ["salesAmount"],
+        }
+
+        resp = _execute(svc, payload)
+
+        assert resp.error is None
+        assert resp.items
+        assert resp.sql is not None
+        assert "WITH _base_query AS" in resp.sql
+        assert "_parent_agg" in resp.sql
+        assert "_child_domain" in resp.sql
+        assert resp.params == []
 
 
 # ─────────────────────────────────────────────────────────────────────────────
