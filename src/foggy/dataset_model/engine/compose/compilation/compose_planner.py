@@ -1082,8 +1082,9 @@ def _render_select_column(
     if _is_simple_output_ref(parts.expression):
         rendered = _render_qualified_ref(inner_alias, parts.expression, dialect)
     else:
+        expression = _rewrite_safe_division(parts.expression)
         rendered = _render_expression_output_refs(
-            parts.expression,
+            expression,
             inner_alias=inner_alias,
             dialect=dialect,
             source_columns=source_columns or [],
@@ -1154,6 +1155,135 @@ def _render_expression_output_refs(
         out.append(ch)
         i += 1
     return "".join(out)
+
+
+def _rewrite_safe_division(expression: str) -> str:
+    """Wrap explicit SQL division denominators with NULLIF(..., 0).
+
+    This is intentionally narrow: it only rewrites top-level slash tokens in
+    derived SELECT expressions and leaves already protected NULLIF(...) calls
+    unchanged. It avoids changing slice/value DSL semantics.
+    """
+    if "/" not in expression:
+        return expression
+    out: List[str] = []
+    i = 0
+    length = len(expression)
+    while i < length:
+        ch = expression[i]
+        if ch == "'":
+            end = _consume_single_quoted(expression, i)
+            out.append(expression[i:end])
+            i = end
+            continue
+        if ch == '"':
+            end = _consume_double_quoted(expression, i)
+            out.append(expression[i:end])
+            i = end
+            continue
+        if ch == "`":
+            end = _consume_backtick_quoted(expression, i)
+            out.append(expression[i:end])
+            i = end
+            continue
+        if ch == "[":
+            end = _consume_bracket_quoted(expression, i)
+            out.append(expression[i:end])
+            i = end
+            continue
+        if ch != "/":
+            out.append(ch)
+            i += 1
+            continue
+
+        rhs_start = _skip_ws(expression, i + 1)
+        if _starts_function_call(expression, rhs_start, "NULLIF"):
+            out.append(ch)
+            i += 1
+            continue
+
+        rhs_end = _consume_division_denominator(expression, rhs_start)
+        if rhs_end <= rhs_start:
+            out.append(ch)
+            i += 1
+            continue
+        out.append("/ NULLIF(")
+        out.append(expression[rhs_start:rhs_end].strip())
+        out.append(", 0)")
+        i = rhs_end
+    return "".join(out)
+
+
+def _skip_ws(text: str, start: int) -> int:
+    while start < len(text) and text[start].isspace():
+        start += 1
+    return start
+
+
+def _starts_function_call(text: str, start: int, name: str) -> bool:
+    end = start + len(name)
+    if text[start:end].upper() != name:
+        return False
+    if end < len(text) and (text[end].isalnum() or text[end] in {"_", "$"}):
+        return False
+    return _skip_ws(text, end) < len(text) and text[_skip_ws(text, end)] == "("
+
+
+def _consume_division_denominator(text: str, start: int) -> int:
+    if start >= len(text):
+        return start
+    original_start = start
+    if text[start] in {"+", "-"}:
+        start = _skip_ws(text, start + 1)
+    if start >= len(text):
+        return start
+    ch = text[start]
+    if ch == "(":
+        return _consume_balanced_parentheses(text, start)
+    if ch == "'":
+        return _consume_single_quoted(text, start)
+    if ch == '"':
+        return _consume_double_quoted(text, start)
+    if ch == "`":
+        return _consume_backtick_quoted(text, start)
+    if ch == "[":
+        return _consume_bracket_quoted(text, start)
+    i = start
+    while i < len(text) and (
+        text[i].isalnum() or text[i] in {"_", "$", "."}
+    ):
+        i += 1
+    call_start = _skip_ws(text, i)
+    if call_start < len(text) and text[call_start] == "(":
+        return _consume_balanced_parentheses(text, call_start)
+    return max(i, original_start)
+
+
+def _consume_balanced_parentheses(text: str, start: int) -> int:
+    depth = 0
+    i = start
+    while i < len(text):
+        ch = text[i]
+        if ch == "'":
+            i = _consume_single_quoted(text, i)
+            continue
+        if ch == '"':
+            i = _consume_double_quoted(text, i)
+            continue
+        if ch == "`":
+            i = _consume_backtick_quoted(text, i)
+            continue
+        if ch == "[":
+            i = _consume_bracket_quoted(text, i)
+            continue
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    return len(text)
 
 
 def _consume_single_quoted(text: str, start: int) -> int:

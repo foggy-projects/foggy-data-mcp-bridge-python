@@ -125,6 +125,64 @@ class TestDerivedSingleLevel:
         assert "$field" in str(err)
         assert "$expr" in str(err)
 
+    def test_derived_ratio_expression_wraps_denominator_with_nullif(
+        self, svc, ctx, base_sales
+    ):
+        first_stage = base_sales.query(
+            columns=[
+                "orderStatus$caption AS customer_name",
+                "salesAmount AS sales_amount",
+                "salesAmount AS overdue_amount",
+            ],
+        )
+        with_ratio = first_stage.query(
+            columns=[
+                "customer_name",
+                "sales_amount",
+                "overdue_amount",
+                "sales_amount / overdue_amount AS sales_to_overdue_ratio",
+            ],
+        )
+        result = with_ratio.query(
+            columns=["customer_name", "sales_to_overdue_ratio"],
+            slice=[{"field": "sales_to_overdue_ratio", "op": ">", "value": 3}],
+        )
+
+        composed = compile_plan_to_sql(
+            result, ctx, semantic_service=svc, dialect="postgres"
+        )
+
+        assert " / NULLIF(" in composed.sql
+        assert "overdue_amount, 0)" in composed.sql
+        assert "division by zero" not in composed.sql.lower()
+        assert 3 in composed.params
+
+    def test_derived_ratio_expression_keeps_existing_nullif(
+        self, svc, ctx, base_sales
+    ):
+        first_stage = base_sales.query(
+            columns=[
+                "orderStatus$caption AS customer_name",
+                "salesAmount AS sales_amount",
+                "salesAmount AS overdue_amount",
+            ],
+        )
+        with_ratio = first_stage.query(
+            columns=[
+                "customer_name",
+                "sales_amount",
+                "overdue_amount",
+                "sales_amount / NULLIF(overdue_amount, 0) AS sales_to_overdue_ratio",
+            ],
+        )
+
+        composed = compile_plan_to_sql(
+            with_ratio, ctx, semantic_service=svc, dialect="postgres"
+        )
+
+        assert composed.sql.upper().count("NULLIF(") == 1
+        assert "NULLIF(NULLIF" not in composed.sql.upper()
+
     def test_derived_distinct(self, svc, ctx, base_sales):
         derived = base_sales.query(columns=["orderStatus$caption"], distinct=True)
         composed = compile_plan_to_sql(
