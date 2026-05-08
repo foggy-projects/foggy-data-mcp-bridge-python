@@ -9,11 +9,17 @@ BUG-2: timeWindow validation must accept property-level timeRole fields
 import pytest
 from foggy.dataset_model.impl.model import (
     DbTableModelImpl,
+    DbModelDimensionImpl,
     DimensionJoinDef,
     DimensionPropertyDef,
     DbModelMeasureImpl,
 )
-from foggy.dataset_model.definitions.base import DbColumnDef, ColumnType, AggregationType
+from foggy.dataset_model.definitions.base import (
+    DbColumnDef,
+    ColumnType,
+    AggregationType,
+    DimensionType,
+)
 from foggy.dataset_model.semantic.service import SemanticQueryService
 from foggy.dataset_model.semantic.time_window import (
     collect_time_window_field_sets,
@@ -123,6 +129,53 @@ def _make_invoice_model() -> DbTableModelImpl:
     return model
 
 
+def _make_self_date_dimension_model() -> DbTableModelImpl:
+    """Build a self/tableless date dimension with timeRole metadata."""
+    date_dim = DbModelDimensionImpl(
+        name="dateOrder",
+        alias="Order Date",
+        column="date_order",
+        dimension_type=DimensionType.TIME,
+        data_type=ColumnType.DATETIME,
+        description="Self date dimension backed by order.date_order.",
+        timeRole="business_date",
+        recommendedUse="Primary order business date for period pivot queries.",
+    )
+    date_join = DimensionJoinDef(
+        name="dateOrder",
+        foreign_key="date_order",
+        primary_key="date_order",
+        caption_column="date_order",
+        caption="Order Date",
+        description="Self date dimension backed by order.date_order.",
+        timeRole="business_date",
+        recommendedUse="Primary order business date for period pivot queries.",
+        properties=[
+            DimensionPropertyDef(
+                column="date_order",
+                name="yearMonth",
+                caption="Order Year-Month",
+                data_type="STRING",
+            )
+        ],
+    )
+    amount_measure = DbModelMeasureImpl(
+        name="amount",
+        alias="Amount",
+        column="amount",
+        aggregation=AggregationType.SUM,
+    )
+    return DbTableModelImpl(
+        name="SelfDateModel",
+        alias="Self Date",
+        source_table="orders",
+        dimensions={"dateOrder": date_dim},
+        measures={"amount": amount_measure},
+        columns={},
+        dimension_joins=[date_join],
+    )
+
+
 def _make_service_with(model: DbTableModelImpl) -> SemanticQueryService:
     svc = SemanticQueryService()
     svc.register_model(model)
@@ -155,6 +208,16 @@ class TestTimeRoleVisibleInMarkdown:
             "recommendedUse must be visible in the markdown output"
         )
         assert "payment trend" in md, "recommendedUse text must appear in markdown"
+
+    def test_dimension_time_role_visible(self):
+        """Self date dimensions with timeRole must show the hint on the root field."""
+        model = _make_self_date_dimension_model()
+        svc = _make_service_with(model)
+        md = svc.get_metadata_v3_markdown(model_names=["SelfDateModel"])
+        assert "dateOrder$id" in md
+        assert "dateOrder$yearMonth" in md
+        assert "timeRole=business_date" in md
+        assert "period pivot" in md
 
     def test_fact_column_time_role_visible(self):
         """Fact-table columns with timeRole must appear in single-model markdown."""

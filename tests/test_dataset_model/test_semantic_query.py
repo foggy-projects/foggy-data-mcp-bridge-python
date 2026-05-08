@@ -869,6 +869,77 @@ class TestOdooTablelessDateOrderDimension:
         assert "t.date_order >= ?" in sql
         assert "t.date_order < ?" in sql
 
+    @pytest.mark.parametrize(
+        ("model_name", "date_field", "metric", "base_table", "physical_column", "expects_join"),
+        [
+            (
+                "OdooPurchaseOrderQueryModel",
+                "dateOrder",
+                "amountTotal",
+                "purchase_order",
+                "date_order",
+                False,
+            ),
+            (
+                "OdooStockPickingQueryModel",
+                "scheduledDate",
+                "transferCount",
+                "stock_picking",
+                "scheduled_date",
+                False,
+            ),
+            (
+                "OdooSaleOrderLineQueryModel",
+                "orderDate",
+                "priceTotal",
+                "sale_order_line",
+                "date_order",
+                True,
+            ),
+        ],
+    )
+    def test_high_value_odoo_business_dates_expose_year_month_grains(
+        self,
+        odoo_service,
+        model_name,
+        date_field,
+        metric,
+        base_table,
+        physical_column,
+        expects_join,
+    ):
+        request = SemanticQueryRequest(
+            columns=[
+                f"{date_field}$year",
+                f"{date_field}$month",
+                f"{date_field}$yearMonth",
+                metric,
+            ],
+            groupBy=[
+                f"{date_field}$year",
+                f"{date_field}$month",
+                f"{date_field}$yearMonth",
+            ],
+            orderBy=[{"field": f"{date_field}$yearMonth", "direction": "asc"}],
+            slice=[{
+                "field": date_field,
+                "op": "[)",
+                "value": ["2024-01-01", "2025-01-01"],
+            }],
+            limit=10,
+        )
+
+        sql = _build_sql(odoo_service, model_name, request)
+
+        assert f'FROM {base_table} AS t' in sql
+        assert f"strftime('%Y'," in sql
+        assert physical_column in sql
+        assert "dim_date" not in sql.lower()
+        if expects_join:
+            assert "JOIN sale_order" in sql
+        else:
+            assert "JOIN" not in sql
+
     def test_self_dimension_grain_properties_can_filter_without_dim_date_join(self, odoo_service):
         request = SemanticQueryRequest(
             columns=["dateOrder$yearMonth", "amountTotal"],

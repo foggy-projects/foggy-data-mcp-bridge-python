@@ -366,6 +366,33 @@ class JdbcTableModelLoader(TableModelLoader):
             elif dim_def.get("parentKey"):
                 dim_type = DimensionType.HIERARCHY
 
+            dim_extra = _extra_metadata(
+                dim_def,
+                {
+                    "name",
+                    "alias",
+                    "caption",
+                    "column",
+                    "foreignKey",
+                    "primaryKey",
+                    "captionColumn",
+                    "tableName",
+                    "joinTo",
+                    "type",
+                    "parentKey",
+                    "childKey",
+                    "closureTableName",
+                    "visible",
+                    "sortable",
+                    "filterable",
+                    "groupable",
+                    "dictClass",
+                    "properties",
+                    "description",
+                    "keyDescription",
+                    "_captionDefRaw",
+                },
+            )
             dimension = DbModelDimensionImpl(
                 name=dim_name,
                 alias=dim_def.get("alias"),
@@ -383,6 +410,8 @@ class JdbcTableModelLoader(TableModelLoader):
                 filterable=dim_def.get("filterable", True),
                 groupable=dim_def.get("groupable", True),
                 dictionary=dim_def.get("dictClass"),
+                description=dim_def.get("description"),
+                **dim_extra,
             )
             model.add_dimension(dimension)
 
@@ -411,10 +440,24 @@ class JdbcTableModelLoader(TableModelLoader):
                             data_type=prop.get("type", "STRING"),
                             formula_def_raw=prop.get("formulaDef"),
                             dialect_formula_def_raw=prop.get("dialectFormulaDef"),
+                            **_extra_metadata(
+                                prop,
+                                {
+                                    "column",
+                                    "name",
+                                    "caption",
+                                    "alias",
+                                    "description",
+                                    "type",
+                                    "formulaDef",
+                                    "dialectFormulaDef",
+                                },
+                            ),
                         )
                         for prop in dim_props
                         if isinstance(prop, dict)
                     ],
+                    **dim_extra,
                 )
                 # Attach raw captionDef for formula-based caption resolution
                 raw_cdef = dim_def.get("_captionDefRaw")

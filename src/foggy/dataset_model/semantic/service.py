@@ -2971,7 +2971,7 @@ class SemanticQueryService(SemanticServiceResolver):
                     ref_expr = f"COUNT(DISTINCT {ref_resolved['sql_expr']})"
                 else:
                     ref_expr = f"{agg_ref}({ref_resolved['sql_expr']})"
-            
+
             op_map = {"=": "=", "eq": "=", "!=": "<>", "<>": "<>", "neq": "<>",
                        ">": ">", "gt": ">", ">=": ">=", "gte": ">=",
                        "<": "<", "lt": "<", "<=": "<=", "lte": "<=",
@@ -5017,7 +5017,11 @@ class SemanticQueryService(SemanticServiceResolver):
                 dimension_field_names.add(id_field)
                 dimension_field_names.add(caption_field)
                 if _visible(id_field):
-                    dim_rows.append(f"| {id_field} | {dc}(ID) | INTEGER | {hier_label} | {jd.key_description or jd.description or ''} |")
+                    dim_desc = jd.key_description or jd.description or ""
+                    _dim_trh = self._get_time_role_hint(jd) or self._get_time_role_hint(dim_obj)
+                    if _dim_trh:
+                        dim_desc = f"{dim_desc} [{_dim_trh}]".strip() if dim_desc else f"[{_dim_trh}]"
+                    dim_rows.append(f"| {id_field} | {dc}(ID) | INTEGER | {hier_label} | {dim_desc} |")
                 if _visible(caption_field):
                     dim_rows.append(f"| {caption_field} | {dc} (Caption) | TEXT | - | {dc} display name |")
                 for prop in jd.properties:
