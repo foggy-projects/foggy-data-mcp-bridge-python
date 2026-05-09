@@ -191,6 +191,7 @@ def test_undefined_name_raises():
 def test_allowed_script_globals_contains_compose_entry_points():
     assert "from" in ALLOWED_SCRIPT_GLOBALS
     assert "dsl" in ALLOWED_SCRIPT_GLOBALS
+    assert "subquery" in ALLOWED_SCRIPT_GLOBALS
 
 
 def test_allowed_script_globals_includes_fsscript_builtins():

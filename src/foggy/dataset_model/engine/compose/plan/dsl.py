@@ -43,6 +43,7 @@ from .plan import (
     _validate_columns,
     _validate_pagination,
 )
+from ..sandbox import validate_slice
 
 
 def from_(
@@ -109,6 +110,8 @@ def from_(
         raise ValueError("from_().columns must be non-empty")
     _validate_columns(cols, "from_().columns")
     _validate_pagination(limit, start, "from_()")
+    validate_slice(slice, "plan-build")
+    validate_slice(having, "plan-build")
 
     slice_tuple = _freeze_opt_list(slice)
     having_tuple = _freeze_opt_list(having)

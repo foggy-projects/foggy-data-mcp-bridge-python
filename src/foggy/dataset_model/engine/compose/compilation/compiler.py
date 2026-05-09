@@ -42,7 +42,15 @@ from foggy.dataset_model.engine.compose.authority.resolver import (
 from foggy.dataset_model.engine.compose.compilation.compose_planner import (
     compile_to_composed_sql,
 )
-from foggy.dataset_model.engine.compose.plan.plan import QueryPlan
+from foggy.dataset_model.engine.compose.plan.plan import (
+    BaseModelPlan,
+    DerivedQueryPlan,
+    JoinPlan,
+    PlanSubquery,
+    QueryPlan,
+    UnionPlan,
+)
+from foggy.dataset_model.engine.compose.sandbox import validate_slice
 from foggy.dataset_model.engine.compose.security.models import ModelBinding
 
 
@@ -119,6 +127,8 @@ def compile_plan_to_sql(
         ``CROSS_DATASOURCE_REJECTED`` when union / join operands span
         multiple datasources (F-7).
     """
+    _validate_plan_slice_values(plan)
+
     if bindings is None:
         bindings = resolve_authority_for_plan(
             plan,
@@ -144,3 +154,89 @@ def compile_plan_to_sql(
         dialect=dialect,
         datasource_ids=datasource_ids,
     )
+
+
+def _validate_plan_slice_values(plan: QueryPlan) -> None:
+    if isinstance(plan, BaseModelPlan):
+        validate_slice(list(plan.slice_), "plan-build")
+        validate_slice(list(plan.having), "plan-build")
+        # Phase 2: base slice subqueries are allowed for IN/NOT IN;
+        # validate the subquery plans recursively instead of rejecting.
+        _validate_base_slice_subquery_plans(plan.slice_)
+        # Having subqueries remain rejected (aggregate semantics TBD).
+        _reject_base_slice_subqueries(plan.having)
+        return
+    if isinstance(plan, DerivedQueryPlan):
+        validate_slice(list(plan.slice_), "plan-build")
+        _validate_slice_subquery_plans(plan.slice_)
+        _validate_plan_slice_values(plan.source)
+        return
+    if isinstance(plan, (JoinPlan, UnionPlan)):
+        _validate_plan_slice_values(plan.left)
+        _validate_plan_slice_values(plan.right)
+
+
+def _reject_base_slice_subqueries(slice_: Any) -> None:
+    if not isinstance(slice_, (list, tuple)):
+        return
+    for entry in slice_:
+        if not isinstance(entry, dict):
+            continue
+        if len(entry) == 1:
+            key, val = next(iter(entry.items()))
+            if key in {"$and", "$or"} and isinstance(val, (list, tuple)):
+                _reject_base_slice_subqueries(val)
+                continue
+            if key == "$not":
+                nested = val if isinstance(val, (list, tuple)) else [val]
+                _reject_base_slice_subqueries(nested)
+                continue
+            if key != "value" and "field" not in entry:
+                _reject_base_slice_value_subquery(val)
+                continue
+        if "value" in entry:
+            _reject_base_slice_value_subquery(entry.get("value"))
+
+
+def _reject_base_slice_value_subquery(value: Any) -> None:
+    if isinstance(value, (QueryPlan, PlanSubquery)):
+        raise ValueError(
+            "COMPOSE_SUBQUERY_VALUE_UNSUPPORTED: base model slice.value "
+            "cannot be a QueryPlan or subquery(plan, field) because base "
+            "having filters cannot use subquery values. Apply the "
+            "subquery filter in a derived plan via plan.query({slice: ...})."
+        )
+
+
+def _validate_slice_subquery_plans(slice_: Any) -> None:
+    if not isinstance(slice_, (list, tuple)):
+        return
+    for entry in slice_:
+        if not isinstance(entry, dict):
+            continue
+        if len(entry) == 1:
+            key, val = next(iter(entry.items()))
+            if key in {"$and", "$or"} and isinstance(val, (list, tuple)):
+                _validate_slice_subquery_plans(val)
+                continue
+            if key == "$not":
+                nested = val if isinstance(val, (list, tuple)) else [val]
+                _validate_slice_subquery_plans(nested)
+                continue
+            if key != "value" and "field" not in entry:
+                _validate_slice_value_subquery_plan(val)
+                continue
+        if "value" in entry:
+            _validate_slice_value_subquery_plan(entry.get("value"))
+
+
+def _validate_slice_value_subquery_plan(value: Any) -> None:
+    if isinstance(value, PlanSubquery):
+        _validate_plan_slice_values(value.plan)
+    elif isinstance(value, QueryPlan):
+        _validate_plan_slice_values(value)
+
+
+# Phase 2: base slice subqueries are allowed — validate the contained
+# plans recursively (same walk as derived slice validation).
+_validate_base_slice_subquery_plans = _validate_slice_subquery_plans

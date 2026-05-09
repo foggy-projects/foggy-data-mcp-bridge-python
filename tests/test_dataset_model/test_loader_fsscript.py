@@ -9,6 +9,7 @@ import pytest
 import tempfile
 from pathlib import Path
 
+from foggy.dataset_model.definitions.base import DimensionType
 from foggy.dataset_model.impl.loader import (
     _snake_to_camel,
     _adapt_fsscript_tm,
@@ -549,8 +550,11 @@ export const queryModel = { name: 'OrphanQM', model: x };
         assert len(sale.measures) >= 4  # amountUntaxed, amountTax, amountTotal, ...
         assert "amountTotal" in sale.measures
 
-        # Verify properties
-        assert "dateOrder" in sale.columns
+        # Verify self date dimension
+        assert "dateOrder" not in sale.columns
+        assert "dateOrder" in sale.dimensions
+        assert sale.dimensions["dateOrder"].dimension_type == DimensionType.TIME
+        assert any(j.name == "dateOrder" for j in sale.dimension_joins)
 
 
 # ==================== columnGroups filtering ====================

@@ -8,6 +8,9 @@ and injection pattern blacklist. Applied at ``BaseModelPlan`` and
 from __future__ import annotations
 
 import re
+from datetime import date, datetime, time
+from decimal import Decimal
+from numbers import Number
 from typing import Any
 
 from .error_codes import (
@@ -78,6 +81,21 @@ INJECTION_PATTERNS = [
     re.compile(r"(?i)\bOR\s+'[^']*'\s*=\s*'[^']*'"),
 ]
 
+SLICE_VALUE_UNSUPPORTED_CODE = "COMPOSE_SLICE_VALUE_UNSUPPORTED"
+SUBQUERY_VALUE_UNSUPPORTED_CODE = "COMPOSE_SUBQUERY_VALUE_UNSUPPORTED"
+
+_SCALAR_SLICE_VALUE_TYPES = (
+    str,
+    bytes,
+    Number,
+    Decimal,
+    bool,
+    date,
+    datetime,
+    time,
+    type(None),
+)
+
 
 def validate_columns(columns: list[str] | None, phase: str) -> None:
     """Validate column expressions for blocked function usage.
@@ -147,7 +165,7 @@ def validate_derived_columns(columns: list[str] | None, phase: str) -> None:
 
 
 def validate_slice(slice_: list[Any] | None, phase: str) -> None:
-    """Validate slice values for injection patterns.
+    """Validate slice values for injection patterns and supported shape.
 
     Parameters
     ----------
@@ -164,10 +182,120 @@ def validate_slice(slice_: list[Any] | None, phase: str) -> None:
     if not slice_:
         return
     for entry in slice_:
-        if isinstance(entry, dict):
-            value = entry.get("value")
-            if isinstance(value, str):
-                _check_injection(value, phase)
+        _validate_slice_entry(entry, phase)
+
+
+def _validate_slice_entry(entry: Any, phase: str) -> None:
+    if not isinstance(entry, dict):
+        return
+
+    if len(entry) == 1:
+        key, val = next(iter(entry.items()))
+        if key in {"$and", "$or"}:
+            if isinstance(val, (list, tuple)):
+                for nested in val:
+                    _validate_slice_entry(nested, phase)
+            return
+        if key == "$not":
+            nested_items = val if isinstance(val, (list, tuple)) else [val]
+            for nested in nested_items:
+                _validate_slice_entry(nested, phase)
+            return
+        if key != "value" and "field" not in entry:
+            _validate_slice_value(val, phase, op="=")
+            return
+
+    if "value" in entry:
+        _validate_slice_value(entry.get("value"), phase, op=entry.get("op", "="))
+
+
+def _validate_slice_value(value: Any, phase: str, *, op: Any) -> None:
+    if isinstance(value, str):
+        _check_injection(value, phase)
+        return
+
+    op_upper = _normalize_slice_op(op)
+
+    if isinstance(value, dict) and set(value.keys()) == {"$field"}:
+        ref = value.get("$field")
+        if isinstance(ref, str):
+            _check_injection(ref, phase)
+        return
+
+    if _is_query_plan(value) or _is_plan_subquery(value):
+        if op_upper in {"IN", "NOT IN"}:
+            return
+        raise ValueError(
+            f"{SUBQUERY_VALUE_UNSUPPORTED_CODE}: slice.value can only be a "
+            "QueryPlan or subquery(plan, field) for IN / NOT IN operators."
+        )
+
+    if isinstance(value, dict) or _is_object_like(value):
+        raise ValueError(
+            f"{SLICE_VALUE_UNSUPPORTED_CODE}: slice.value must be a scalar "
+            "or a list of scalar values; object values are not supported. "
+            "Use {'$field': '<output_field>'} only for derived "
+            "field-to-field comparisons."
+        )
+
+    if isinstance(value, (list, tuple, set)):
+        for item in value:
+            if isinstance(item, str):
+                _check_injection(item, phase)
+            if _is_query_plan(item):
+                raise ValueError(
+                    f"{SLICE_VALUE_UNSUPPORTED_CODE}: slice.value list "
+                    "cannot contain QueryPlan values; join/anti-join "
+                    "support is not available in this form."
+                )
+            if _is_plan_subquery(item):
+                raise ValueError(
+                    f"{SLICE_VALUE_UNSUPPORTED_CODE}: slice.value list "
+                    "cannot contain subquery values; pass the subquery as "
+                    "the direct IN / NOT IN value instead."
+                )
+            if isinstance(item, dict) or _is_object_like(item):
+                raise ValueError(
+                    f"{SLICE_VALUE_UNSUPPORTED_CODE}: slice.value list "
+                    "cannot contain object values; use scalar values only."
+                )
+        return
+
+    if isinstance(value, _SCALAR_SLICE_VALUE_TYPES):
+        return
+
+    raise ValueError(
+        f"{SLICE_VALUE_UNSUPPORTED_CODE}: slice.value must be a scalar "
+        "or a list of scalar values."
+    )
+
+
+def _is_query_plan(value: Any) -> bool:
+    try:
+        from ..plan.plan import QueryPlan
+    except Exception:
+        return False
+    return isinstance(value, QueryPlan)
+
+
+def _is_plan_subquery(value: Any) -> bool:
+    try:
+        from ..plan.plan import PlanSubquery
+    except Exception:
+        return False
+    return isinstance(value, PlanSubquery)
+
+
+def _is_object_like(value: Any) -> bool:
+    if value is None or isinstance(value, _SCALAR_SLICE_VALUE_TYPES):
+        return False
+    if isinstance(value, (list, tuple, set)):
+        return False
+    return hasattr(value, "__dict__")
+
+
+def _normalize_slice_op(op: Any) -> str:
+    return " ".join(str(op).strip().upper().split())
 
 
 def _check_injection(value: str, phase: str) -> None:

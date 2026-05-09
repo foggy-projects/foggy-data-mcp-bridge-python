@@ -23,8 +23,10 @@ from .plan import (
     BaseModelPlan,
     DerivedQueryPlan,
     JoinPlan,
+    PlanSubquery,
     QueryPlan,
     UnionPlan,
+    subquery,
 )
 from .result import SqlPreview, UnsupportedInM2Error
 
@@ -35,6 +37,8 @@ __all__ = [
     "DerivedQueryPlan",
     "UnionPlan",
     "JoinPlan",
+    "PlanSubquery",
+    "subquery",
     "SqlPreview",
     "UnsupportedInM2Error",
 ]

@@ -25,6 +25,9 @@ from foggy.dataset_model.semantic.service import SemanticQueryService
 from foggy.mcp_spi import SemanticQueryRequest
 
 
+AGG_NET_EXPR = "SUM(t.sales_amount) - SUM(t.cost_amount)"
+
+
 @pytest.fixture
 def model():
     m = DbTableModelImpl(name="TestModel", source_table="t_test")
@@ -74,8 +77,8 @@ class TestTransitiveCalcRefs:
         idx_net = r.sql.index('AS "netAmount"')
         idx_tax = r.sql.index('AS "withTax"')
         assert idx_net < idx_tax
-        # withTax inlines netAmount and parameterises the literal
-        assert "t.sales_amount - t.cost_amount" in r.sql
+        # withTax inlines netAmount using the measure aggregations.
+        assert AGG_NET_EXPR in r.sql
         assert "* ?" in r.sql
         assert 1.13 in (r.params or [])
 
@@ -91,8 +94,9 @@ class TestTransitiveCalcRefs:
         )
         r = svc.query_model("TestModel", req, mode="validate")
         assert r.error is None
-        # v1.4 M4: literals flow through bind_params, physical column still inlines.
-        assert "t.sales_amount + ?" in r.sql  # a = salesAmount + 1
+        # Measure refs are compiled as aggregate expressions; literals still
+        # flow through bind_params.
+        assert "SUM(t.sales_amount) + ?" in r.sql  # a = salesAmount + 1
         assert "* ?" in r.sql  # b = a * 2
         # Check params contain the three literals encountered left-to-right.
         # Order follows Spec parity.md §2.4 pre-order DFS across the SELECT list.
@@ -140,7 +144,7 @@ class TestTransitiveCalcRefs:
         assert r.error is None
         # v1.4 M4: IF → CASE WHEN form preserved; literals parameterised.
         assert "CASE WHEN" in r.sql
-        assert "t.sales_amount - t.cost_amount" in r.sql
+        assert AGG_NET_EXPR in r.sql
         assert "> ?" in r.sql  # net > 0 parameterised
         assert "THEN ? ELSE ? END" in r.sql  # 1 / 0 branches parameterised
         assert 0 in (r.params or []) and 1 in (r.params or [])
@@ -228,8 +232,9 @@ class TestSliceRefsCalc:
         )
         r = svc.query_model("TestModel", req, mode="validate")
         assert r.error is None
-        # v1.4 M4: calc inlined, slice RHS becomes ``?`` with 100 in params.
-        assert "t.sales_amount - t.cost_amount" in r.sql
+        # Calc inlined through aggregate measure expressions; slice RHS becomes
+        # ``?`` with 100 in params.
+        assert AGG_NET_EXPR in r.sql
         assert "> ?" in r.sql
         assert 100 in (r.params or [])
 
@@ -246,7 +251,7 @@ class TestSliceRefsCalc:
         assert r.error is None
         # v1.4 M4: withTax inlines net; both 1.13 (calc literal) and 113
         # (slice RHS) are parameterised.
-        assert "t.sales_amount - t.cost_amount" in r.sql
+        assert AGG_NET_EXPR in r.sql
         assert "* ?" in r.sql
         assert "> ?" in r.sql
         params = list(r.params or [])
@@ -323,8 +328,9 @@ class TestBackwardCompat:
         )
         r = svc.query_model("TestModel", req, mode="validate")
         assert r.error is None
-        # v1.4 M4: FormulaCompiler adds defensive outer parens (R-2).
-        assert '(t.sales_amount - t.cost_amount) AS "profit"' in r.sql
+        # FormulaCompiler adds defensive outer parens; measure refs are
+        # compiled as aggregate expressions.
+        assert f'({AGG_NET_EXPR}) AS "profit"' in r.sql
 
     def test_calc_with_agg_no_deps(self, svc):
         req = SemanticQueryRequest(

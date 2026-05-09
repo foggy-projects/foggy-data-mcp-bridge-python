@@ -35,6 +35,7 @@ from foggy.dataset_model.engine.compose.plan.plan import (
     DerivedQueryPlan,
     JoinOn,
     JoinPlan,
+    PlanSubquery,
     QueryPlan,
     UnionPlan,
 )
@@ -84,6 +85,10 @@ def canonical(value: Any) -> Any:
       - anything else (``str / int / float / bool / None``) returned
         verbatim, trusting it is already hashable
     """
+    if isinstance(value, PlanSubquery):
+        return ("subquery", plan_hash(value.plan), value.field)
+    if isinstance(value, QueryPlan):
+        return ("plan", plan_hash(value))
     if isinstance(value, list):
         return tuple(canonical(v) for v in value)
     if isinstance(value, Mapping):

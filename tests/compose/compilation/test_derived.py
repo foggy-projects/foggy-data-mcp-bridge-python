@@ -16,7 +16,6 @@ from __future__ import annotations
 import pytest
 
 from foggy.dataset_model.engine.compose.compilation import (
-    ComposeCompileError,
     compile_plan_to_sql,
 )
 from foggy.dataset_model.engine.compose.schema import error_codes as schema_error_codes
@@ -106,24 +105,22 @@ class TestDerivedSingleLevel:
         assert "completed" in composed.params
 
     def test_derived_slice_rejects_expression_object_value(self, svc, ctx, base_sales):
-        derived = base_sales.query(
-            columns=["salesAmount"],
-            slice=[
-                {
-                    "field": "salesAmount",
-                    "op": ">",
-                    "value": {"$expr": "COALESCE(arOverdueAmount, 0) * 3"},
-                }
-            ],
-        )
-
-        with pytest.raises(ComposeCompileError) as exc_info:
-            compile_plan_to_sql(derived, ctx, semantic_service=svc, dialect="postgres")
+        with pytest.raises(ValueError) as exc_info:
+            base_sales.query(
+                columns=["salesAmount"],
+                slice=[
+                    {
+                        "field": "salesAmount",
+                        "op": ">",
+                        "value": {"$expr": "COALESCE(arOverdueAmount, 0) * 3"},
+                    }
+                ],
+            )
 
         err = exc_info.value
-        assert err.code.endswith("unsupported-plan-shape")
+        assert "COMPOSE_SLICE_VALUE_UNSUPPORTED" in str(err)
         assert "$field" in str(err)
-        assert "$expr" in str(err)
+        assert "unhashable type" not in str(err)
 
     def test_derived_ratio_expression_wraps_denominator_with_nullif(
         self, svc, ctx, base_sales

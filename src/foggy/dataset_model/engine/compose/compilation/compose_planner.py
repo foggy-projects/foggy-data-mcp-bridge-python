@@ -67,6 +67,7 @@ from foggy.dataset_model.engine.compose.plan.plan import (
     DerivedQueryPlan,
     JoinOn,
     JoinPlan,
+    PlanSubquery,
     QueryPlan,
     UnionPlan,
 )
@@ -425,7 +426,19 @@ def _compile_base(plan: BaseModelPlan, state: _CompileState) -> CteUnit:
     (``_compile_join`` for joins, ``_compile_derived`` for embedding
     into an outer SELECT, or ``compile_to_composed_sql`` for a top-
     level single-unit wrap) decides whether to anchor it.
+
+    Phase 2: if the plan's ``slice_`` contains subquery values
+    (``QueryPlan`` / ``PlanSubquery``), they are partitioned out,
+    the base SQL is built without them, and the subquery WHERE
+    fragments are injected into the resulting SQL post-build.
     """
+    from foggy.dataset_model.engine.compose.compilation.per_base_subquery import (
+        inject_where_fragments_with_params,
+        partition_subquery_slices,
+        render_subquery_where_fragments,
+        strip_subquery_slices,
+    )
+
     binding = state.bindings.get(plan.model)
     if binding is None:
         raise ComposeCompileError(
@@ -439,8 +452,15 @@ def _compile_base(plan: BaseModelPlan, state: _CompileState) -> CteUnit:
         )
     alias = state.next_alias()
     _register_plan_alias(state, plan, alias)
+
+    # Phase 2: partition subquery slices
+    _, subquery_slices = partition_subquery_slices(plan.slice_)
+    if subquery_slices:
+        _check_cross_datasource(plan, state, "base subquery")
+    compile_plan = strip_subquery_slices(plan) if subquery_slices else plan
+
     unit = compile_base_model(
-        plan,
+        compile_plan,
         binding,
         semantic_service=state.semantic_service,
         alias=alias,
@@ -448,7 +468,31 @@ def _compile_base(plan: BaseModelPlan, state: _CompileState) -> CteUnit:
         prerequisite_ctes=state.prerequisite_ctes,
         next_alias_fn=state.next_alias,
     )
-    return _stabilize_base_output_names(unit, plan=plan, dialect=state.dialect)
+    unit = _stabilize_base_output_names(unit, plan=plan, dialect=state.dialect)
+
+    # Phase 2: render and inject subquery WHERE fragments
+    if subquery_slices:
+        fragments, subquery_params = render_subquery_where_fragments(
+            subquery_slices,
+            plan=plan,
+            state=state,
+            dialect=state.dialect,
+        )
+        if fragments:
+            injected_sql, injected_params = inject_where_fragments_with_params(
+                unit.sql,
+                list(unit.params or []),
+                fragments,
+                subquery_params,
+            )
+            unit = CteUnit(
+                alias=unit.alias,
+                sql=injected_sql,
+                params=injected_params,
+                select_columns=unit.select_columns,
+            )
+
+    return unit
 
 
 def _register_plan_alias(state: _CompileState, plan: QueryPlan, alias: str) -> None:
@@ -549,6 +593,7 @@ def _compile_derived(plan: DerivedQueryPlan, state: _CompileState) -> CteUnit:
         inner_sql=inner.sql,
         dialect=state.dialect,
         source_columns=source_columns,
+        state=state,
     )
     derived_alias = state.next_alias()
     _register_plan_alias(state, plan, derived_alias)
@@ -1384,6 +1429,7 @@ def _render_outer_select(
     inner_sql: str,
     dialect: str,
     source_columns: List[str],
+    state: _CompileState,
 ) -> Tuple[str, List[Any]]:
     """Render ``SELECT <cols> FROM (<inner_sql>) AS <inner_alias> …``.
 
@@ -1425,6 +1471,7 @@ def _render_outer_select(
             inner_alias=inner_alias,
             dialect=dialect,
             source_columns=source_columns,
+            state=state,
         )
         if where_fragments:
             parts.append("WHERE " + " AND ".join(where_fragments))
@@ -1463,6 +1510,7 @@ def _render_slice(
     inner_alias: str,
     dialect: str,
     source_columns: List[str],
+    state: _CompileState,
 ) -> Tuple[List[str], List[Any]]:
     """Render each slice entry as a WHERE predicate.
 
@@ -1505,6 +1553,7 @@ def _render_slice(
                     inner_alias=inner_alias,
                     dialect=dialect,
                     source_columns=source_columns,
+                    state=state,
                 )
                 if sub_fragments:
                     if len(sub_fragments) == 1:
@@ -1523,6 +1572,7 @@ def _render_slice(
                     inner_alias=inner_alias,
                     dialect=dialect,
                     source_columns=source_columns,
+                    state=state,
                 )
                 if sub_fragments:
                     joined = " AND ".join(sub_fragments)
@@ -1562,6 +1612,7 @@ def _render_slice(
             op=op,
             inner_alias=inner_alias,
             dialect=dialect,
+            state=state,
         )
         rendered_op = _normalize_slice_op(op)
         if value_sql:
@@ -1578,7 +1629,28 @@ def _render_slice_value(
     op: str,
     inner_alias: str,
     dialect: str,
+    state: _CompileState,
 ) -> Tuple[str, List[Any]]:
+    # Phase 1: subquery value → compile plan and emit SQL subquery
+    op_upper = _normalize_slice_op(op)
+    subquery_parts = _coerce_plan_subquery(value)
+    if subquery_parts is not None:
+        if op_upper not in {"IN", "NOT IN"}:
+            raise ComposeCompileError(
+                code=error_codes.UNSUPPORTED_PLAN_SHAPE,
+                phase="plan-lower",
+                message=(
+                    "COMPOSE_SUBQUERY_VALUE_UNSUPPORTED: slice.value can "
+                    "only be a QueryPlan or subquery(plan, field) for "
+                    "IN / NOT IN operators."
+                ),
+            )
+        return _render_plan_subquery_value(
+            subquery_parts[0],
+            subquery_parts[1],
+            state=state,
+            dialect=dialect,
+        )
     if isinstance(value, dict) and set(value.keys()) == {"$field"}:
         ref = value.get("$field")
         if not isinstance(ref, str) or not _is_simple_output_ref(ref):
@@ -1601,7 +1673,7 @@ def _render_slice_value(
                 "as {'$expr': ...} are not a public DSL feature."
             ),
         )
-    op_upper = _normalize_slice_op(op)
+    # op_upper already set above (moved for subquery handling)
     if op_upper in {"IS NULL", "IS NOT NULL"}:
         return "", []
     if op_upper in {"IN", "NOT IN"}:
@@ -1636,6 +1708,81 @@ def _render_slice_value(
             )
         return "(" + ", ".join("?" for _ in values) + ")", values
     return "?", [value]
+
+
+def _coerce_plan_subquery(value: Any) -> Optional[Tuple[QueryPlan, Optional[str]]]:
+    """Return ``(plan, field)`` if *value* is a subquery reference, else ``None``."""
+    if isinstance(value, PlanSubquery):
+        return value.plan, value.field
+    if isinstance(value, QueryPlan):
+        return value, None
+    return None
+
+
+def _render_plan_subquery_value(
+    plan: QueryPlan,
+    field: Optional[str],
+    *,
+    state: _CompileState,
+    dialect: str,
+) -> Tuple[str, List[Any]]:
+    """Compile a subquery plan and return ``(sql_fragment, params)``.
+
+    Wraps the compiled SQL in ``(SELECT <field> FROM (...) WHERE IS NOT NULL)``
+    to ensure NULL safety for NOT IN semantics.
+    """
+    from foggy.dataset_model.engine.compose.schema.derive import derive_schema
+
+    schema = derive_schema(plan)
+    names = schema.names()
+    if field is None:
+        if len(names) != 1:
+            raise ComposeCompileError(
+                code=error_codes.UNSUPPORTED_PLAN_SHAPE,
+                phase="plan-lower",
+                message=(
+                    "COMPOSE_SUBQUERY_FIELD_AMBIGUOUS: implicit QueryPlan "
+                    "slice.value requires the subquery plan to project "
+                    f"exactly one column; projected columns: {names!r}. "
+                    "Use subquery(plan, '<field>') to select one column."
+                ),
+            )
+        field = names[0]
+    if field not in schema.name_set():
+        raise ComposeCompileError(
+            code=error_codes.UNSUPPORTED_PLAN_SHAPE,
+            phase="plan-lower",
+            message=(
+                "COMPOSE_SUBQUERY_FIELD_NOT_FOUND: subquery(plan, field) "
+                f"references {field!r}, but the plan projects {names!r}."
+            ),
+        )
+
+    compiled = _compile_any(plan, state)
+    if isinstance(compiled, CteUnit):
+        rhs_sql = compiled.sql
+        rhs_params = list(compiled.params or [])
+    elif isinstance(compiled, ComposedSql):
+        rhs_sql = compiled.sql
+        rhs_params = list(compiled.params or [])
+    else:
+        raise ComposeCompileError(
+            code=error_codes.UNSUPPORTED_PLAN_SHAPE,
+            phase="plan-lower",
+            message=(
+                "COMPOSE_SUBQUERY_VALUE_UNSUPPORTED: subquery plan "
+                f"compiled to unsupported shape {type(compiled).__name__}."
+            ),
+        )
+
+    alias = state.next_alias()
+    field_ref = _render_qualified_ref(alias, field, dialect)
+    sql = (
+        f"(SELECT {field_ref}\n"
+        f"FROM ({rhs_sql}) AS {alias}\n"
+        f"WHERE {field_ref} IS NOT NULL)"
+    )
+    return sql, rhs_params
 
 
 def _normalize_slice_op(op: Any) -> str:

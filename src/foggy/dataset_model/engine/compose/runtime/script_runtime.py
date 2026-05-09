@@ -40,6 +40,7 @@ from ..capability.runtime_integration import build_capability_context
 from ..capability.library_loader import ControlledLibraryModuleLoader
 from ..context.compose_query_context import ComposeQueryContext
 from ..plan import from_ as _plan_from
+from ..plan import subquery as _plan_subquery
 from ..plan.column_normalizer import normalize_columns as _normalize_columns
 from ..plan.plan import QueryPlan
 from ..plan.query_factory import INSTANCE as _query_factory
@@ -185,7 +186,7 @@ ALLOWED_SCRIPT_GLOBALS: frozenset = frozenset({
     "isNaN", "isFinite",
     "Array", "Object", "Function",
     "typeof",
-    "from", "dsl", "Query",
+    "from", "dsl", "Query", "subquery",
     "params",
 })
 
@@ -295,6 +296,7 @@ def _evaluate_program(
     evaluator.context["from"] = _from_dsl
     evaluator.context["dsl"] = _from_dsl
     evaluator.context["Query"] = _query_factory
+    evaluator.context["subquery"] = _plan_subquery
     evaluator.context["params"] = (
         dict(ctx.params) if ctx.params else {}
     )

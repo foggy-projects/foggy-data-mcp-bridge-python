@@ -664,6 +664,30 @@ class JoinOn:
             )
 
 
+@dataclass(frozen=True)
+class PlanSubquery:
+    """Typed slice value for ``field IN subquery(plan, field)``."""
+
+    plan: QueryPlan
+    field: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        _require_plan(self.plan, "subquery.plan")
+        if self.field is not None and not isinstance(self.field, str):
+            raise TypeError("subquery.field must be a string or None")
+        if isinstance(self.field, str) and not self.field.strip():
+            raise ValueError("subquery.field must be non-empty when provided")
+
+
+def subquery(plan: QueryPlan, field: Optional[str] = None) -> PlanSubquery:
+    """Return an explicit plan subquery slice value."""
+
+    return PlanSubquery(
+        plan=plan,
+        field=field.strip() if isinstance(field, str) else field,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Concrete plan nodes
 # ---------------------------------------------------------------------------
@@ -699,7 +723,10 @@ class BaseModelPlan(QueryPlan):
         # strings at parse time (column_normalizer module docstring).
 
     def base_model_plans(self) -> Tuple["BaseModelPlan", ...]:
-        return (self,)
+        return (self,) + _slice_subquery_base_model_plans(
+            self.slice_,
+            self.having,
+        )
 
     def collect_visible_plans(self) -> Tuple[QueryPlan, ...]:
         # BaseModelPlan is a leaf — visible set is just `(self,)`.
@@ -733,7 +760,9 @@ class DerivedQueryPlan(QueryPlan):
         # F5 visibility no-op — see `BaseModelPlan.__post_init__`.
 
     def base_model_plans(self) -> Tuple[BaseModelPlan, ...]:
-        return self.source.base_model_plans()
+        return self.source.base_model_plans() + _slice_subquery_base_model_plans(
+            self.slice_,
+        )
 
     def collect_visible_plans(self) -> Tuple[QueryPlan, ...]:
         # Derived = (self,) + source.visible — source's visible already
@@ -846,6 +875,45 @@ def _coerce_join_on(value: Any) -> JoinOn:
     raise TypeError(
         f"JoinOn entries must be JoinOn or dict, got {type(value).__name__}"
     )
+
+
+def _slice_subquery_base_model_plans(*slices: Tuple[Any, ...]) -> Tuple[BaseModelPlan, ...]:
+    collected: list[BaseModelPlan] = []
+    for slice_ in slices:
+        collected.extend(_collect_slice_subquery_base_model_plans(slice_))
+    return tuple(collected)
+
+
+def _collect_slice_subquery_base_model_plans(slice_: Any) -> list[BaseModelPlan]:
+    if not isinstance(slice_, (list, tuple)):
+        return []
+    collected: list[BaseModelPlan] = []
+    for entry in slice_:
+        if not isinstance(entry, dict):
+            continue
+        if len(entry) == 1:
+            key, val = next(iter(entry.items()))
+            if key in {"$and", "$or"} and isinstance(val, (list, tuple)):
+                collected.extend(_collect_slice_subquery_base_model_plans(val))
+                continue
+            if key == "$not":
+                nested = val if isinstance(val, (list, tuple)) else [val]
+                collected.extend(_collect_slice_subquery_base_model_plans(nested))
+                continue
+            if key != "value" and "field" not in entry:
+                collected.extend(_base_model_plans_from_slice_value(val))
+                continue
+        if "value" in entry:
+            collected.extend(_base_model_plans_from_slice_value(entry.get("value")))
+    return collected
+
+
+def _base_model_plans_from_slice_value(value: Any) -> list[BaseModelPlan]:
+    if isinstance(value, PlanSubquery):
+        return list(value.plan.base_model_plans())
+    if isinstance(value, QueryPlan):
+        return list(value.base_model_plans())
+    return []
 
 
 def _require_plan(value: Any, field_name: str) -> None:
