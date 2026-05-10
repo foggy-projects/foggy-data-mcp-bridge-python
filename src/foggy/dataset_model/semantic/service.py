@@ -5497,6 +5497,19 @@ class SemanticQueryService(SemanticServiceResolver):
         hint = "Use ISO date/datetime string values such as 2026-05-01; do not use numeric YYYYMMDD values."
         return f"{description} {hint}".strip() if description else hint
 
+    @staticmethod
+    def _build_dimension_key_description(join_def, dim_obj, dim_caption: str) -> str:
+        """Build LLM-facing $id guidance without leaking physical modeling details."""
+        key_desc = getattr(join_def, "key_description", None)
+        if key_desc:
+            return SemanticQueryService._append_date_dimension_key_hint(key_desc, dim_obj)
+        if SemanticQueryService._is_date_dimension_root(dim_obj):
+            return SemanticQueryService._append_date_dimension_key_hint(
+                f"{dim_caption} business date",
+                dim_obj,
+            )
+        return getattr(join_def, "description", None) or ""
+
     def _build_single_model_markdown(
         self,
         model_name: str,
@@ -5544,11 +5557,10 @@ class SemanticQueryService(SemanticServiceResolver):
                 dimension_field_names.add(id_field)
                 dimension_field_names.add(caption_field)
                 if _visible(id_field):
-                    dim_desc = jd.key_description or jd.description or ""
+                    dim_desc = self._build_dimension_key_description(jd, dim_obj, dc)
                     _dim_trh = self._get_time_role_hint(jd) or self._get_time_role_hint(dim_obj)
                     if _dim_trh:
                         dim_desc = f"{dim_desc} [{_dim_trh}]".strip() if dim_desc else f"[{_dim_trh}]"
-                    dim_desc = self._append_date_dimension_key_hint(dim_desc, dim_obj)
                     dim_rows.append(f"| {id_field} | {dc}(ID) | {self._get_dimension_id_type(dim_obj)} | {hier_label} | {dim_desc} |")
                 if _visible(caption_field):
                     dim_rows.append(f"| {caption_field} | {dc} (Caption) | TEXT | - | {dc} display name |")

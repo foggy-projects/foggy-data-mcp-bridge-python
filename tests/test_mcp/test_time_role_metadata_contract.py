@@ -218,6 +218,7 @@ class TestTimeRoleVisibleInMarkdown:
         assert "| dateOrder$id | Order Date(ID) | DATETIME |" in md
         assert "Use ISO date/datetime string values such as 2026-05-01" in md
         assert "do not use numeric YYYYMMDD values" in md
+        assert "Self date dimension backed by" not in md
         assert "dateOrder$yearMonth" in md
         assert "timeRole=business_date" in md
         assert "period pivot" in md
