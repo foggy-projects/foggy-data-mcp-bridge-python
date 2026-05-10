@@ -4912,11 +4912,7 @@ class SemanticQueryService(SemanticServiceResolver):
                 # Check hierarchy support from the corresponding dimension object
                 dim_obj = model.dimensions.get(dim_name)
                 is_hier = dim_obj is not None and dim_obj.supports_hierarchy_operators()
-                is_time_dim_root = (
-                    dim_obj is not None
-                    and dim_obj.data_type in {ColumnType.DATE, ColumnType.DATETIME, ColumnType.TIMESTAMP}
-                    and bool(join_def.caption_column)
-                )
+                is_time_dim_root = self._is_date_dimension_root(dim_obj) and bool(join_def.caption_column)
 
                 if is_time_dim_root and dim_name not in fields:
                     fields[dim_name] = {
@@ -4940,12 +4936,18 @@ class SemanticQueryService(SemanticServiceResolver):
                 # dim$id
                 id_fn = f"{dim_name}$id"
                 if id_fn not in fields:
+                    id_type = self._get_dimension_id_type(dim_obj)
+                    id_meta = (
+                        f"Date Dimension Key | {join_def.primary_key}"
+                        if self._is_date_dimension_root(dim_obj)
+                        else f"Dimension ID | {join_def.primary_key}"
+                    )
                     field_info: Dict[str, Any] = {
                         "name": f"{dim_caption}(ID)",
                         "fieldName": id_fn,
-                        "meta": f"Dimension ID | {join_def.primary_key}",
-                        "type": "INTEGER",
-                        "filterType": "dimension",
+                        "meta": id_meta,
+                        "type": id_type,
+                        "filterType": "date" if self._is_date_dimension_root(dim_obj) else "dimension",
                         "filterable": True,
                         "measure": False,
                         "aggregatable": False,
@@ -4956,9 +4958,12 @@ class SemanticQueryService(SemanticServiceResolver):
                         field_info["hierarchical"] = True
                         field_info["supportedOps"] = ["selfAndDescendantsOf", "selfAndAncestorsOf"]
                     fields[id_fn] = field_info
+                id_usage = "Used for exact filtering and sorting"
+                if self._is_date_dimension_root(dim_obj):
+                    id_usage = "Used for absolute date filtering, range filtering, aggregation, and sorting with ISO date/datetime string values"
                 fields[id_fn]["models"][model_name] = {
-                    "description": f"{dim_caption}(ID)",
-                        "usage": "Used for exact filtering and sorting",
+                    "description": self._append_date_dimension_key_hint(f"{dim_caption}(ID)", dim_obj),
+                    "usage": id_usage,
                 }
 
                 # dim$caption
@@ -5469,6 +5474,29 @@ class SemanticQueryService(SemanticServiceResolver):
         }
         return mapping.get(type_name, "Text")
 
+    @staticmethod
+    def _is_date_dimension_root(dim_obj) -> bool:
+        """Return true when a dimension root key is backed by a date-like column."""
+        return (
+            dim_obj is not None
+            and dim_obj.data_type in {ColumnType.DATE, ColumnType.DATETIME, ColumnType.TIMESTAMP}
+        )
+
+    @staticmethod
+    def _get_dimension_id_type(dim_obj) -> str:
+        """Return the exposed type for a dimension $id field."""
+        if SemanticQueryService._is_date_dimension_root(dim_obj):
+            return dim_obj.data_type.value.upper()
+        return "INTEGER"
+
+    @staticmethod
+    def _append_date_dimension_key_hint(description: str, dim_obj) -> str:
+        """Clarify date-like dimension keys so LLMs do not use numeric YYYYMMDD."""
+        if not SemanticQueryService._is_date_dimension_root(dim_obj):
+            return description
+        hint = "Use ISO date/datetime string values such as 2026-05-01; do not use numeric YYYYMMDD values."
+        return f"{description} {hint}".strip() if description else hint
+
     def _build_single_model_markdown(
         self,
         model_name: str,
@@ -5520,7 +5548,8 @@ class SemanticQueryService(SemanticServiceResolver):
                     _dim_trh = self._get_time_role_hint(jd) or self._get_time_role_hint(dim_obj)
                     if _dim_trh:
                         dim_desc = f"{dim_desc} [{_dim_trh}]".strip() if dim_desc else f"[{_dim_trh}]"
-                    dim_rows.append(f"| {id_field} | {dc}(ID) | INTEGER | {hier_label} | {dim_desc} |")
+                    dim_desc = self._append_date_dimension_key_hint(dim_desc, dim_obj)
+                    dim_rows.append(f"| {id_field} | {dc}(ID) | {self._get_dimension_id_type(dim_obj)} | {hier_label} | {dim_desc} |")
                 if _visible(caption_field):
                     dim_rows.append(f"| {caption_field} | {dc} (Caption) | TEXT | - | {dc} display name |")
                 for prop in jd.properties:

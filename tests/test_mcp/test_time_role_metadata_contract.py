@@ -215,9 +215,26 @@ class TestTimeRoleVisibleInMarkdown:
         svc = _make_service_with(model)
         md = svc.get_metadata_v3_markdown(model_names=["SelfDateModel"])
         assert "dateOrder$id" in md
+        assert "| dateOrder$id | Order Date(ID) | DATETIME |" in md
+        assert "Use ISO date/datetime string values such as 2026-05-01" in md
+        assert "do not use numeric YYYYMMDD values" in md
         assert "dateOrder$yearMonth" in md
         assert "timeRole=business_date" in md
         assert "period pivot" in md
+
+    def test_self_date_dimension_id_metadata_uses_datetime_type(self):
+        """V3 JSON metadata must not advertise date dimension keys as integers."""
+        model = _make_self_date_dimension_model()
+        svc = _make_service_with(model)
+        metadata = svc.get_metadata_v3(model_names=["SelfDateModel"])
+
+        field = metadata["fields"]["dateOrder$id"]
+        assert field["type"] == "DATETIME"
+        assert field["filterType"] == "date"
+        assert field["meta"].startswith("Date Dimension Key")
+        model_info = field["models"]["SelfDateModel"]
+        assert "ISO date/datetime string values" in model_info["usage"]
+        assert "do not use numeric YYYYMMDD values" in model_info["description"]
 
     def test_fact_column_time_role_visible(self):
         """Fact-table columns with timeRole must appear in single-model markdown."""
