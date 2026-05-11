@@ -5253,7 +5253,7 @@ class SemanticQueryService(SemanticServiceResolver):
         this DTO by :meth:`render_model_catalog_markdown` so callers do not need
         to parse prompt text to apply permissions.
         """
-        target_names = model_names or list(self._models.keys())
+        target_names = self._dedupe_model_names(model_names or list(self._models.keys()))
         metadata = self.get_metadata_v3(
             model_names=target_names,
             visible_fields=visible_fields,
@@ -5299,10 +5299,10 @@ class SemanticQueryService(SemanticServiceResolver):
                     or info.get("purpose")
                     or ""
                 ),
-                "recommendedNext": "dataset.describe_model_internal",
-                "fieldPreview": field_names[:preview_limit],
-                "fieldCount": len(field_names),
             }
+            short_alias = getattr(model, "short_alias", None) or getattr(model, "shortAlias", None)
+            if short_alias:
+                item["shortAlias"] = short_alias
             namespace = self._infer_catalog_namespace(model_name)
             if namespace:
                 item["namespace"] = namespace
@@ -5311,6 +5311,9 @@ class SemanticQueryService(SemanticServiceResolver):
             model_hints = hints_by_model.get(model_name)
             if model_hints:
                 item["llmHints"] = dict(model_hints)
+            if preview_limit > 0:
+                item["fieldPreview"] = field_names[:preview_limit]
+                item["fieldCount"] = len(field_names)
             items.append(item)
 
         return {
@@ -5319,6 +5322,17 @@ class SemanticQueryService(SemanticServiceResolver):
             "recommendedNext": "dataset.describe_model_internal",
             "items": items,
         }
+
+    @staticmethod
+    def _dedupe_model_names(model_names: List[str]) -> List[str]:
+        seen: set[str] = set()
+        result: List[str] = []
+        for model_name in model_names:
+            if not model_name or model_name in seen:
+                continue
+            seen.add(model_name)
+            result.append(model_name)
+        return result
 
     @staticmethod
     def _infer_catalog_namespace(model_name: str) -> Optional[str]:
@@ -5344,25 +5358,9 @@ class SemanticQueryService(SemanticServiceResolver):
             lines.append(f"- **{caption}** (`{model}`)")
             if description:
                 lines.append(f"  - Description: {description}")
-            physical_tables = item.get("physicalTables") or []
-            if physical_tables:
-                lines.append(f"  - Physical tables: {', '.join(physical_tables)}")
-            hints = item.get("llmHints") or {}
-            for key in ("recommendedFor", "notRecommendedFor", "keyFields"):
-                values = hints.get(key) or []
-                if values:
-                    label = key[0].upper() + key[1:]
-                    lines.append(f"  - {label}: {', '.join(values)}")
-            if hints.get("businessDateNote"):
-                lines.append(f"  - Business date: {hints['businessDateNote']}")
-            field_preview = item.get("fieldPreview") or []
-            if field_preview:
-                suffix = ""
-                field_count = item.get("fieldCount") or len(field_preview)
-                if field_count > len(field_preview):
-                    suffix = f" ... ({field_count} fields total)"
-                lines.append(f"  - Field preview: {', '.join(field_preview)}{suffix}")
-            lines.append(f"  - Recommended next: {item.get('recommendedNext') or catalog.get('recommendedNext')}")
+            short_alias = item.get("shortAlias")
+            if short_alias:
+                lines.append(f"  - Short alias: {short_alias}")
         return "\n".join(lines)
 
     # ---------- Phase 2: formula permission helpers ----------

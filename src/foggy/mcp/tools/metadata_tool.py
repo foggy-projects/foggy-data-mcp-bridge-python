@@ -152,7 +152,6 @@ class ListModelsTool(BaseMcpTool):
                         {
                             "model": model,
                             "caption": model,
-                            "recommendedNext": "dataset.describe_model_internal",
                             "fieldPreview": [],
                             "fieldCount": 0,
                         }

@@ -264,20 +264,21 @@ def create_semantic_v3_router(
             if model_names:
                 allowed = set(model_names)
                 models = [model for model in models if model in allowed]
+            items = []
+            for model in models:
+                item = {
+                    "model": model,
+                    "caption": model,
+                }
+                if field_limit > 0:
+                    item["fieldPreview"] = []
+                    item["fieldCount"] = 0
+                items.append(item)
             catalog = {
                 "models": models,
                 "count": len(models),
                 "recommendedNext": "dataset.describe_model_internal",
-                "items": [
-                    {
-                        "model": model,
-                        "caption": model,
-                        "recommendedNext": "dataset.describe_model_internal",
-                        "fieldPreview": [],
-                        "fieldCount": 0,
-                    }
-                    for model in models
-                ],
+                "items": items,
             }
 
         markdown = (
@@ -285,10 +286,20 @@ def create_semantic_v3_router(
             if hasattr(svc, "render_model_catalog_markdown")
             else json.dumps(catalog, ensure_ascii=False, indent=2)
         )
-        content = markdown if fmt == MetadataFormat.MARKDOWN else json.dumps(catalog, ensure_ascii=False)
+        if fmt == MetadataFormat.MARKDOWN:
+            return JSONResponse(content={
+                "format": fmt,
+                "content": markdown,
+            })
+        if fmt == "all":
+            return JSONResponse(content={
+                "format": fmt,
+                "content": markdown,
+                "data": catalog,
+            })
         return JSONResponse(content={
             "format": fmt,
-            "content": content,
+            "content": json.dumps(catalog, ensure_ascii=False),
             "data": catalog,
         })
 

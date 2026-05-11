@@ -260,11 +260,22 @@ class TestModelCatalogService:
             "caption",
             "description",
             "physicalTables",
-            "recommendedNext",
             "fieldPreview",
             "fieldCount",
         }
+        assert "recommendedNext" not in first
         assert len(first["fieldPreview"]) <= 3
+
+    def test_catalog_dedupes_model_names(self, catalog_service):
+        catalog = catalog_service.get_model_catalog(
+            model_names=["FactSalesModel", "FactSalesModel"],
+            field_limit=0,
+        )
+        assert catalog["models"] == ["FactSalesModel"]
+        assert catalog["count"] == 1
+        assert len(catalog["items"]) == 1
+        assert "fieldPreview" not in catalog["items"][0]
+        assert "fieldCount" not in catalog["items"][0]
 
     def test_catalog_field_preview_is_permission_filtered(self, catalog_service):
         catalog = catalog_service.get_model_catalog(
@@ -291,8 +302,10 @@ class TestModelCatalogService:
         )
         markdown = catalog_service.render_model_catalog_markdown(catalog)
         assert "FactSalesModel" in markdown
-        assert "RecommendedFor: sales analysis" in markdown
-        assert "NotRecommendedFor: AR aging" in markdown
-        assert "KeyFields: salesAmount" in markdown
-        assert "Business date: Use salesDate$id." in markdown
-        assert catalog["items"][0]["fieldPreview"][0] in markdown
+        assert "RecommendedFor:" not in markdown
+        assert "NotRecommendedFor:" not in markdown
+        assert "KeyFields:" not in markdown
+        assert "Business date:" not in markdown
+        assert "Field preview:" not in markdown
+        assert "dataset.describe_model_internal" not in markdown
+        assert "Recommended next:" not in markdown

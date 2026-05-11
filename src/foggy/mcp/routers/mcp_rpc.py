@@ -291,7 +291,6 @@ def create_mcp_router(
                                 {
                                     "model": model,
                                     "caption": model,
-                                    "recommendedNext": "dataset.describe_model_internal",
                                     "fieldPreview": [],
                                     "fieldCount": 0,
                                 }
