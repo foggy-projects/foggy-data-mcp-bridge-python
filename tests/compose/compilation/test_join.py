@@ -363,6 +363,59 @@ class TestJoinBasic:
         assert "right." not in composed.sql
         assert 'ORDER BY "totalAmount" DESC' in composed.sql
 
+    def test_postgres_query_after_join_accepts_inherited_source_alias_refs(
+        self, svc, ctx
+    ):
+        first_orders = from_(
+            model="FactSalesModel",
+            columns=[
+                "orderStatus$caption",
+                "MIN(salesAmount) AS firstOrderDate",
+            ],
+            group_by=["orderStatus$caption"],
+        ).__fsscript_bind_alias__("firstOrders")
+        may_first_customers = first_orders.query(
+            slice=[{"field": "firstOrderDate", "op": ">=", "value": 1}]
+        ).__fsscript_bind_alias__("mayFirstCustomers")
+        may_orders = from_(
+            model="FactOrderModel",
+            columns=[
+                "orderStatus$caption AS order_status",
+                "COUNT(totalAmount) AS orderCount",
+                "SUM(totalAmount) AS totalAmount",
+            ],
+            group_by=["orderStatus$caption"],
+        ).__fsscript_bind_alias__("mayOrders")
+        joined = may_first_customers.join(
+            may_orders,
+            type="left",
+            on=[JoinOn(left="orderStatus$caption", op="=", right="order_status")],
+        )
+
+        result = joined.query(
+            columns=[
+                "firstOrders.orderStatus$caption",
+                "firstOrders.firstOrderDate",
+                "mayOrders.orderCount",
+                "mayOrders.totalAmount",
+            ],
+            order_by=["-mayOrders.totalAmount"],
+        )
+
+        composed = compile_plan_to_sql(
+            result,
+            ctx,
+            semantic_service=svc,
+            dialect="postgres",
+        )
+
+        assert 'cte_3."orderStatus$caption"' in composed.sql
+        assert 'cte_3."firstOrderDate"' in composed.sql
+        assert 'cte_3."orderCount"' in composed.sql
+        assert 'ORDER BY "totalAmount" DESC' in composed.sql
+        assert "firstOrders." not in composed.sql
+        assert "mayOrders." not in composed.sql
+
     def test_postgres_base_stabilizes_declared_dollar_outputs_with_extra_columns(
         self, ctx
     ):

@@ -426,7 +426,7 @@ class QueryPlan(ABC):
                 "derived-plan post-result filters."
             )
 
-        return DerivedQueryPlan(
+        plan = DerivedQueryPlan(
             source=self,
             columns=_freeze_columns(columns),
             slice_=_freeze_opt_list(slice),
@@ -436,6 +436,9 @@ class QueryPlan(ABC):
             start=start,
             distinct=distinct,
         )
+        for alias in self._compose_aliases():
+            plan.__fsscript_bind_alias__(alias)
+        return plan
 
     def union(
         self, other: "QueryPlan", options_dict: Optional[Dict[str, Any]] = None, *, all: bool = False

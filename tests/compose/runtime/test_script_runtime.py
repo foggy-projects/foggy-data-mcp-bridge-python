@@ -180,7 +180,7 @@ def test_assignment_captures_derived_query_plan_local_alias():
         _ctx(), semantic_service=_StubSemanticService(),
     )
 
-    assert r.value._compose_aliases() == ("mayFirstCustomers",)
+    assert r.value._compose_aliases() == ("firstOrders", "mayFirstCustomers")
 
 
 # ---------------------------------------------------------------------------
