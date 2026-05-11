@@ -124,6 +124,11 @@ class AssignmentExpression(Expression):
         val = self.value.evaluate(context)
 
         if isinstance(self.target, VariableExpression):
+            binder = getattr(val, "__fsscript_bind_alias__", None)
+            if callable(binder):
+                bound = binder(self.target.name)
+                if bound is not None:
+                    val = bound
             if self.is_declaration:
                 # var/let/const: declare in local scope (shadow outer vars)
                 from foggy.fsscript.scope import ScopeChain

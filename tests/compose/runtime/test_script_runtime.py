@@ -158,6 +158,31 @@ def test_documented_join_signature_creates_join_plan():
     assert r.value.on[0].left == "id"
 
 
+def test_assignment_captures_query_plan_local_alias():
+    r = run_script(
+        """
+        const firstOrders = dsl({model: "Sales", columns: ["id"]});
+        return firstOrders;
+        """,
+        _ctx(), semantic_service=_StubSemanticService(),
+    )
+
+    assert r.value._compose_aliases() == ("firstOrders",)
+
+
+def test_assignment_captures_derived_query_plan_local_alias():
+    r = run_script(
+        """
+        const firstOrders = dsl({model: "Sales", columns: ["id"]});
+        const mayFirstCustomers = firstOrders.query({columns: ["id"]});
+        return mayFirstCustomers;
+        """,
+        _ctx(), semantic_service=_StubSemanticService(),
+    )
+
+    assert r.value._compose_aliases() == ("mayFirstCustomers",)
+
+
 # ---------------------------------------------------------------------------
 # Evaluator lockdown — allowed globals + no import
 # ---------------------------------------------------------------------------

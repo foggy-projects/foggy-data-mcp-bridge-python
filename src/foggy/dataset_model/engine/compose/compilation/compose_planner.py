@@ -583,16 +583,16 @@ def _compile_derived(plan: DerivedQueryPlan, state: _CompileState) -> CteUnit:
             select_columns=None,
         )
     assert isinstance(inner, CteUnit)
-    source_columns = _source_output_columns_for_derived(plan.source, inner)
-    _validate_derived_slice_not_same_stage_alias(plan, source_columns)
-    _validate_derived_output_refs(plan, source_columns)
+    source_scope = _source_column_scope_for_derived(plan.source, inner)
+    _validate_derived_slice_not_same_stage_alias(plan, source_scope)
+    _validate_derived_output_refs(plan, source_scope)
 
     outer_sql, outer_params = _render_outer_select(
         plan=plan,
         inner_alias=inner.alias,
         inner_sql=inner.sql,
         dialect=state.dialect,
-        source_columns=source_columns,
+        source_scope=source_scope,
         state=state,
     )
     derived_alias = state.next_alias()
@@ -601,7 +601,7 @@ def _compile_derived(plan: DerivedQueryPlan, state: _CompileState) -> CteUnit:
         alias=derived_alias,
         sql=outer_sql,
         params=list(inner.params) + list(outer_params),
-        select_columns=_derived_output_columns(plan, source_columns),
+        select_columns=_derived_output_columns(plan, source_scope),
     )
 
 
@@ -763,6 +763,22 @@ _ALL_LOGICAL_OPS: frozenset = frozenset({"$or", "$and", "$not"})
 _LOWER_SAFE_IDENT = re.compile(r"^[a-z_][a-z0-9_]*$")
 
 
+@dataclass(frozen=True)
+class _SourceColumnScope:
+    columns: List[str]
+    qualified_refs: Dict[str, str] = field(default_factory=dict)
+
+    @property
+    def names(self) -> frozenset:
+        return frozenset(self.columns)
+
+    def resolve(self, ref: str) -> Optional[str]:
+        stripped = ref.strip()
+        if stripped in self.names:
+            return stripped
+        return self.qualified_refs.get(stripped)
+
+
 def _quote_identifier(name: str, dialect: str) -> str:
     n = dialect.lower()
     if n in {"mssql", "sqlserver"}:
@@ -857,14 +873,18 @@ def _base_declared_output_names(plan: BaseModelPlan) -> List[str]:
 
 def _derived_output_columns(
     plan: DerivedQueryPlan,
-    source_columns: List[str],
+    source_scope: _SourceColumnScope,
 ) -> List[str]:
     if not plan.columns:
-        return list(source_columns)
-    return [
-        extract_column_alias(column).output_name
-        for column in plan.columns
-    ]
+        return list(source_scope.columns)
+    out: List[str] = []
+    for column in plan.columns:
+        parts = extract_column_alias(column)
+        if parts.has_alias:
+            out.append(parts.output_name)
+        else:
+            out.append(source_scope.resolve(parts.expression) or parts.output_name)
+    return out
 
 
 _DERIVED_EXPR_RESERVED_TOKENS: frozenset = frozenset({
@@ -879,33 +899,78 @@ _DERIVED_EXPR_RESERVED_TOKENS: frozenset = frozenset({
 })
 
 
-def _source_output_columns_for_derived(
+def _source_column_scope_for_derived(
     source: QueryPlan,
     inner: CteUnit,
-) -> List[str]:
+) -> _SourceColumnScope:
     if isinstance(source, UnionPlan):
-        return derive_schema(source).names()
+        return _SourceColumnScope(derive_schema(source).names())
     if inner.select_columns:
-        return [
+        columns = [
             extract_column_alias(column).output_name
             for column in inner.select_columns
         ]
+        return _SourceColumnScope(columns, _qualified_refs_for_plan(source, columns))
     if isinstance(source, JoinPlan):
-        return _declared_output_columns_for_plan(source)
+        columns = _declared_output_columns_for_plan(source)
+        return _SourceColumnScope(columns, _qualified_refs_for_join(source, columns))
     if isinstance(source, BaseModelPlan):
-        return _base_declared_output_names(source)
+        columns = _base_declared_output_names(source)
+        return _SourceColumnScope(columns, _qualified_refs_for_plan(source, columns))
     if isinstance(source, DerivedQueryPlan):
-        return [
-            extract_column_alias(column).output_name
-            for column in source.columns
-        ]
-    return []
+        columns = _derived_output_columns(source, _SourceColumnScope([]))
+        return _SourceColumnScope(columns, _qualified_refs_for_plan(source, columns))
+    return _SourceColumnScope([])
+
+
+def _plan_aliases(plan: QueryPlan) -> Tuple[str, ...]:
+    aliases = getattr(plan, "_compose_aliases", None)
+    if callable(aliases):
+        return aliases()
+    return tuple(getattr(plan, "_compose_local_aliases", ()))
+
+
+def _qualified_refs_for_plan(
+    plan: QueryPlan,
+    columns: List[str],
+) -> Dict[str, str]:
+    refs: Dict[str, str] = {}
+    for alias in _plan_aliases(plan):
+        for column in columns:
+            refs[f"{alias}.{column}"] = column
+    return refs
+
+
+def _qualified_refs_for_join(
+    plan: JoinPlan,
+    output_columns: List[str],
+) -> Dict[str, str]:
+    output = set(output_columns)
+    refs: Dict[str, str] = {}
+
+    def add_refs(qualifiers: Tuple[str, ...], columns: List[str]) -> None:
+        for qualifier in qualifiers:
+            for column in columns:
+                if column in output:
+                    refs[f"{qualifier}.{column}"] = column
+
+    left_columns = _declared_output_columns_for_plan(plan.left)
+    right_columns = _declared_output_columns_for_plan(plan.right)
+    left_names = set(left_columns)
+    add_refs(("left",) + _plan_aliases(plan.left), left_columns)
+    add_refs(
+        ("right",) + _plan_aliases(plan.right),
+        [column for column in right_columns if column not in left_names],
+    )
+    return refs
 
 
 def _declared_output_columns_for_plan(plan: QueryPlan) -> List[str]:
     if isinstance(plan, BaseModelPlan):
         return _base_declared_output_names(plan)
     if isinstance(plan, DerivedQueryPlan):
+        if not plan.columns:
+            return _declared_output_columns_for_plan(plan.source)
         return [
             extract_column_alias(column).output_name
             for column in plan.columns
@@ -949,18 +1014,33 @@ def _iter_slice_entries(slice_: Any) -> Any:
 
 def _validate_derived_output_refs(
     plan: DerivedQueryPlan,
-    source_columns: List[str],
+    source_scope: _SourceColumnScope,
 ) -> None:
-    if not source_columns:
+    if not source_scope.columns:
         return
-    source_names = set(source_columns)
+    source_names = set(source_scope.columns)
     current_output_names = {
-        extract_column_alias(column).output_name
+        _derived_output_name_for_validation(column, source_scope)
         for column in plan.columns
     }
     order_by_names = source_names | current_output_names
     for column in plan.columns:
         parts = extract_column_alias(column)
+        if _DOTTED_REF.match(parts.expression):
+            if source_scope.resolve(parts.expression) is None:
+                alias_part = parts.expression.split(".", 1)[0]
+                raise ComposeSchemaError(
+                    code=schema_error_codes.DERIVED_QUERY_UNKNOWN_FIELD,
+                    message=(
+                        f"derived query references unknown field {alias_part!r} "
+                        "not present in source output schema "
+                        f"(available: {sorted(source_names)!r})"
+                    ),
+                    phase=schema_error_codes.PHASE_SCHEMA_DERIVE,
+                    plan_path="DerivedQueryPlan",
+                    offending_field=alias_part,
+                )
+            continue
         for ident in _iter_unquoted_identifiers(parts.expression):
             if ident.upper() in _DERIVED_EXPR_RESERVED_TOKENS:
                 continue
@@ -973,12 +1053,13 @@ def _validate_derived_output_refs(
                         f"(available: {sorted(source_names)!r})"
                     ),
                     phase=schema_error_codes.PHASE_SCHEMA_DERIVE,
-                        plan_path="DerivedQueryPlan",
-                        offending_field=ident,
-                    )
+                    plan_path="DerivedQueryPlan",
+                    offending_field=ident,
+                )
     for entry in plan.order_by or []:
         field_name = normalize_order_by_item(entry).field
-        if field_name not in order_by_names:
+        resolved_field = source_scope.resolve(field_name) or field_name
+        if resolved_field not in order_by_names:
             raise ComposeSchemaError(
                 code=schema_error_codes.DERIVED_QUERY_UNKNOWN_FIELD,
                 message=(
@@ -996,6 +1077,8 @@ def _validate_derived_output_refs(
         if field_name:
             field_str = str(field_name).strip()
             if _DOTTED_REF.match(field_str):
+                if source_scope.resolve(field_str) is not None:
+                    continue
                 alias_part = field_str.split(".")[0]
                 raise ComposeSchemaError(
                     code=schema_error_codes.DERIVED_QUERY_UNKNOWN_FIELD,
@@ -1025,9 +1108,19 @@ def _validate_derived_output_refs(
                     )
 
 
+def _derived_output_name_for_validation(
+    column: str,
+    source_scope: _SourceColumnScope,
+) -> str:
+    parts = extract_column_alias(column)
+    if parts.has_alias:
+        return parts.output_name
+    return source_scope.resolve(parts.expression) or parts.output_name
+
+
 def _validate_derived_slice_not_same_stage_alias(
     plan: DerivedQueryPlan,
-    source_columns: List[str],
+    source_scope: _SourceColumnScope,
 ) -> None:
     """Reject filtering a SELECT alias in the same derived stage.
 
@@ -1039,18 +1132,24 @@ def _validate_derived_slice_not_same_stage_alias(
     if not plan.slice_:
         return
 
-    source_names = set(source_columns)
+    source_names = set(source_scope.columns)
     current_stage_aliases = {
-        parts.output_name
-        for parts in (extract_column_alias(column) for column in plan.columns)
-        if parts.has_alias and parts.output_name not in source_names
+        _derived_output_name_for_validation(column, source_scope)
+        for column in plan.columns
+        for parts in (extract_column_alias(column),)
+        if parts.has_alias
+        and _derived_output_name_for_validation(column, source_scope) not in source_names
     }
     if not current_stage_aliases:
         return
 
     for entry in _iter_slice_entries(plan.slice_):
         field_name = _slice_field_name(entry)
-        if field_name in current_stage_aliases:
+        if isinstance(field_name, str):
+            candidate_field = source_scope.resolve(field_name) or field_name
+        else:
+            candidate_field = field_name
+        if candidate_field in current_stage_aliases:
             raise ComposeSchemaError(
                 code=schema_error_codes.DERIVED_QUERY_SAME_STAGE_ALIAS,
                 message=(
@@ -1119,12 +1218,16 @@ def _render_select_column(
     column: str,
     inner_alias: str,
     dialect: str,
-    source_columns: Optional[List[str]] = None,
+    source_scope: Optional[_SourceColumnScope] = None,
 ) -> str:
     if column.strip() == "*":
         return "*"
+    scope = source_scope or _SourceColumnScope([])
     parts = extract_column_alias(column)
-    if _is_simple_output_ref(parts.expression):
+    resolved_expression = scope.resolve(parts.expression)
+    if resolved_expression is not None:
+        rendered = _render_qualified_ref(inner_alias, resolved_expression, dialect)
+    elif _is_simple_output_ref(parts.expression):
         rendered = _render_qualified_ref(inner_alias, parts.expression, dialect)
     else:
         expression = _rewrite_safe_division(parts.expression)
@@ -1132,7 +1235,7 @@ def _render_select_column(
             expression,
             inner_alias=inner_alias,
             dialect=dialect,
-            source_columns=source_columns or [],
+            source_scope=scope,
         )
     if parts.has_alias:
         return f"{rendered} AS {_render_identifier(parts.output_name, dialect)}"
@@ -1144,7 +1247,7 @@ def _render_expression_output_refs(
     *,
     inner_alias: str,
     dialect: str,
-    source_columns: List[str],
+    source_scope: _SourceColumnScope,
 ) -> str:
     """Qualify output-schema references inside a derived expression.
 
@@ -1153,10 +1256,13 @@ def _render_expression_output_refs(
     camelCase identifiers to lowercase; qualifying and quoting matched
     output names preserves aliases such as ``currentMonthAmount``.
     """
-    if not source_columns:
+    resolved_expression = source_scope.resolve(expression.strip())
+    if resolved_expression is not None:
+        return _render_qualified_ref(inner_alias, resolved_expression, dialect)
+    if not source_scope.columns:
         return expression
 
-    source_names = set(source_columns)
+    source_names = set(source_scope.columns)
     out: List[str] = []
     i = 0
     length = len(expression)
@@ -1428,7 +1534,7 @@ def _render_outer_select(
     inner_alias: str,
     inner_sql: str,
     dialect: str,
-    source_columns: List[str],
+    source_scope: _SourceColumnScope,
     state: _CompileState,
 ) -> Tuple[str, List[Any]]:
     """Render ``SELECT <cols> FROM (<inner_sql>) AS <inner_alias> …``.
@@ -1450,7 +1556,7 @@ def _render_outer_select(
                 column,
                 inner_alias,
                 dialect,
-                source_columns=source_columns,
+                source_scope=source_scope,
             )
             for column in plan.columns
         )
@@ -1470,7 +1576,7 @@ def _render_outer_select(
             list(plan.slice_),
             inner_alias=inner_alias,
             dialect=dialect,
-            source_columns=source_columns,
+            source_scope=source_scope,
             state=state,
         )
         if where_fragments:
@@ -1481,14 +1587,16 @@ def _render_outer_select(
     if plan.group_by:
         parts.append(
             "GROUP BY " + ", ".join(
-                _render_identifier(field, dialect) for field in plan.group_by
+                _render_identifier(source_scope.resolve(field) or field, dialect)
+                for field in plan.group_by
             )
         )
 
     # ORDER BY — entries may be "name" or "name:asc|desc" / dict forms
     if plan.order_by:
         order_fragments = [
-            _render_order_entry(entry, dialect) for entry in plan.order_by
+            _render_order_entry(entry, dialect, source_scope=source_scope)
+            for entry in plan.order_by
         ]
         parts.append("ORDER BY " + ", ".join(order_fragments))
 
@@ -1509,7 +1617,7 @@ def _render_slice(
     *,
     inner_alias: str,
     dialect: str,
-    source_columns: List[str],
+    source_scope: _SourceColumnScope,
     state: _CompileState,
 ) -> Tuple[List[str], List[Any]]:
     """Render each slice entry as a WHERE predicate.
@@ -1552,7 +1660,7 @@ def _render_slice(
                     list(val),
                     inner_alias=inner_alias,
                     dialect=dialect,
-                    source_columns=source_columns,
+                    source_scope=source_scope,
                     state=state,
                 )
                 if sub_fragments:
@@ -1571,7 +1679,7 @@ def _render_slice(
                     list(sub_slice),
                     inner_alias=inner_alias,
                     dialect=dialect,
-                    source_columns=source_columns,
+                    source_scope=source_scope,
                     state=state,
                 )
                 if sub_fragments:
@@ -1597,22 +1705,26 @@ def _render_slice(
                 )
             field_name, value = next(iter(entry.items()))
             op = "="
-        field_sql = (
-            _render_qualified_ref(inner_alias, str(field_name), dialect)
-            if _is_simple_output_ref(str(field_name))
-            else _render_expression_output_refs(
-                str(field_name),
+        field_ref = str(field_name)
+        resolved_field = source_scope.resolve(field_ref)
+        if resolved_field is not None:
+            field_sql = _render_qualified_ref(inner_alias, resolved_field, dialect)
+        elif _is_simple_output_ref(field_ref):
+            field_sql = _render_qualified_ref(inner_alias, field_ref, dialect)
+        else:
+            field_sql = _render_expression_output_refs(
+                field_ref,
                 inner_alias=inner_alias,
                 dialect=dialect,
-                source_columns=source_columns,
+                source_scope=source_scope,
             )
-        )
         value_sql, value_params = _render_slice_value(
             value,
             op=op,
             inner_alias=inner_alias,
             dialect=dialect,
             state=state,
+            source_scope=source_scope,
         )
         rendered_op = _normalize_slice_op(op)
         if value_sql:
@@ -1630,6 +1742,7 @@ def _render_slice_value(
     inner_alias: str,
     dialect: str,
     state: _CompileState,
+    source_scope: _SourceColumnScope,
 ) -> Tuple[str, List[Any]]:
     # Phase 1: subquery value → compile plan and emit SQL subquery
     op_upper = _normalize_slice_op(op)
@@ -1653,6 +1766,9 @@ def _render_slice_value(
         )
     if isinstance(value, dict) and set(value.keys()) == {"$field"}:
         ref = value.get("$field")
+        resolved_ref = source_scope.resolve(ref) if isinstance(ref, str) else None
+        if isinstance(ref, str) and resolved_ref is not None:
+            return _render_qualified_ref(inner_alias, resolved_ref, dialect), []
         if not isinstance(ref, str) or not _is_simple_output_ref(ref):
             raise ComposeCompileError(
                 code=error_codes.UNSUPPORTED_PLAN_SHAPE,
@@ -1789,7 +1905,11 @@ def _normalize_slice_op(op: Any) -> str:
     return " ".join(str(op).strip().upper().split())
 
 
-def _render_order_entry(entry: Any, dialect: str) -> str:
+def _render_order_entry(
+    entry: Any,
+    dialect: str,
+    source_scope: Optional[_SourceColumnScope] = None,
+) -> str:
     """Render one ``order_by`` entry into a ``<name> [ASC|DESC]`` fragment."""
     try:
         spec = normalize_order_by_item(entry)
@@ -1802,4 +1922,9 @@ def _render_order_entry(entry: Any, dialect: str) -> str:
                 f"{type(entry).__name__}"
             ),
         ) from exc
-    return f"{_render_identifier(spec.field, dialect)} {spec.direction.upper()}"
+    field = (
+        source_scope.resolve(spec.field)
+        if source_scope is not None
+        else None
+    ) or spec.field
+    return f"{_render_identifier(field, dialect)} {spec.direction.upper()}"

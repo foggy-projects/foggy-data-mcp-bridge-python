@@ -28,7 +28,7 @@ What the rules do NOT yet do (deferred)
 from __future__ import annotations
 
 import re
-from typing import Iterable, List, Optional, Set, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 from .. import feature_flags
 from ..plan import (
@@ -122,10 +122,21 @@ def _derive_derived(plan: DerivedQueryPlan, *, path: str) -> OutputSchema:
     source_path = f"{path}DerivedQueryPlan/source/"
     source_schema = _derive(plan.source, path=source_path)
     source_names = source_schema.name_set()
+    qualified_refs = _qualified_refs_for_derived_source(
+        plan.source,
+        source_schema,
+        path=source_path,
+    )
 
     current_path = f"{path}DerivedQueryPlan"
     parts_list = [
-        _parse_alias_or_raise(c, plan_path=current_path) for c in plan.columns
+        _normalize_qualified_parts(
+            _parse_alias_or_raise(c, plan_path=current_path),
+            qualified_refs,
+            source_names,
+            plan_path=current_path,
+        )
+        for c in plan.columns
     ]
 
     # Every *expression* must reference only names in source_names.
@@ -335,6 +346,79 @@ def _append_annotated_side(
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
+
+_QUALIFIED_FIELD_REF = re.compile(
+    r"\A[A-Za-z_][A-Za-z0-9_$]*\.[A-Za-z_][A-Za-z0-9_$]*\Z"
+)
+
+
+def _plan_aliases(plan: QueryPlan) -> Tuple[str, ...]:
+    aliases = getattr(plan, "_compose_aliases", None)
+    if callable(aliases):
+        return aliases()
+    return tuple(getattr(plan, "_compose_local_aliases", ()))
+
+
+def _qualified_refs_for_derived_source(
+    source: QueryPlan,
+    source_schema: OutputSchema,
+    *,
+    path: str,
+) -> Dict[str, str]:
+    output_names = set(source_schema.names())
+    refs: Dict[str, str] = {}
+
+    def add_refs(qualifiers: Tuple[str, ...], names: Iterable[str]) -> None:
+        for qualifier in qualifiers:
+            for name in names:
+                if name in output_names:
+                    refs[f"{qualifier}.{name}"] = name
+
+    if isinstance(source, JoinPlan):
+        left_schema = _derive(source.left, path=f"{path}JoinPlan/left/")
+        right_schema = _derive(source.right, path=f"{path}JoinPlan/right/")
+        left_names = left_schema.names()
+        right_names = right_schema.names()
+        left_name_set = set(left_names)
+        add_refs(("left",) + _plan_aliases(source.left), left_names)
+        add_refs(
+            ("right",) + _plan_aliases(source.right),
+            [name for name in right_names if name not in left_name_set],
+        )
+        return refs
+
+    add_refs(_plan_aliases(source), source_schema.names())
+    return refs
+
+
+def _normalize_qualified_parts(
+    parts: ColumnAliasParts,
+    qualified_refs: Dict[str, str],
+    source_names: frozenset,
+    *,
+    plan_path: str,
+) -> ColumnAliasParts:
+    if not _QUALIFIED_FIELD_REF.match(parts.expression):
+        return parts
+    resolved = qualified_refs.get(parts.expression)
+    if resolved is None:
+        qualifier = parts.expression.split(".", 1)[0]
+        raise ComposeSchemaError(
+            code=error_codes.DERIVED_QUERY_UNKNOWN_FIELD,
+            message=(
+                f"derived query references unknown field {qualifier!r} "
+                "not present in source's output schema "
+                f"(available: {sorted(source_names)!r})"
+            ),
+            phase=error_codes.PHASE_SCHEMA_DERIVE,
+            plan_path=plan_path,
+            offending_field=qualifier,
+        )
+    return ColumnAliasParts(
+        expression=resolved,
+        output_name=parts.output_name if parts.has_alias else resolved,
+        has_alias=parts.has_alias,
+    )
 
 
 def _columns_to_specs(

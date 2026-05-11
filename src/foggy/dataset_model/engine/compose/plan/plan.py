@@ -259,6 +259,28 @@ class QueryPlan(ABC):
             raise AttributeError(name)
         return PlanColumnRef(self, name)
 
+    def __fsscript_bind_alias__(self, alias: str) -> "QueryPlan":
+        """Attach a compose-script local alias captured from assignment.
+
+        This is intentionally an internal fsscript hook, not part of the
+        public QueryPlan surface. Plan nodes remain semantically immutable;
+        the alias is side metadata used only to resolve qualified join
+        references such as ``firstOrders.partner$caption``.
+        """
+        if not isinstance(alias, str):
+            return self
+        clean = alias.strip()
+        if not clean or not clean.replace("_", "a").isalnum():
+            return self
+        existing = tuple(getattr(self, "_compose_local_aliases", ()))
+        if clean in existing:
+            return self
+        object.__setattr__(self, "_compose_local_aliases", existing + (clean,))
+        return self
+
+    def _compose_aliases(self) -> Tuple[str, ...]:
+        return tuple(getattr(self, "_compose_local_aliases", ()))
+
     # ---- Window Function Builders ----
 
     def rowNumber(self) -> WindowColumnBuilder:

@@ -204,6 +204,165 @@ class TestJoinBasic:
         assert 'cte_2."orderStatus$caption"' in composed.sql
         assert "cte_2.orderStatus$caption" not in composed.sql
 
+    def test_postgres_query_after_join_selects_left_non_conflicting_dollar_field(
+        self, svc, ctx
+    ):
+        first_orders = from_(
+            model="FactSalesModel",
+            columns=[
+                "orderStatus$caption",
+                "MIN(salesAmount) AS firstOrderDate",
+            ],
+            group_by=["orderStatus$caption"],
+        )
+        may_orders = from_(
+            model="FactOrderModel",
+            columns=[
+                "orderStatus$caption AS order_status",
+                "COUNT(totalAmount) AS orderCount",
+                "SUM(totalAmount) AS totalAmount",
+            ],
+            group_by=["orderStatus$caption"],
+        )
+        joined = first_orders.join(
+            may_orders,
+            type="left",
+            on=[JoinOn(left="orderStatus$caption", op="=", right="order_status")],
+        )
+
+        result = joined.query(
+            columns=[
+                "orderStatus$caption",
+                "firstOrderDate",
+                "orderCount",
+                "totalAmount",
+            ],
+            order_by=["-totalAmount"],
+        )
+
+        composed = compile_plan_to_sql(
+            result,
+            ctx,
+            semantic_service=svc,
+            dialect="postgres",
+        )
+
+        assert 'cte_2."orderStatus$caption"' in composed.sql
+        assert 'cte_2."firstOrderDate"' in composed.sql
+        assert 'cte_2."orderCount"' in composed.sql
+        assert 'ORDER BY "totalAmount" DESC' in composed.sql
+
+    def test_postgres_query_after_join_preserves_no_columns_derived_left_schema(
+        self, svc, ctx
+    ):
+        first_orders = from_(
+            model="FactSalesModel",
+            columns=[
+                "orderStatus$caption",
+                "MIN(salesAmount) AS firstOrderDate",
+            ],
+            group_by=["orderStatus$caption"],
+        )
+        filtered_first_orders = first_orders.query(
+            slice=[{"field": "firstOrderDate", "op": ">", "value": 0}]
+        )
+        may_orders = from_(
+            model="FactOrderModel",
+            columns=[
+                "orderStatus$caption",
+                "COUNT(totalAmount) AS orderCount",
+                "SUM(totalAmount) AS totalAmount",
+            ],
+            group_by=["orderStatus$caption"],
+        )
+        joined = filtered_first_orders.join(
+            may_orders,
+            type="left",
+            on=[
+                JoinOn(
+                    left="orderStatus$caption",
+                    op="=",
+                    right="orderStatus$caption",
+                )
+            ],
+        )
+
+        result = joined.query(
+            columns=[
+                "orderStatus$caption",
+                "firstOrderDate",
+                "orderCount",
+                "totalAmount",
+            ],
+            order_by=["-totalAmount"],
+        )
+
+        composed = compile_plan_to_sql(
+            result,
+            ctx,
+            semantic_service=svc,
+            dialect="postgres",
+        )
+
+        assert 'cte_3."orderStatus$caption"' in composed.sql
+        assert 'cte_3."firstOrderDate"' in composed.sql
+        assert 'cte_3."orderCount"' in composed.sql
+        assert 'ORDER BY "totalAmount" DESC' in composed.sql
+
+    def test_postgres_query_after_join_accepts_side_and_local_qualified_refs(
+        self, svc, ctx
+    ):
+        first_orders = from_(
+            model="FactSalesModel",
+            columns=[
+                "orderStatus$caption",
+                "MIN(salesAmount) AS firstOrderDate",
+            ],
+            group_by=["orderStatus$caption"],
+        ).__fsscript_bind_alias__("firstOrders")
+        may_orders = from_(
+            model="FactOrderModel",
+            columns=[
+                "orderStatus$caption AS order_status",
+                "COUNT(totalAmount) AS orderCount",
+                "SUM(totalAmount) AS totalAmount",
+            ],
+            group_by=["orderStatus$caption"],
+        ).__fsscript_bind_alias__("mayOrders")
+        joined = first_orders.join(
+            may_orders,
+            type="left",
+            on=[JoinOn(left="orderStatus$caption", op="=", right="order_status")],
+        )
+
+        result = joined.query(
+            columns=[
+                "firstOrders.orderStatus$caption",
+                "left.firstOrderDate",
+                "mayOrders.orderCount",
+                "right.totalAmount",
+            ],
+            slice=[{"field": "left.firstOrderDate", "op": "IS NOT NULL"}],
+            order_by=["-mayOrders.totalAmount"],
+        )
+
+        composed = compile_plan_to_sql(
+            result,
+            ctx,
+            semantic_service=svc,
+            dialect="postgres",
+        )
+
+        assert 'cte_2."orderStatus$caption"' in composed.sql
+        assert 'cte_2."firstOrderDate"' in composed.sql
+        assert 'cte_2."orderCount"' in composed.sql
+        assert 'cte_2."totalAmount"' in composed.sql
+        assert "firstOrders." not in composed.sql
+        assert "mayOrders." not in composed.sql
+        assert "left." not in composed.sql
+        assert "right." not in composed.sql
+        assert 'ORDER BY "totalAmount" DESC' in composed.sql
+
     def test_postgres_base_stabilizes_declared_dollar_outputs_with_extra_columns(
         self, ctx
     ):
