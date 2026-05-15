@@ -21,6 +21,8 @@ RESULT_HANDLE_EXPIRED = "MEMORY_GRID_RESULT_HANDLE_EXPIRED"
 NAMESPACE_MISMATCH = "MEMORY_GRID_RESULT_NAMESPACE_MISMATCH"
 SOURCE_ROUTE_MISMATCH = "MEMORY_GRID_RESULT_SOURCE_ROUTE_MISMATCH"
 SCHEMA_MISMATCH = "MEMORY_GRID_RESULT_SCHEMA_MISMATCH"
+SCHEMA_DRIFT = "MEMORY_GRID_RESULT_SCHEMA_DRIFT"
+AUTH_REPLAY_MISMATCH = "MEMORY_GRID_RESULT_AUTH_REPLAY_MISMATCH"
 GOVERNANCE_MISMATCH = "MEMORY_GRID_RESULT_GOVERNANCE_MISMATCH"
 STORAGE_UNAVAILABLE = "MEMORY_GRID_RESULT_STORAGE_UNAVAILABLE"
 
@@ -55,6 +57,15 @@ class MemoryGridColumn:
 
 
 @dataclass(frozen=True)
+class PolicySnapshot:
+    owner_context_hash: str | None = None
+    field_access_hash: str | None = None
+    schema_hash: str | None = None
+    policy_version: str | None = None
+    schema_version: str | None = None
+
+
+@dataclass(frozen=True)
 class ResultHandleMetadata:
     handle_id: str
     namespace: str | None = None
@@ -73,6 +84,7 @@ class ResultHandleMetadata:
     storage_ref: str | None = None
     read_count: int = 0
     max_read_count: int = -1
+    policy_snapshot: PolicySnapshot | dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -198,6 +210,8 @@ class ResultHandleWriteRequest:
     cell_limit: int = -1
     ttl: timedelta = timedelta(minutes=30)
     max_read_count: int = -1
+    policy_version: str | None = None
+    schema_version: str | None = None
 
 
 class ResultHandleWriter:
@@ -256,6 +270,13 @@ class ResultHandleWriter:
             storage_ref=storage_ref,
             read_count=0,
             max_read_count=request.max_read_count,
+            policy_snapshot=PolicySnapshot(
+                owner_context_hash=_owner_context_hash(context),
+                field_access_hash=_field_access_hash(context),
+                schema_hash=_schema_hash(request.schema),
+                policy_version=request.policy_version,
+                schema_version=request.schema_version,
+            ),
         )
         result = ResolvedMemoryGridResult(
             result_handle=handle,
@@ -271,12 +292,68 @@ class ResultHandleWriter:
         return handle
 
 
+class MemoryGridAuthReplayPolicy:
+    """Replays request-side policy before a stored Memory Grid handle is read."""
+
+    def verify(
+        self,
+        result: ResolvedMemoryGridResult,
+        context: SemanticRequestContext | None = None,
+    ) -> None:
+        raise NotImplementedError
+
+
+class StrictMemoryGridAuthReplayPolicy(MemoryGridAuthReplayPolicy):
+    """Strict fail-closed replay policy aligned with the Java P0.13 cut."""
+
+    def verify(
+        self,
+        result: ResolvedMemoryGridResult,
+        context: SemanticRequestContext | None = None,
+    ) -> None:
+        metadata = _metadata_dict(result.metadata)
+        snapshot = _policy_snapshot_dict(_get(metadata, "policy_snapshot", "policySnapshot"))
+        if not snapshot:
+            return
+        handle = result.result_handle
+        owner_hash = _get(snapshot, "owner_context_hash", "ownerContextHash")
+        if owner_hash is not None and owner_hash != _owner_context_hash(context):
+            raise MemoryGridError(AUTH_REPLAY_MISMATCH, f"owner context changed for {handle}.")
+        field_access_hash = _get(snapshot, "field_access_hash", "fieldAccessHash")
+        if field_access_hash is not None and field_access_hash != _field_access_hash(context):
+            raise MemoryGridError(AUTH_REPLAY_MISMATCH, f"field access policy changed for {handle}.")
+        schema_hash = _get(snapshot, "schema_hash", "schemaHash")
+        if schema_hash is not None and schema_hash != _schema_hash(result.schema):
+            raise MemoryGridError(SCHEMA_DRIFT, f"schema snapshot changed for {handle}.")
+        field_access = _field_access_values(context)
+        if field_access is None:
+            return
+        allowed = set(field_access)
+        for column_value in result.schema.values():
+            column = _column_dict(column_value)
+            if not column:
+                continue
+            if not (_get(column, "join_allowed", "joinAllowed")
+                    or _get(column, "derived_allowed", "derivedAllowed")
+                    or _get(column, "output_allowed", "outputAllowed")):
+                continue
+            name = _get(column, "name")
+            if name not in allowed:
+                raise MemoryGridError(AUTH_REPLAY_MISMATCH, f"field access narrowed for {handle}: {name}")
+
+
 class MemoryGridStoreBackedResultResolver:
     """Store-backed resolver for production Memory Grid handles."""
 
-    def __init__(self, store: ResultHandleStore, storage_adapter: ResultStorageAdapter) -> None:
+    def __init__(
+        self,
+        store: ResultHandleStore,
+        storage_adapter: ResultStorageAdapter,
+        auth_replay_policy: MemoryGridAuthReplayPolicy | None = None,
+    ) -> None:
         self._store = store
         self._storage_adapter = storage_adapter
+        self._auth_replay_policy = auth_replay_policy or StrictMemoryGridAuthReplayPolicy()
 
     def resolve(
         self,
@@ -297,6 +374,7 @@ class MemoryGridStoreBackedResultResolver:
             raise MemoryGridError(RESULT_HANDLE_EXPIRED, handle)
         if metadata.max_read_count >= 0 and metadata.read_count >= metadata.max_read_count:
             raise MemoryGridError(GOVERNANCE_MISMATCH, f"resolver read_count exceeds max_read_count for {handle}.")
+        self._auth_replay_policy.verify(record.result, context)
         rows = self._storage_adapter.read(metadata.storage_ref)
         self._store.increment_read_count(handle)
         refreshed = self._store.find(handle) or record
@@ -671,7 +749,7 @@ def _audit(result: ResolvedMemoryGridResult) -> dict[str, Any]:
             "source_route": _first_non_blank(_get(metadata, "source_route", "sourceRoute"), result.source_route),
             "namespace": _first_non_blank(_get(metadata, "namespace"), result.namespace),
             "query_hash": _get(metadata, "query_hash", "queryHash"),
-            "storage_ref": _get(metadata, "storage_ref", "storageRef"),
+            "storage_ref_redacted": bool(_string(_get(metadata, "storage_ref", "storageRef"))),
             "expires_at": _string(_get(metadata, "expires_at", "expiresAt")),
             "source_model_refs": _get(metadata, "source_model_refs", "sourceModelRefs") or [],
             "read_count": _get(metadata, "read_count", "readCount"),
@@ -785,6 +863,23 @@ def _metadata_dict(value: Any) -> dict[str, Any]:
             "storage_ref": value.storage_ref,
             "read_count": value.read_count,
             "max_read_count": value.max_read_count,
+            "policy_snapshot": value.policy_snapshot,
+        }
+    if isinstance(value, dict):
+        return value
+    return getattr(value, "__dict__", {}) or {}
+
+
+def _policy_snapshot_dict(value: Any) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if isinstance(value, PolicySnapshot):
+        return {
+            "owner_context_hash": value.owner_context_hash,
+            "field_access_hash": value.field_access_hash,
+            "schema_hash": value.schema_hash,
+            "policy_version": value.policy_version,
+            "schema_version": value.schema_version,
         }
     if isinstance(value, dict):
         return value
@@ -871,11 +966,73 @@ def _owner_context_hash(context: SemanticRequestContext | None) -> str:
         seed = "|".join(
             [
                 str(getattr(context, "namespace", None)),
-                str(getattr(context, "authorization", None)),
-                str(getattr(context, "field_access", None)),
+                str(_authorization(context)),
             ]
         )
     return "sha256:" + sha256(seed.encode("utf-8")).hexdigest()
+
+
+def _authorization(context: SemanticRequestContext | None) -> str | None:
+    if context is None:
+        return None
+    direct = getattr(context, "authorization", None)
+    if direct is not None:
+        return direct
+    attributes = getattr(context, "attributes", None)
+    if isinstance(attributes, dict):
+        return attributes.get("authorization")
+    return None
+
+
+def _field_access_values(context: SemanticRequestContext | None) -> list[str] | None:
+    if context is None:
+        return None
+    value = getattr(context, "field_access", None)
+    if value is None:
+        attributes = getattr(context, "attributes", None)
+        if isinstance(attributes, dict):
+            value = attributes.get("field_access")
+    if value is None:
+        return None
+    visible = getattr(value, "visible", None)
+    if visible is not None:
+        return [str(item) for item in visible]
+    if isinstance(value, dict):
+        visible = value.get("visible")
+        if visible is not None:
+            return [str(item) for item in visible]
+    if isinstance(value, (set, list, tuple)):
+        return [str(item) for item in value]
+    return None
+
+
+def _field_access_hash(context: SemanticRequestContext | None) -> str | None:
+    field_access = _field_access_values(context)
+    if field_access is None:
+        return None
+    seed = "|".join(sorted(field_access))
+    return "sha256:" + sha256(seed.encode("utf-8")).hexdigest()
+
+
+def _schema_hash(schema: dict[str, Any] | None) -> str | None:
+    if not schema:
+        return None
+    parts: list[str] = []
+    for name in sorted(schema):
+        column = _column_dict(schema.get(name))
+        parts.append(
+            ":".join(
+                [
+                    str(name),
+                    str(_get(column, "type")),
+                    str(bool(_get(column, "join_allowed", "joinAllowed"))).lower(),
+                    str(bool(_get(column, "derived_allowed", "derivedAllowed"))).lower(),
+                    str(bool(_get(column, "output_allowed", "outputAllowed"))).lower(),
+                    str(bool(_get(column, "sensitive"))).lower(),
+                ]
+            )
+        )
+    return "sha256:" + sha256("|".join(parts).encode("utf-8")).hexdigest()
 
 
 def _string(value: Any) -> str | None:
@@ -943,6 +1100,7 @@ def _parse_datetime(value: Any) -> datetime | None:
 __all__ = [
     "BridgePlan",
     "DerivedFormula",
+    "AUTH_REPLAY_MISMATCH",
     "GOVERNANCE_MISMATCH",
     "GRAIN_MISMATCH",
     "InMemoryResultHandleStore",
@@ -950,9 +1108,11 @@ __all__ = [
     "LIMIT_EXCEEDED",
     "MemoryGridColumn",
     "MemoryGridError",
+    "MemoryGridAuthReplayPolicy",
     "MemoryGridRegistryResultResolver",
     "MemoryGridStoreBackedResultResolver",
     "NAMESPACE_MISMATCH",
+    "PolicySnapshot",
     "ResolvedMemoryGridResult",
     "ResultHandleRecord",
     "ResultHandleStore",
@@ -962,11 +1122,13 @@ __all__ = [
     "ResultStorageAdapter",
     "RESULT_HANDLE_EXPIRED",
     "RESULT_HANDLE_NOT_FOUND",
+    "SCHEMA_DRIFT",
     "SCHEMA_MISMATCH",
     "SOURCE_ROUTE_MISMATCH",
     "STATUS_DEFERRED",
     "STATUS_READY",
     "STORAGE_UNAVAILABLE",
+    "StrictMemoryGridAuthReplayPolicy",
     "UNBOUNDED_INPUT",
     "UNGOVERNED_SOURCE",
     "append_memory_grid_bridge_evidence",
