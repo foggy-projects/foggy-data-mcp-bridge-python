@@ -3,10 +3,15 @@
 from datetime import UTC, datetime, timedelta
 
 from foggy.dataset_model.semantic.memory_grid import (
+    InMemoryResultHandleStore,
+    InMemoryResultStorageAdapter,
     MemoryGridColumn,
     MemoryGridRegistryResultResolver,
+    MemoryGridStoreBackedResultResolver,
     ResolvedMemoryGridResult,
     ResultHandleMetadata,
+    ResultHandleWriter,
+    ResultHandleWriteRequest,
 )
 from foggy.dataset_model.semantic.service import SemanticQueryService
 from foggy.mcp_spi import SemanticQueryRequest, SemanticRequestContext
@@ -141,6 +146,22 @@ def _schema(metric, *, sensitive=False):
     }
 
 
+def _write_request(route, model, metric, rows, *, max_read_count=3):
+    return ResultHandleWriteRequest(
+        source_route=route,
+        source_model_refs=[model],
+        query_hash=f"hash_{model}_{metric}",
+        grain=["salesTeam.name"],
+        schema=_schema(metric),
+        rows=rows,
+        lineage={"model": model},
+        row_limit=200,
+        cell_limit=500,
+        ttl=timedelta(hours=1),
+        max_read_count=max_read_count,
+    )
+
+
 def test_memory_grid_validate_returns_bridge_ready_plan_evidence():
     response = SemanticQueryService().query_model(
         "AnyModel",
@@ -223,6 +244,152 @@ def test_memory_grid_execute_uses_resolver_and_returns_audit_summary():
     assert summary["memory_grid_bridge_status"] == "BRIDGE_READY"
     assert summary["resolver_audit"][0]["query_hash"] == "hash_dsl_cte_result_actual_by_team_2026_05"
     assert summary["resolver_audit"][0]["storage_ref"] == "memory://result/dsl_cte_result_actual_by_team_2026_05"
+
+
+def test_memory_grid_execute_uses_store_backed_result_handles():
+    store = InMemoryResultHandleStore()
+    storage = InMemoryResultStorageAdapter()
+    handles = iter(["mgr_actual_2026_05", "mgr_target_2026_05"])
+    writer = ResultHandleWriter(store, storage, handle_supplier=lambda: next(handles))
+    actual_handle = writer.write(
+        _write_request(
+            "DSL_CTE",
+            "SaleOrder",
+            "actualSalesAmount",
+            [{"salesTeam.name": "Team A", "actualSalesAmount": 120}, {"salesTeam.name": "Team B", "actualSalesAmount": 80}],
+        )
+    )
+    target_handle = writer.write(
+        _write_request(
+            "DSL",
+            "SalesTarget",
+            "targetSalesAmount",
+            [{"salesTeam.name": "Team A", "targetSalesAmount": 100}, {"salesTeam.name": "Team C", "targetSalesAmount": 50}],
+        )
+    )
+
+    response = SemanticQueryService(memory_grid_result_resolver=MemoryGridStoreBackedResultResolver(store, storage)).query_model(
+        "AnyModel",
+        SemanticQueryRequest(
+            route="MEMORY_GRID",
+            memory_grid_plan=_third009_plan(
+                inputs=[
+                    dict(_third009_plan()["inputs"][0], result_handle=actual_handle),
+                    dict(_third009_plan()["inputs"][1], result_handle=target_handle),
+                ]
+            ),
+            hints={"memoryGridExecute": True},
+        ),
+    )
+
+    assert response.error is None
+    assert response.items == [
+        {
+            "salesTeam.name": "Team A",
+            "actualSalesAmount": 120,
+            "targetSalesAmount": 100,
+            "targetAchievementRate": 1.2,
+        }
+    ]
+    summary = response.execution.memory_grid_execution_summary
+    assert summary["resolver_audit"][0]["storage_ref"] == "memory-grid://result/mgr_actual_2026_05"
+    assert summary["resolver_audit"][0]["read_count"] == 1
+    assert summary["resolver_audit"][0]["cell_count"] == 4
+
+
+def test_memory_grid_execute_rejects_invalidated_store_backed_handle():
+    store = InMemoryResultHandleStore()
+    storage = InMemoryResultStorageAdapter()
+    writer = ResultHandleWriter(store, storage, handle_supplier=lambda: "mgr_actual_2026_05")
+    actual_handle = writer.write(
+        _write_request(
+            "DSL_CTE",
+            "SaleOrder",
+            "actualSalesAmount",
+            [{"salesTeam.name": "Team A", "actualSalesAmount": 120}],
+        )
+    )
+    store.invalidate(actual_handle)
+    resolver = MemoryGridStoreBackedResultResolver(store, storage)
+
+    response = SemanticQueryService(memory_grid_result_resolver=resolver).query_model(
+        "AnyModel",
+        SemanticQueryRequest(
+            route="MEMORY_GRID",
+            memory_grid_plan=_third009_plan(inputs=[dict(_third009_plan()["inputs"][0], result_handle=actual_handle), _third009_plan()["inputs"][1]]),
+            hints={"memoryGridExecute": True},
+        ),
+    )
+
+    assert response.error is not None
+    assert response.error_detail["errorCode"] == "MEMORY_GRID_RESULT_HANDLE_EXPIRED"
+
+
+def test_memory_grid_execute_rejects_store_backed_storage_unavailable():
+    store = InMemoryResultHandleStore()
+    writer = ResultHandleWriter(store, InMemoryResultStorageAdapter(), handle_supplier=lambda: "mgr_actual_2026_05")
+    actual_handle = writer.write(
+        _write_request(
+            "DSL_CTE",
+            "SaleOrder",
+            "actualSalesAmount",
+            [{"salesTeam.name": "Team A", "actualSalesAmount": 120}],
+        )
+    )
+    resolver = MemoryGridStoreBackedResultResolver(store, InMemoryResultStorageAdapter())
+
+    response = SemanticQueryService(memory_grid_result_resolver=resolver).query_model(
+        "AnyModel",
+        SemanticQueryRequest(
+            route="MEMORY_GRID",
+            memory_grid_plan=_third009_plan(inputs=[dict(_third009_plan()["inputs"][0], result_handle=actual_handle), _third009_plan()["inputs"][1]]),
+            hints={"memoryGridExecute": True},
+        ),
+    )
+
+    assert response.error is not None
+    assert response.error_detail["errorCode"] == "MEMORY_GRID_RESULT_STORAGE_UNAVAILABLE"
+
+
+def test_memory_grid_execute_rejects_store_backed_handle_after_max_read_count():
+    store = InMemoryResultHandleStore()
+    storage = InMemoryResultStorageAdapter()
+    handles = iter(["mgr_actual_2026_05", "mgr_target_2026_05"])
+    writer = ResultHandleWriter(store, storage, handle_supplier=lambda: next(handles))
+    actual_handle = writer.write(
+        _write_request(
+            "DSL_CTE",
+            "SaleOrder",
+            "actualSalesAmount",
+            [{"salesTeam.name": "Team A", "actualSalesAmount": 120}],
+            max_read_count=1,
+        )
+    )
+    target_handle = writer.write(
+        _write_request(
+            "DSL",
+            "SalesTarget",
+            "targetSalesAmount",
+            [{"salesTeam.name": "Team A", "targetSalesAmount": 100}],
+        )
+    )
+    request = SemanticQueryRequest(
+        route="MEMORY_GRID",
+        memory_grid_plan=_third009_plan(
+            inputs=[
+                dict(_third009_plan()["inputs"][0], result_handle=actual_handle),
+                dict(_third009_plan()["inputs"][1], result_handle=target_handle),
+            ]
+        ),
+        hints={"memoryGridExecute": True},
+    )
+    service = SemanticQueryService(memory_grid_result_resolver=MemoryGridStoreBackedResultResolver(store, storage))
+
+    assert service.query_model("AnyModel", request).error is None
+    response = service.query_model("AnyModel", request)
+
+    assert response.error is not None
+    assert response.error_detail["errorCode"] == "MEMORY_GRID_RESULT_GOVERNANCE_MISMATCH"
 
 
 def test_memory_grid_execute_rejects_sensitive_derived_operand():

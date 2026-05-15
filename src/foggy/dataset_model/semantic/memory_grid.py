@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
+import uuid
+from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, DivisionByZero, InvalidOperation
+from hashlib import sha256
 from typing import Any
 
 from foggy.mcp_spi import SemanticRequestContext
@@ -56,15 +58,21 @@ class MemoryGridColumn:
 class ResultHandleMetadata:
     handle_id: str
     namespace: str | None = None
+    owner_context_hash: str | None = None
     source_route: str | None = None
     source_model_refs: list[str] = field(default_factory=list)
     query_hash: str | None = None
     created_at: Any | None = None
     expires_at: Any | None = None
+    invalidated_at: Any | None = None
     row_count: int = -1
     row_limit: int = -1
+    cell_count: int = -1
+    byte_size: int = -1
     lineage: dict[str, Any] = field(default_factory=dict)
     storage_ref: str | None = None
+    read_count: int = 0
+    max_read_count: int = -1
 
 
 @dataclass(frozen=True)
@@ -95,6 +103,204 @@ class MemoryGridRegistryResultResolver:
         context: SemanticRequestContext | None = None,
     ) -> ResolvedMemoryGridResult | None:
         return self._results.get(result_handle)
+
+
+@dataclass(frozen=True)
+class ResultHandleRecord:
+    result: ResolvedMemoryGridResult
+
+
+class ResultHandleStore:
+    """Result handle metadata store contract for Memory Grid."""
+
+    def save(self, record: ResultHandleRecord) -> None:
+        raise NotImplementedError
+
+    def find(self, handle_id: str) -> ResultHandleRecord | None:
+        raise NotImplementedError
+
+    def increment_read_count(self, handle_id: str) -> None:
+        raise NotImplementedError
+
+    def invalidate(self, handle_id: str) -> None:
+        raise NotImplementedError
+
+
+class ResultStorageAdapter:
+    """Bounded row storage contract for Memory Grid result handles."""
+
+    def write(self, storage_ref: str, rows: list[dict[str, Any]]) -> None:
+        raise NotImplementedError
+
+    def read(self, storage_ref: str) -> list[dict[str, Any]]:
+        raise NotImplementedError
+
+
+class InMemoryResultHandleStore(ResultHandleStore):
+    """Scoped in-memory result handle store for tests and local parity fixtures."""
+
+    def __init__(self) -> None:
+        self._records: dict[str, ResultHandleRecord] = {}
+
+    def save(self, record: ResultHandleRecord) -> None:
+        self._records[record.result.metadata.handle_id] = record
+
+    def find(self, handle_id: str) -> ResultHandleRecord | None:
+        return self._records.get(handle_id)
+
+    def increment_read_count(self, handle_id: str) -> None:
+        record = self._records.get(handle_id)
+        if record is None:
+            return
+        metadata = record.result.metadata
+        refreshed = replace(record.result, metadata=replace(metadata, read_count=metadata.read_count + 1))
+        self._records[handle_id] = ResultHandleRecord(refreshed)
+
+    def invalidate(self, handle_id: str) -> None:
+        record = self._records.get(handle_id)
+        if record is None:
+            return
+        metadata = record.result.metadata
+        refreshed = replace(record.result, metadata=replace(metadata, invalidated_at=datetime.now(UTC)))
+        self._records[handle_id] = ResultHandleRecord(refreshed)
+
+
+class InMemoryResultStorageAdapter(ResultStorageAdapter):
+    """Scoped in-memory row storage for tests and local parity fixtures."""
+
+    def __init__(self) -> None:
+        self._rows_by_storage_ref: dict[str, list[dict[str, Any]]] = {}
+
+    def write(self, storage_ref: str, rows: list[dict[str, Any]]) -> None:
+        if not _string(storage_ref):
+            raise MemoryGridError(STORAGE_UNAVAILABLE, "storage_ref is required.")
+        self._rows_by_storage_ref[storage_ref] = _copy_rows(rows)
+
+    def read(self, storage_ref: str) -> list[dict[str, Any]]:
+        if not _string(storage_ref):
+            raise MemoryGridError(STORAGE_UNAVAILABLE, "storage_ref is missing.")
+        rows = self._rows_by_storage_ref.get(storage_ref)
+        if rows is None:
+            raise MemoryGridError(STORAGE_UNAVAILABLE, storage_ref)
+        return _copy_rows(rows)
+
+
+@dataclass(frozen=True)
+class ResultHandleWriteRequest:
+    source_route: str
+    source_model_refs: list[str]
+    query_hash: str | None
+    grain: list[str]
+    schema: dict[str, Any]
+    rows: list[dict[str, Any]]
+    lineage: dict[str, Any] = field(default_factory=dict)
+    row_limit: int = -1
+    cell_limit: int = -1
+    ttl: timedelta = timedelta(minutes=30)
+    max_read_count: int = -1
+
+
+class ResultHandleWriter:
+    """Writes governed bounded results and returns an opaque system-generated handle."""
+
+    def __init__(
+        self,
+        store: ResultHandleStore,
+        storage_adapter: ResultStorageAdapter,
+        *,
+        handle_supplier: Any | None = None,
+        now: Any | None = None,
+    ) -> None:
+        self._store = store
+        self._storage_adapter = storage_adapter
+        self._handle_supplier = handle_supplier or (lambda: f"mgr_{uuid.uuid4().hex}")
+        self._now = now or (lambda: datetime.now(UTC))
+
+    def write(self, request: ResultHandleWriteRequest, context: SemanticRequestContext | None = None) -> str:
+        if request is None:
+            raise MemoryGridError(GOVERNANCE_MISMATCH, "result handle write request is required.")
+        if not _normalize_route(request.source_route):
+            raise MemoryGridError(GOVERNANCE_MISMATCH, "source_route is required.")
+        if not request.schema:
+            raise MemoryGridError(SCHEMA_MISMATCH, "schema is required.")
+        if request.rows is None:
+            raise MemoryGridError(GOVERNANCE_MISMATCH, "rows are required.")
+        if request.row_limit <= 0 or len(request.rows) > request.row_limit:
+            raise MemoryGridError(GOVERNANCE_MISMATCH, "rows exceed row_limit.")
+        cell_count = _cell_count(request.rows)
+        if request.cell_limit > 0 and cell_count > request.cell_limit:
+            raise MemoryGridError(GOVERNANCE_MISMATCH, "rows exceed cell_limit.")
+        if request.ttl.total_seconds() <= 0:
+            raise MemoryGridError(GOVERNANCE_MISMATCH, "positive ttl is required.")
+
+        handle = _string(self._handle_supplier())
+        if not handle:
+            raise MemoryGridError(GOVERNANCE_MISMATCH, "generated result_handle is blank.")
+        created_at = self._now()
+        storage_ref = f"memory-grid://result/{handle}"
+        self._storage_adapter.write(storage_ref, request.rows)
+        metadata = ResultHandleMetadata(
+            handle_id=handle,
+            namespace=getattr(context, "namespace", None),
+            owner_context_hash=_owner_context_hash(context),
+            source_route=_normalize_route(request.source_route),
+            source_model_refs=list(request.source_model_refs or []),
+            query_hash=request.query_hash,
+            created_at=created_at,
+            expires_at=created_at + request.ttl,
+            row_count=len(request.rows),
+            row_limit=request.row_limit,
+            cell_count=cell_count,
+            byte_size=len(str(request.rows).encode("utf-8")),
+            lineage=dict(request.lineage or {}),
+            storage_ref=storage_ref,
+            read_count=0,
+            max_read_count=request.max_read_count,
+        )
+        result = ResolvedMemoryGridResult(
+            result_handle=handle,
+            source_route=_normalize_route(request.source_route) or request.source_route,
+            namespace=getattr(context, "namespace", None),
+            grain=list(request.grain or []),
+            schema=dict(request.schema),
+            rows=[],
+            lineage=dict(request.lineage or {}),
+            metadata=metadata,
+        )
+        self._store.save(ResultHandleRecord(result))
+        return handle
+
+
+class MemoryGridStoreBackedResultResolver:
+    """Store-backed resolver for production Memory Grid handles."""
+
+    def __init__(self, store: ResultHandleStore, storage_adapter: ResultStorageAdapter) -> None:
+        self._store = store
+        self._storage_adapter = storage_adapter
+
+    def resolve(
+        self,
+        result_handle: str,
+        context: SemanticRequestContext | None = None,
+    ) -> ResolvedMemoryGridResult | None:
+        handle = _string(result_handle)
+        if not handle:
+            raise MemoryGridError(RESULT_HANDLE_NOT_FOUND, "result_handle is missing.")
+        record = self._store.find(handle)
+        if record is None:
+            raise MemoryGridError(RESULT_HANDLE_NOT_FOUND, handle)
+        metadata = record.result.metadata
+        if _parse_datetime(metadata.invalidated_at) is not None:
+            raise MemoryGridError(RESULT_HANDLE_EXPIRED, f"{handle} is invalidated.")
+        expires_at = _parse_datetime(metadata.expires_at)
+        if expires_at is not None and expires_at < datetime.now(UTC):
+            raise MemoryGridError(RESULT_HANDLE_EXPIRED, handle)
+        if metadata.max_read_count >= 0 and metadata.read_count >= metadata.max_read_count:
+            raise MemoryGridError(GOVERNANCE_MISMATCH, f"resolver read_count exceeds max_read_count for {handle}.")
+        rows = self._storage_adapter.read(metadata.storage_ref)
+        self._store.increment_read_count(handle)
+        refreshed = self._store.find(handle) or record
+        return replace(refreshed.result, rows=rows)
 
 
 @dataclass(frozen=True)
@@ -352,6 +558,9 @@ def _validate_metadata(
     expires_at = _parse_datetime(_get(metadata, "expires_at", "expiresAt"))
     if expires_at is not None and expires_at < datetime.now(UTC):
         raise MemoryGridError(RESULT_HANDLE_EXPIRED, str(handle))
+    invalidated_at = _parse_datetime(_get(metadata, "invalidated_at", "invalidatedAt"))
+    if invalidated_at is not None:
+        raise MemoryGridError(RESULT_HANDLE_EXPIRED, f"{handle} is invalidated.")
 
     request_namespace = _normalize_namespace(getattr(context, "namespace", None))
     result_namespace = _normalize_namespace(_first_non_blank(_get(metadata, "namespace"), result.namespace))
@@ -369,6 +578,13 @@ def _validate_metadata(
     row_limit = _int(_get(metadata, "row_limit", "rowLimit"))
     if row_limit is not None and row_limit >= 0 and len(result.rows) > row_limit:
         raise MemoryGridError(GOVERNANCE_MISMATCH, f"resolver rows exceed metadata row_limit for {handle}.")
+    cell_count = _int(_get(metadata, "cell_count", "cellCount"))
+    if cell_count is not None and cell_count >= 0 and cell_count != _cell_count(result.rows):
+        raise MemoryGridError(GOVERNANCE_MISMATCH, f"resolver metadata cell_count mismatch for {handle}.")
+    read_count = _int(_get(metadata, "read_count", "readCount"))
+    max_read_count = _int(_get(metadata, "max_read_count", "maxReadCount"))
+    if read_count is not None and max_read_count is not None and max_read_count >= 0 and read_count > max_read_count:
+        raise MemoryGridError(GOVERNANCE_MISMATCH, f"resolver read_count exceeds max_read_count for {handle}.")
     storage_ref = _string(_get(metadata, "storage_ref", "storageRef"))
     if not storage_ref:
         raise MemoryGridError(STORAGE_UNAVAILABLE, f"resolver metadata storage_ref is missing for {handle}.")
@@ -458,6 +674,8 @@ def _audit(result: ResolvedMemoryGridResult) -> dict[str, Any]:
             "storage_ref": _get(metadata, "storage_ref", "storageRef"),
             "expires_at": _string(_get(metadata, "expires_at", "expiresAt")),
             "source_model_refs": _get(metadata, "source_model_refs", "sourceModelRefs") or [],
+            "read_count": _get(metadata, "read_count", "readCount"),
+            "cell_count": _get(metadata, "cell_count", "cellCount"),
         })
     else:
         audit.update({"source_route": result.source_route, "namespace": result.namespace})
@@ -552,15 +770,21 @@ def _metadata_dict(value: Any) -> dict[str, Any]:
         return {
             "handle_id": value.handle_id,
             "namespace": value.namespace,
+            "owner_context_hash": value.owner_context_hash,
             "source_route": value.source_route,
             "source_model_refs": value.source_model_refs,
             "query_hash": value.query_hash,
             "created_at": value.created_at,
             "expires_at": value.expires_at,
+            "invalidated_at": value.invalidated_at,
             "row_count": value.row_count,
             "row_limit": value.row_limit,
+            "cell_count": value.cell_count,
+            "byte_size": value.byte_size,
             "lineage": value.lineage,
             "storage_ref": value.storage_ref,
+            "read_count": value.read_count,
+            "max_read_count": value.max_read_count,
         }
     if isinstance(value, dict):
         return value
@@ -631,6 +855,29 @@ def _string_list(value: Any) -> list[str]:
     return [str(item).strip() for item in _list(value) if str(item).strip()]
 
 
+def _copy_rows(rows: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    if rows is None:
+        return []
+    return [dict(row or {}) for row in rows]
+
+
+def _cell_count(rows: list[dict[str, Any]] | None) -> int:
+    return sum(len(row or {}) for row in rows or [])
+
+
+def _owner_context_hash(context: SemanticRequestContext | None) -> str:
+    seed = ""
+    if context is not None:
+        seed = "|".join(
+            [
+                str(getattr(context, "namespace", None)),
+                str(getattr(context, "authorization", None)),
+                str(getattr(context, "field_access", None)),
+            ]
+        )
+    return "sha256:" + sha256(seed.encode("utf-8")).hexdigest()
+
+
 def _string(value: Any) -> str | None:
     if value is None:
         return None
@@ -698,13 +945,21 @@ __all__ = [
     "DerivedFormula",
     "GOVERNANCE_MISMATCH",
     "GRAIN_MISMATCH",
+    "InMemoryResultHandleStore",
+    "InMemoryResultStorageAdapter",
     "LIMIT_EXCEEDED",
     "MemoryGridColumn",
     "MemoryGridError",
     "MemoryGridRegistryResultResolver",
+    "MemoryGridStoreBackedResultResolver",
     "NAMESPACE_MISMATCH",
     "ResolvedMemoryGridResult",
+    "ResultHandleRecord",
+    "ResultHandleStore",
+    "ResultHandleWriteRequest",
     "ResultHandleMetadata",
+    "ResultHandleWriter",
+    "ResultStorageAdapter",
     "RESULT_HANDLE_EXPIRED",
     "RESULT_HANDLE_NOT_FOUND",
     "SCHEMA_MISMATCH",
