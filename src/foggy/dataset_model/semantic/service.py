@@ -38,6 +38,7 @@ from foggy.mcp_spi import (
     SemanticQueryRequest,
     SemanticRequestContext,
     DebugInfo,
+    ExecutionInfo,
     QueryMode,
 )
 from foggy.mcp_spi.semantic import DeniedColumn, FieldAccessDef
@@ -91,6 +92,13 @@ from foggy.dataset_model.semantic.inline_expression import (
     parse_inline_aggregate,
     skip_string_literal,
     split_top_level_commas,
+)
+from foggy.dataset_model.semantic.memory_grid import (
+    MemoryGridError,
+    append_memory_grid_bridge_evidence,
+    execute_memory_grid,
+    plan_memory_grid_bridge,
+    validate_memory_grid_plan,
 )
 
 
@@ -146,6 +154,7 @@ class SemanticQueryService(SemanticServiceResolver):
         use_ast_expression_compiler: bool = False,
         auto_lift_aggregate_slice_to_having: Optional[bool] = None,
         auto_case_insensitive_field_resolve: Optional[bool] = None,
+        memory_grid_result_resolver=None,
     ):
         """Initialize the semantic query service.
 
@@ -189,6 +198,7 @@ class SemanticQueryService(SemanticServiceResolver):
         self._cache_ttl = cache_ttl_seconds
         self._cache: Dict[str, Tuple[SemanticQueryResponse, float]] = {}
         self._executor = executor
+        self._memory_grid_result_resolver = memory_grid_result_resolver
         self._executor_manager = None  # Optional[ExecutorManager] for multi-datasource routing
         self._dialect = dialect or self._infer_dialect_from_executor(executor)
         self._use_ast_expression_compiler = use_ast_expression_compiler
@@ -505,6 +515,10 @@ class SemanticQueryService(SemanticServiceResolver):
                 name = cf.get("name") if isinstance(cf, dict) else getattr(cf, "name", None)
                 if name:
                     calc_names.add(name)
+        for pac in getattr(request, "post_aggregate_calculations", None) or []:
+            name = pac.get("name") if isinstance(pac, dict) else getattr(pac, "name", None)
+            if name:
+                calc_names.add(name)
         all_fields = schema_fields | calc_names
 
         resolver = CaseInsensitiveFieldResolver(all_fields)
@@ -518,6 +532,9 @@ class SemanticQueryService(SemanticServiceResolver):
             )
             new_having = resolve_slice_fields(
                 getattr(request, "having", None), resolver,
+            )
+            new_post_slice = resolve_slice_fields(
+                getattr(request, "post_slice", None), resolver,
             )
             new_order_by = resolve_order_by_fields(
                 getattr(request, "order_by", None), resolver,
@@ -543,6 +560,8 @@ class SemanticQueryService(SemanticServiceResolver):
             update_kwargs["slice"] = new_slice
         if new_having is not None:
             update_kwargs["having"] = new_having
+        if new_post_slice is not None:
+            update_kwargs["post_slice"] = new_post_slice
         if new_order_by is not None:
             update_kwargs["order_by"] = new_order_by
         if new_group_by is not None:
@@ -587,8 +606,10 @@ class SemanticQueryService(SemanticServiceResolver):
                 columns=request.columns,
                 slice_items=request.slice,
                 having_items=request.having,
+                post_slice_items=request.post_slice,
                 order_by=request.order_by,
                 calculated_fields=request.calculated_fields,
+                post_aggregate_calculations=request.post_aggregate_calculations,
                 field_access=field_access,
                 denied_qm_fields=denied_qm_fields,
             )
@@ -842,6 +863,10 @@ class SemanticQueryService(SemanticServiceResolver):
     ) -> SemanticQueryResponse:
         """Execute a query against a model."""
         start_time = time.time()
+
+        memory_grid_response = self._memory_grid_response_if_any(request, context)
+        if memory_grid_response is not None:
+            return memory_grid_response
 
         table_model = self.get_model(model)
         if not table_model:
@@ -1392,6 +1417,13 @@ class SemanticQueryService(SemanticServiceResolver):
                     break
         if post_aggregate_defs:
             needs_cte_wrapping = True
+        if request.post_slice and not needs_cte_wrapping:
+            raise ValueError(
+                "POST_SLICE_REQUIRES_RESULT_STAGE: postSlice is only supported "
+                "when the query has a result stage, such as window "
+                "calculatedFields or postAggregateCalculations. Keep base "
+                "field filters in slice."
+            )
 
         if needs_cte_wrapping:
             from foggy.dataset_model.semantic.formula_field_extractor import extract_formula_fields
@@ -1743,7 +1775,7 @@ class SemanticQueryService(SemanticServiceResolver):
                     final_builder.select(self._qi(col["name"]))
 
                 final_aliases = self._build_selected_order_aliases(columns_info)
-                for filter_item in post_aggregate_slice:
+                for filter_item in list(post_aggregate_slice) + list(request.post_slice or []):
                     fragment, filter_params = self._build_outer_alias_filter_condition(
                         filter_item,
                         final_aliases,
@@ -1775,19 +1807,20 @@ class SemanticQueryService(SemanticServiceResolver):
                 params = inner_params + post_params + final_params
             else:
                 selected_order_aliases = self._build_selected_order_aliases(columns_info)
-                for order_item in request.order_by:
-                    column, direction = self._normalize_order_by_item(order_item)
-                    if column:
-                        selected_alias = selected_order_aliases.get(column)
-                        if selected_alias:
-                            outer_builder.order_by(selected_alias, direction)
-                        else:
-                            outer_builder.order_by(self._qi(column), direction)
+                if not request.post_slice:
+                    for order_item in request.order_by:
+                        column, direction = self._normalize_order_by_item(order_item)
+                        if column:
+                            selected_alias = selected_order_aliases.get(column)
+                            if selected_alias:
+                                outer_builder.order_by(selected_alias, direction)
+                            else:
+                                outer_builder.order_by(self._qi(column), direction)
 
-                limit = min(request.limit or self._default_limit, self._max_limit)
-                outer_builder.limit(limit)
-                if request.start:
-                    outer_builder.offset(request.start)
+                    limit = min(request.limit or self._default_limit, self._max_limit)
+                    outer_builder.limit(limit)
+                    if request.start:
+                        outer_builder.offset(request.start)
 
                 sql, params = outer_builder.build()
 
@@ -1799,8 +1832,52 @@ class SemanticQueryService(SemanticServiceResolver):
                 )
                 cte_stages.append(outer_stage)
 
-                sql = f"WITH {inner_alias} AS (\n{self._indent_sql(inner_sql)}\n)\n{sql}"
-                params = inner_params + params
+                if request.post_slice:
+                    post_alias = "__POST_RESULT_STAGE__"
+                    final_builder = SqlQueryBuilder(dialect=self._dialect)
+                    final_builder.from_table(post_alias)
+                    for col in columns_info:
+                        final_builder.select(self._qi(col["name"]))
+
+                    final_aliases = self._build_selected_order_aliases(columns_info)
+                    for filter_item in request.post_slice or []:
+                        fragment, filter_params = self._build_outer_alias_filter_condition(
+                            filter_item,
+                            final_aliases,
+                        )
+                        if fragment:
+                            final_builder.where(fragment, params=filter_params or None)
+
+                    for order_item in request.order_by:
+                        column, direction = self._normalize_order_by_item(order_item)
+                        if column:
+                            selected_alias = final_aliases.get(column)
+                            if selected_alias:
+                                final_builder.order_by(selected_alias, direction)
+                            else:
+                                final_builder.order_by(self._qi(column), direction)
+
+                    limit = min(request.limit or self._default_limit, self._max_limit)
+                    final_builder.limit(limit)
+                    if request.start:
+                        final_builder.offset(request.start)
+
+                    final_sql, final_params = final_builder.build()
+                    cte_stages.append(QueryBuildResultCteStage(
+                        alias=post_alias,
+                        sql=sql,
+                        params=params,
+                        select_columns=[c["name"] for c in columns_info],
+                    ))
+                    sql = (
+                        f"WITH {inner_alias} AS (\n{self._indent_sql(inner_sql)}\n),\n"
+                        f"{post_alias} AS (\n{self._indent_sql(sql)}\n)\n"
+                        f"{final_sql}"
+                    )
+                    params = inner_params + params + final_params
+                else:
+                    sql = f"WITH {inner_alias} AS (\n{self._indent_sql(inner_sql)}\n)\n{sql}"
+                    params = inner_params + params
         else:
             sql, params = inner_sql, inner_params
 
@@ -5816,14 +5893,92 @@ class SemanticQueryService(SemanticServiceResolver):
             "columns": sorted(request.columns),
             "slice": request.slice,
             "having": request.having,
+            "post_slice": request.post_slice,
             "group_by": sorted(request.group_by) if request.group_by else [],
             "order_by": request.order_by,
+            "post_aggregate_calculations": request.post_aggregate_calculations,
             "limit": request.limit,
             "start": request.start,
         }
 
         key_str = json.dumps(key_data, sort_keys=True)
         return hashlib.md5(key_str.encode()).hexdigest()
+
+    # ==================== Memory Grid contract parity ====================
+
+    def _memory_grid_response_if_any(
+        self,
+        request: SemanticQueryRequest,
+        context: Optional[SemanticRequestContext],
+    ) -> Optional[SemanticQueryResponse]:
+        if not self._is_memory_grid_plan(request):
+            return None
+
+        try:
+            validation = validate_memory_grid_plan(request.memory_grid_plan, context)
+            bridge_plan = plan_memory_grid_bridge(request.memory_grid_plan)
+            append_memory_grid_bridge_evidence(validation, bridge_plan)
+
+            if self._memory_grid_execute_enabled(request):
+                if not bridge_plan.ready:
+                    raise MemoryGridError(
+                        "MEMORY_GRID_BRIDGE_NOT_SUPPORTED",
+                        ", ".join(bridge_plan.unsupported),
+                    )
+                rows, summary = execute_memory_grid(
+                    request.memory_grid_plan or {},
+                    bridge_plan,
+                    self._memory_grid_result_resolver,
+                    context,
+                )
+                validation["memory_grid_execution_summary"] = summary
+                return SemanticQueryResponse(
+                    items=rows,
+                    total=len(rows),
+                    warnings=[],
+                    execution=ExecutionInfo(
+                        route=request.route or "MEMORY_GRID",
+                        status="EXECUTED",
+                        risk_flags=list(request.risk_flags or []),
+                        why=list(request.why or []),
+                        clarifying_questions=[],
+                        memory_grid_plan=request.memory_grid_plan,
+                        memory_grid_validation=validation,
+                        memory_grid_execution_summary=summary,
+                    ),
+                )
+
+            return SemanticQueryResponse(
+                items=[],
+                warnings=[],
+                execution=ExecutionInfo(
+                    route=request.route or "MEMORY_GRID",
+                    status=request.status or "PLAN_READY",
+                    risk_flags=list(request.risk_flags or []),
+                    why=list(request.why or []),
+                    clarifying_questions=[],
+                    executable_plan=request.executable_plan,
+                    memory_grid_plan=request.memory_grid_plan,
+                    memory_grid_validation=validation,
+                ),
+            )
+        except MemoryGridError as exc:
+            return SemanticQueryResponse.from_error(
+                str(exc),
+                error_detail={"errorCode": exc.code},
+            )
+
+    @staticmethod
+    def _is_memory_grid_plan(request: SemanticQueryRequest) -> bool:
+        if request.memory_grid_plan:
+            return True
+        return bool(request.route and request.route.strip().upper() == "MEMORY_GRID")
+
+    @staticmethod
+    def _memory_grid_execute_enabled(request: SemanticQueryRequest) -> bool:
+        hints = request.hints or {}
+        value = hints.get("memoryGridExecute")
+        return value is True or (isinstance(value, str) and value.lower() == "true")
 
 
 __all__ = [

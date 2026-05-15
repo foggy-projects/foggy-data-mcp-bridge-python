@@ -103,6 +103,23 @@ class SemanticInfo(BaseModel):
     should_answer_directly: Optional[bool] = Field(None, alias="shouldAnswerDirectly")
 
 
+class ExecutionInfo(BaseModel):
+    """Execution plan evidence — aligned with Java SemanticQueryResponse.ExecutionInfo."""
+    model_config = ConfigDict(populate_by_name=True)
+
+    route: Optional[str] = None
+    status: Optional[str] = None
+    risk_flags: Optional[List[str]] = Field(None, alias="risk_flags")
+    why: Optional[List[str]] = None
+    clarifying_questions: Optional[List[str]] = Field(None, alias="clarifying_questions")
+    executable_plan: Optional[Any] = Field(None, alias="executable_plan")
+    semantic_sql: Optional[str] = Field(None, alias="semantic_sql")
+    memory_grid_plan: Optional[Dict[str, Any]] = Field(None, alias="memory_grid_plan")
+    memory_grid_validation: Optional[Dict[str, Any]] = Field(None, alias="memory_grid_validation")
+    memory_grid_execution_summary: Optional[Dict[str, Any]] = Field(None, alias="memory_grid_execution_summary")
+    error_code: Optional[str] = Field(None, alias="error_code")
+
+
 # ============================================================================
 # SemanticQueryResponse — aligned with Java
 # ============================================================================
@@ -138,6 +155,7 @@ class SemanticQueryResponse(BaseModel):
     warnings: Optional[List[str]] = None
     debug: Optional[DebugInfo] = None
     semantic: Optional[SemanticInfo] = None
+    execution: Optional[ExecutionInfo] = None
     truncation_info: Optional[Dict[str, Any]] = Field(None, alias="truncationInfo")
     error_detail: Optional[Dict[str, Any]] = Field(None, alias="error")
 
@@ -556,6 +574,7 @@ class SemanticQueryRequest(BaseModel):
             "withSubtotals": false,
             "timeWindow": {...},
             "postAggregateCalculations": [...],
+            "postSlice": [...],
             "pivot": {...},
             "captionMatchMode": "EXACT",
             "mismatchHandleStrategy": "ABORT"
@@ -564,6 +583,14 @@ class SemanticQueryRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     columns: List[str] = []
+    route: Optional[str] = None
+    status: Optional[str] = None
+    risk_flags: List[str] = Field(default_factory=list, alias="risk_flags")
+    clarifying_questions: List[str] = Field(default_factory=list, alias="clarifying_questions")
+    why: List[str] = []
+    executable_plan: Optional[Any] = Field(None, alias="executable_plan")
+    semantic_sql: Optional[str] = Field(None, alias="semantic_sql")
+    memory_grid_plan: Optional[Dict[str, Any]] = Field(None, alias="memory_grid_plan")
     calculated_fields: List[Dict[str, Any]] = Field(default_factory=list, alias="calculatedFields")
     slice: List[Any] = []
     having: List[Any] = []
@@ -588,6 +615,11 @@ class SemanticQueryRequest(BaseModel):
         default_factory=list,
         alias="postAggregateCalculations",
         description="Post-aggregate calculated aliases computed from grouped result aliases.",
+    )
+    post_slice: List[Any] = Field(
+        default_factory=list,
+        alias="postSlice",
+        description="Result-stage filters evaluated after projected/window aliases exist.",
     )
     pivot: Optional[PivotRequest] = Field(
         None,

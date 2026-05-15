@@ -172,6 +172,65 @@ class TestOdooAggregateHaving:
         assert "WINDOW_CALCULATED_FIELD_SLICE_NOT_SUPPORTED" in response.error
         assert "salesRank" in response.error
 
+    def test_window_calculated_field_post_slice_builds_outer_filter_stage(self, odoo_service):
+        request = SemanticQueryRequest(
+            columns=[
+                "salesTeam$id",
+                "salesTeam$caption",
+                "salesperson$id",
+                "salesperson$caption",
+                "sum(amountTotal) as totalSales",
+                "salesRank",
+            ],
+            group_by=[
+                "salesTeam$id",
+                "salesTeam$caption",
+                "salesperson$id",
+                "salesperson$caption",
+            ],
+            calculated_fields=[
+                {
+                    "name": "salesRank",
+                    "expression": "RANK()",
+                    "partitionBy": ["salesTeam$id"],
+                    "windowOrderBy": [{"field": "totalSales", "dir": "desc"}],
+                }
+            ],
+            post_slice=[{"field": "salesRank", "op": "=", "value": 1}],
+            order_by=["salesTeam$caption"],
+            limit=100,
+        )
+
+        response = _build_response(
+            odoo_service, "OdooSaleOrderQueryModel", request,
+        )
+
+        assert "WITH __STAGE_1__ AS" in response.sql
+        assert "__POST_RESULT_STAGE__ AS" in response.sql
+        assert (
+            'RANK() OVER (PARTITION BY ("Sales Team(ID)") '
+            'ORDER BY ("totalSales") DESC) AS "salesRank"'
+        ) in response.sql
+        assert 'FROM __POST_RESULT_STAGE__' in response.sql
+        assert 'WHERE "salesRank" = ?' in response.sql
+        assert response.params[-1] == 1
+
+    def test_post_slice_without_result_stage_rejected(self, odoo_service):
+        request = SemanticQueryRequest(
+            columns=["salesTeam$caption", "sum(amountTotal) as totalSales"],
+            group_by=["salesTeam$caption"],
+            post_slice=[{"field": "totalSales", "op": ">", "value": 1000}],
+            limit=10,
+        )
+
+        response = odoo_service.query_model(
+            "OdooSaleOrderQueryModel", request, mode="validate",
+        )
+
+        assert response.sql is None
+        assert response.error is not None
+        assert "POST_SLICE_REQUIRES_RESULT_STAGE" in response.error
+
     def test_post_aggregate_calculated_field_alias_slice_rejected_before_sql(self, odoo_service):
         request = SemanticQueryRequest(
             columns=[

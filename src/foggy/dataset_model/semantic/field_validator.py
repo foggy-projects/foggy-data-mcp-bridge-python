@@ -411,8 +411,10 @@ def validate_field_access(
     columns: List[str],
     slice_items: List[Any],
     having_items: Optional[List[Any]] = None,
+    post_slice_items: Optional[List[Any]] = None,
     order_by: List[Any],
     calculated_fields: Optional[List[Dict[str, Any]]] = None,
+    post_aggregate_calculations: Optional[List[Dict[str, Any]]] = None,
     field_access: Optional[FieldAccessDef] = None,
     denied_qm_fields: Optional[Set[str]] = None,
 ) -> FieldValidationResult:
@@ -510,7 +512,31 @@ def validate_field_access(
         else:
             _check_field(f)
 
-    # 4. Validate orderBy (with alias back-tracking to dependency fields)
+    calc_aliases = {
+        str(cf.get("alias") or cf.get("name"))
+        for cf in (calculated_fields or [])
+        if isinstance(cf, dict) and (cf.get("alias") or cf.get("name"))
+    }
+    result_stage_aliases = set(calc_aliases)
+    result_stage_aliases.update(
+        str(item.get("name"))
+        for item in (post_aggregate_calculations or [])
+        if isinstance(item, dict) and item.get("name")
+    )
+
+    # 4. Validate result-stage postSlice. It may reference aliases created by
+    # columns[]; in that case validate the alias dependencies, not the alias.
+    post_slice_fields = _extract_fields_from_slice(post_slice_items or [])
+    for f in post_slice_fields:
+        if f in alias_deps:
+            for dep in alias_deps[f]:
+                _check_field(dep)
+        elif f in result_stage_aliases:
+            continue
+        else:
+            _check_field(f)
+
+    # 5. Validate orderBy (with alias back-tracking to dependency fields)
     for ob in order_by:
         try:
             field_ref = normalize_order_by_item(ob).field
@@ -528,7 +554,7 @@ def validate_field_access(
         else:
             _check_field(field_ref)
 
-    # 5. Validate calculatedFields
+    # 6. Validate calculatedFields
     if calculated_fields:
         calc_fields = _extract_fields_from_calculated(calculated_fields)
         for f in calc_fields:
@@ -666,6 +692,11 @@ def validate_query_fields(model: Any, request: Any) -> Optional[InvalidQueryFiel
             return detail
 
     for item in getattr(request, "having", None) or []:
+        detail = _validate_slice_item(model, item, schema_fields, dynamic_fields)
+        if detail:
+            return detail
+
+    for item in getattr(request, "post_slice", None) or []:
         detail = _validate_slice_item(model, item, schema_fields, dynamic_fields)
         if detail:
             return detail

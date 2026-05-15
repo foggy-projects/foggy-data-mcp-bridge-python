@@ -293,24 +293,30 @@ class TestSemanticQueryRequestAlignment:
             having=[{"field": "totalAmount", "op": ">", "value": 0}],
             group_by=[{"field": "name"}],
             order_by=[{"field": "name", "dir": "asc"}],
+            post_slice=[{"field": "rank", "op": "=", "value": 1}],
             return_total=True,
             with_subtotals=True,
             calculated_fields=[{"name": "ratio", "expression": "a/b"}],
+            post_aggregate_calculations=[{"name": "rank", "kind": "ratioToTotal", "measure": "total"}],
             time_window={"field": "salesDate", "grain": "MONTH"},
         )
         j = req.model_dump(by_alias=True, exclude_none=True)
         assert "groupBy" in j
         assert "having" in j
         assert "orderBy" in j
+        assert "postSlice" in j
         assert "returnTotal" in j
         assert "withSubtotals" in j
         assert "calculatedFields" in j
+        assert "postAggregateCalculations" in j
         assert "timeWindow" in j
         # No snake_case keys in output
         assert "group_by" not in j
         assert "having_" not in j
         assert "order_by" not in j
+        assert "post_slice" not in j
         assert "return_total" not in j
+        assert "post_aggregate_calculations" not in j
         assert "time_window" not in j
 
     def test_populate_by_name_allows_snake_case_attrs(self):

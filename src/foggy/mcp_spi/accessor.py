@@ -102,6 +102,14 @@ def build_query_request(payload: Dict[str, Any]) -> SemanticQueryRequest:
 
     return SemanticQueryRequest(
         columns=payload.get("columns", []),
+        route=payload.get("route"),
+        status=payload.get("status"),
+        risk_flags=payload.get("risk_flags", payload.get("riskFlags", [])),
+        clarifying_questions=payload.get("clarifying_questions", payload.get("clarifyingQuestions", [])),
+        why=payload.get("why", []),
+        executable_plan=payload.get("executable_plan", payload.get("executablePlan")),
+        semantic_sql=payload.get("semantic_sql", payload.get("semanticSql")),
+        memory_grid_plan=payload.get("memory_grid_plan", payload.get("memoryGridPlan")),
         slice=payload.get("slice", []),
         having=payload.get("having", []),
         group_by=payload.get("groupBy", []),
@@ -109,6 +117,8 @@ def build_query_request(payload: Dict[str, Any]) -> SemanticQueryRequest:
         start=payload.get("start", 0),
         limit=payload.get("limit"),
         calculated_fields=payload.get("calculatedFields", []),
+        post_aggregate_calculations=payload.get("postAggregateCalculations", []),
+        post_slice=payload.get("postSlice", []),
         return_total=payload.get("returnTotal", False),
         distinct=payload.get("distinct", False),
         with_subtotals=payload.get("withSubtotals", False),
