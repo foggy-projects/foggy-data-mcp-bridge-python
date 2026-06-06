@@ -34,6 +34,7 @@ Current P0 execution records:
 - [P0-14-pivot-non-additive-output-snapshot-replay.md](workitems/P0-14-pivot-non-additive-output-snapshot-replay.md)
 - [P0-15-pivot-domain-large-domain-snapshot-replay.md](workitems/P0-15-pivot-domain-large-domain-snapshot-replay.md)
 - [P0-16-pivot-domain-governance-snapshot-replay.md](workitems/P0-16-pivot-domain-governance-snapshot-replay.md)
+- [BUG-P0-17-compose-runtime-pause-suspension-publication.md](workitems/BUG-P0-17-compose-runtime-pause-suspension-publication.md)
 
 Current active snapshot lanes:
 
@@ -50,22 +51,16 @@ Current active snapshot lanes:
 - Pivot domain transport large-domain threshold and SQLite bind-limit
   fail-closed snapshots
 
-Latest P0-16 status:
+Latest BUG-P0-17 status:
 
-- Python focused replay passed:
-  `2 passed in 0.64s`.
-- Java exporter passed with SQLite-focused execution:
-  `Tests run: 1, Failures: 0, Errors: 0, Skipped: 0`.
-- Manifest replay passed:
-  `6 passed in 0.66s`.
-- Full Python pytest currently shows compose runtime pause/resume baseline
-  instability:
-  - First run: `2 failed, 4039 passed, 232 skipped, 45 warnings in 17.58s`.
-  - Second run: `1 failed, 4040 passed, 232 skipped, 43 warnings in 17.82s`.
-  - The three observed failing tests each passed when rerun directly.
-- `java_governance_snapshot_parity.json` now contains 16 cases, including
-  Pivot denied-row-axis, Pivot parentShare native-metric denial, and domain
-  transport denied-column fail-closed propagation.
-- Remaining governance gaps after P0-16: authority-resolved visible model
-  allow/deny cases, cross-model calculated-field refusals, sanitized error
-  payload snapshots, and aggregate-join governance propagation.
+- P0-16 exposed full-baseline instability in compose runtime pause/resume
+  tests. BUG-P0-17 fixes the test synchronization boundary by waiting for
+  manager-published active suspension snapshots before reading `suspend_id`.
+- Focused pause/resume files passed:
+  `24 passed in 0.29s`.
+- Scoped ruff passed:
+  `All checks passed!`.
+- Compose runtime suite passed:
+  `293 passed, 16 warnings in 1.01s`.
+- Full Python pytest passed:
+  `4041 passed, 232 skipped, 43 warnings in 18.02s`.

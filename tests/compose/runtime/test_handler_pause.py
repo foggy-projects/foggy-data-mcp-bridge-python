@@ -29,16 +29,15 @@ from foggy.dataset_model.engine.compose.runtime.suspend_errors import (
     ScriptSuspendTimeoutError,
 )
 from foggy.dataset_model.engine.compose.runtime.suspension import (
-    PauseRequest,
     RejectCommand,
     ResumeCommand,
     ScriptRunContext,
     ScriptRunState,
+    SuspensionResult,
 )
 from foggy.dataset_model.engine.compose.runtime.suspension_manager import (
     SuspensionManager,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -52,6 +51,37 @@ def _setup_run(mgr: SuspensionManager) -> ScriptRunContext:
     return run_ctx
 
 
+def _wait_for_active_suspension(
+    mgr: SuspensionManager,
+    run_ctx: ScriptRunContext,
+    *,
+    attempts: int = 200,
+    interval: float = 0.01,
+) -> SuspensionResult:
+    """Wait until the manager has published a complete suspension snapshot."""
+    for _ in range(attempts):
+        result = mgr.get_active_suspension(run_ctx.run_id)
+        if result is not None:
+            return result
+        time.sleep(interval)
+    pytest.fail(f"run {run_ctx.run_id} did not publish an active suspension")
+
+
+def _wait_for_any_active_suspension(
+    mgr: SuspensionManager,
+    *,
+    attempts: int = 200,
+    interval: float = 0.01,
+) -> SuspensionResult:
+    """Wait until any registered run has a complete active suspension."""
+    for _ in range(attempts):
+        results = mgr.list_active_suspensions()
+        if results:
+            return results[0]
+        time.sleep(interval)
+    pytest.fail("no active suspension published")
+
+
 # ---------------------------------------------------------------------------
 # Pause outside run context
 # ---------------------------------------------------------------------------
@@ -60,7 +90,7 @@ class TestPauseOutsideRun:
 
     def test_no_run_context(self):
         """compose_pause outside a script run raises not-in-run."""
-        token = set_run_context(None)
+        set_run_context(None)
         try:
             with pytest.raises(ScriptPauseNotInRunError) as exc_info:
                 compose_pause(
@@ -74,7 +104,7 @@ class TestPauseOutsideRun:
     def test_run_context_without_manager(self):
         """compose_pause with a context that has no _manager."""
         run_ctx = ScriptRunContext()
-        token = set_run_context(run_ctx)
+        set_run_context(run_ctx)
         try:
             with pytest.raises(ScriptPauseNotInRunError):
                 compose_pause(reason="test", timeout_ms=1000)
@@ -111,19 +141,13 @@ class TestPureRuntimePause:
         t = threading.Thread(target=handler_thread)
         t.start()
 
-        # Wait for suspension to appear.
-        for _ in range(100):
-            if run_ctx.state == ScriptRunState.SUSPENDED:
-                break
-            time.sleep(0.01)
-
+        suspension = _wait_for_active_suspension(mgr, run_ctx)
         assert run_ctx.state == ScriptRunState.SUSPENDED
-        assert run_ctx.suspension is not None
 
         # Resume from another thread.
         mgr.resume(ResumeCommand(
             script_run_id=run_ctx.run_id,
-            suspend_id=run_ctx.suspension.suspend_id,
+            suspend_id=suspension.suspend_id,
             payload={"approved": True, "operator": "admin"},
         ))
 
@@ -154,12 +178,8 @@ class TestPureRuntimePause:
         t = threading.Thread(target=handler_thread)
         t.start()
 
-        for _ in range(100):
-            if run_ctx.state == ScriptRunState.SUSPENDED:
-                break
-            time.sleep(0.01)
-
-        suspend_id = run_ctx.suspension.suspend_id
+        suspension = _wait_for_active_suspension(mgr, run_ctx)
+        suspend_id = suspension.suspend_id
 
         with pytest.raises(ScriptSuspendRejectedError):
             mgr.reject(RejectCommand(
@@ -220,12 +240,8 @@ class TestFailClosed:
         t = threading.Thread(target=handler_thread)
         t.start()
 
-        for _ in range(100):
-            if run_ctx.state == ScriptRunState.SUSPENDED:
-                break
-            time.sleep(0.01)
-
-        suspend_id = run_ctx.suspension.suspend_id
+        suspension = _wait_for_active_suspension(mgr, run_ctx)
+        suspend_id = suspension.suspend_id
 
         mgr.resume(ResumeCommand(
             script_run_id=run_ctx.run_id,
@@ -257,12 +273,8 @@ class TestFailClosed:
         t = threading.Thread(target=handler_thread)
         t.start()
 
-        for _ in range(100):
-            if run_ctx.state == ScriptRunState.SUSPENDED:
-                break
-            time.sleep(0.01)
-
-        suspend_id = run_ctx.suspension.suspend_id
+        suspension = _wait_for_active_suspension(mgr, run_ctx)
+        suspend_id = suspension.suspend_id
 
         with pytest.raises(ScriptSuspendRejectedError):
             mgr.reject(RejectCommand(
@@ -319,12 +331,8 @@ class TestTimerCleanup:
         t = threading.Thread(target=handler_thread)
         t.start()
 
-        for _ in range(100):
-            if run_ctx.state == ScriptRunState.SUSPENDED:
-                break
-            time.sleep(0.01)
-
-        suspend_id = run_ctx.suspension.suspend_id
+        suspension = _wait_for_active_suspension(mgr, run_ctx)
+        suspend_id = suspension.suspend_id
         mgr.resume(ResumeCommand(
             script_run_id=run_ctx.run_id,
             suspend_id=suspend_id,
@@ -347,14 +355,11 @@ class TestTimerCleanup:
         t = threading.Thread(target=handler_thread)
         t.start()
 
-        for _ in range(100):
-            if run_ctx.state == ScriptRunState.SUSPENDED:
-                break
-            time.sleep(0.01)
+        suspension = _wait_for_active_suspension(mgr, run_ctx)
 
         mgr.resume(ResumeCommand(
             script_run_id=run_ctx.run_id,
-            suspend_id=run_ctx.suspension.suspend_id,
+            suspend_id=suspension.suspend_id,
             payload={},
         ))
         t.join(timeout=2)
@@ -395,16 +400,14 @@ class TestRaceConditionRegression:
         t = threading.Thread(target=handler_thread)
         t.start()
 
-        # Spin-wait until SUSPENDED, then resume immediately.
-        for _ in range(200):
-            if run_ctx.state == ScriptRunState.SUSPENDED:
-                break
-            time.sleep(0.005)
-
+        # Spin-wait until the suspension is fully published, then resume.
+        suspension = _wait_for_active_suspension(
+            mgr, run_ctx, attempts=400, interval=0.005,
+        )
         assert run_ctx.state == ScriptRunState.SUSPENDED
         mgr.resume(ResumeCommand(
             script_run_id=run_ctx.run_id,
-            suspend_id=run_ctx.suspension.suspend_id,
+            suspend_id=suspension.suspend_id,
             payload={"fast": True},
         ))
 
@@ -457,22 +460,22 @@ class TestE2EPureRuntimePause:
         """Register a pure_runtime handler that calls compose_pause.
         Run the script, resume from another thread, verify the script
         returns the resume payload."""
-        from foggy.dataset_model.engine.compose.capability.registry import (
-            CapabilityRegistry,
+        from foggy.dataset_model.engine.compose.capability.descriptors import (
+            FunctionDescriptor,
         )
         from foggy.dataset_model.engine.compose.capability.policy import (
             CapabilityPolicy,
         )
-        from foggy.dataset_model.engine.compose.capability.descriptors import (
-            FunctionDescriptor,
-        )
-        from foggy.dataset_model.engine.compose.runtime.script_runtime import (
-            run_script,
+        from foggy.dataset_model.engine.compose.capability.registry import (
+            CapabilityRegistry,
         )
         from foggy.dataset_model.engine.compose.context.compose_query_context import (
             ComposeQueryContext,
         )
         from foggy.dataset_model.engine.compose.context.principal import Principal
+        from foggy.dataset_model.engine.compose.runtime.script_runtime import (
+            run_script,
+        )
         from tests.compose.runtime.conftest import StubResolver, StubSemanticService
 
         # Handler calls compose_pause, returns the resume payload.
@@ -530,25 +533,11 @@ class TestE2EPureRuntimePause:
         t = threading.Thread(target=script_thread)
         t.start()
 
-        # Wait for a SUSPENDED run.
-        run_ctx = None
-        for _ in range(200):
-            if mgr.active_suspension_count() > 0:
-                # find the suspended run
-                for rid, rc in list(mgr._runs.items()):
-                    if rc.state == ScriptRunState.SUSPENDED:
-                        run_ctx = rc
-                        break
-            if run_ctx is not None:
-                break
-            time.sleep(0.01)
-
-        assert run_ctx is not None, "no suspended run found"
-        assert run_ctx.suspension is not None
+        suspension = _wait_for_any_active_suspension(mgr)
 
         mgr.resume(ResumeCommand(
-            script_run_id=run_ctx.run_id,
-            suspend_id=run_ctx.suspension.suspend_id,
+            script_run_id=suspension.script_run_id,
+            suspend_id=suspension.suspend_id,
             payload={"approved": True},
         ))
 
@@ -560,22 +549,22 @@ class TestE2EPureRuntimePause:
     def test_handler_pause_reject_through_run_script(self):
         """Same as above but the pause is rejected — script should raise
         ScriptSuspendRejectedError."""
-        from foggy.dataset_model.engine.compose.capability.registry import (
-            CapabilityRegistry,
+        from foggy.dataset_model.engine.compose.capability.descriptors import (
+            FunctionDescriptor,
         )
         from foggy.dataset_model.engine.compose.capability.policy import (
             CapabilityPolicy,
         )
-        from foggy.dataset_model.engine.compose.capability.descriptors import (
-            FunctionDescriptor,
-        )
-        from foggy.dataset_model.engine.compose.runtime.script_runtime import (
-            run_script,
+        from foggy.dataset_model.engine.compose.capability.registry import (
+            CapabilityRegistry,
         )
         from foggy.dataset_model.engine.compose.context.compose_query_context import (
             ComposeQueryContext,
         )
         from foggy.dataset_model.engine.compose.context.principal import Principal
+        from foggy.dataset_model.engine.compose.runtime.script_runtime import (
+            run_script,
+        )
         from tests.compose.runtime.conftest import StubResolver, StubSemanticService
 
         def pause_handler(reason_str):
@@ -628,22 +617,12 @@ class TestE2EPureRuntimePause:
         t = threading.Thread(target=script_thread)
         t.start()
 
-        run_ctx = None
-        for _ in range(200):
-            for rid, rc in list(mgr._runs.items()):
-                if rc.state == ScriptRunState.SUSPENDED:
-                    run_ctx = rc
-                    break
-            if run_ctx is not None:
-                break
-            time.sleep(0.01)
-
-        assert run_ctx is not None
+        suspension = _wait_for_any_active_suspension(mgr)
 
         with pytest.raises(ScriptSuspendRejectedError):
             mgr.reject(RejectCommand(
-                script_run_id=run_ctx.run_id,
-                suspend_id=run_ctx.suspension.suspend_id,
+                script_run_id=suspension.script_run_id,
+                suspend_id=suspension.suspend_id,
                 reason="policy denied",
             ))
 
@@ -662,23 +641,23 @@ class TestE2EObjectFacadePause:
     during run_script evaluation."""
 
     def test_facade_method_pause_resume_through_run_script(self):
-        from foggy.dataset_model.engine.compose.capability.registry import (
-            CapabilityRegistry,
+        from foggy.dataset_model.engine.compose.capability.descriptors import (
+            MethodDescriptor,
+            ObjectFacadeDescriptor,
         )
         from foggy.dataset_model.engine.compose.capability.policy import (
             CapabilityPolicy,
         )
-        from foggy.dataset_model.engine.compose.capability.descriptors import (
-            MethodDescriptor as MD,
-            ObjectFacadeDescriptor,
-        )
-        from foggy.dataset_model.engine.compose.runtime.script_runtime import (
-            run_script,
+        from foggy.dataset_model.engine.compose.capability.registry import (
+            CapabilityRegistry,
         )
         from foggy.dataset_model.engine.compose.context.compose_query_context import (
             ComposeQueryContext,
         )
         from foggy.dataset_model.engine.compose.context.principal import Principal
+        from foggy.dataset_model.engine.compose.runtime.script_runtime import (
+            run_script,
+        )
         from tests.compose.runtime.conftest import StubResolver, StubSemanticService
 
         class ApprovalService:
@@ -692,7 +671,7 @@ class TestE2EObjectFacadePause:
         desc = ObjectFacadeDescriptor(
             object_name="approval",
             methods=[
-                MD(
+                MethodDescriptor(
                     name="ask",
                     args_schema=[{"name": "reason", "type": "string", "required": True}],
                     return_type="dict",
@@ -740,17 +719,15 @@ class TestE2EObjectFacadePause:
         t = threading.Thread(target=script_thread)
         t.start()
 
-        # Wait for a SUSPENDED run.
-        run_ctx = None
+        # Wait for a fully published active suspension.
+        suspension = None
         for _ in range(400):
             # Check if script_thread already failed.
             if "error" in error_holder:
                 break
-            for rid, rc in list(mgr._runs.items()):
-                if rc.state == ScriptRunState.SUSPENDED:
-                    run_ctx = rc
-                    break
-            if run_ctx is not None:
+            active = mgr.list_active_suspensions()
+            if active:
+                suspension = active[0]
                 break
             time.sleep(0.01)
 
@@ -758,12 +735,11 @@ class TestE2EObjectFacadePause:
         if "error" in error_holder:
             raise error_holder["error"]
 
-        assert run_ctx is not None, "no suspended run found for facade"
-        assert run_ctx.suspension is not None
+        assert suspension is not None, "no suspended run found for facade"
 
         mgr.resume(ResumeCommand(
-            script_run_id=run_ctx.run_id,
-            suspend_id=run_ctx.suspension.suspend_id,
+            script_run_id=suspension.script_run_id,
+            suspend_id=suspension.suspend_id,
             payload={"facade_approved": True},
         ))
 
@@ -771,4 +747,3 @@ class TestE2EObjectFacadePause:
         assert not t.is_alive()
         assert "error" not in error_holder, f"error: {error_holder.get('error')}"
         assert result_holder["value"] == {"facade_approved": True}
-

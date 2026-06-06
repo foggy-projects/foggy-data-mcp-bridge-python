@@ -20,16 +20,16 @@ from foggy.dataset_model.engine.compose.runtime.pause_primitive import (
 from foggy.dataset_model.engine.compose.runtime.suspend_errors import (
     ScriptSuspendLimitExceededError,
     ScriptSuspendRejectedError,
-    ScriptSuspendStateInvalidError,
     ScriptSuspendTimeoutError,
 )
 from foggy.dataset_model.engine.compose.runtime.suspension import (
+    MAX_TIMEOUT_MS,
     PauseRequest,
     RejectCommand,
     ResumeCommand,
     ScriptRunContext,
     ScriptRunState,
-    MAX_TIMEOUT_MS,
+    SuspensionResult,
 )
 from foggy.dataset_model.engine.compose.runtime.suspension_manager import (
     SuspensionManager,
@@ -41,6 +41,21 @@ def _setup_run(mgr: SuspensionManager) -> ScriptRunContext:
     run_ctx._manager = mgr  # type: ignore[attr-defined]
     mgr.register_run(run_ctx)
     return run_ctx
+
+
+def _wait_for_active_suspension(
+    mgr: SuspensionManager,
+    run_ctx: ScriptRunContext,
+    *,
+    attempts: int = 200,
+    interval: float = 0.01,
+) -> SuspensionResult:
+    for _ in range(attempts):
+        result = mgr.get_active_suspension(run_ctx.run_id)
+        if result is not None:
+            return result
+        time.sleep(interval)
+    pytest.fail(f"run {run_ctx.run_id} did not publish an active suspension")
 
 
 # ---------------------------------------------------------------------------
@@ -63,11 +78,7 @@ class TestSuspendLimit:
         t1 = threading.Thread(target=handler_thread1)
         t1.start()
 
-        # wait for first run to suspend
-        for _ in range(100):
-            if run1.state == ScriptRunState.SUSPENDED:
-                break
-            time.sleep(0.01)
+        first_suspension = _wait_for_active_suspension(mgr, run1)
 
         assert mgr.active_suspension_count() == 1
         assert len(mgr._slots) == 1
@@ -100,7 +111,7 @@ class TestSuspendLimit:
         # Clean up t1
         mgr.resume(ResumeCommand(
             script_run_id=run1.run_id,
-            suspend_id=run1.suspension.suspend_id,
+            suspend_id=first_suspension.suspend_id,
             payload={},
         ))
         t1.join(timeout=2)
@@ -142,12 +153,8 @@ class TestResourceCleanup:
         t = threading.Thread(target=handler)
         t.start()
 
-        for _ in range(100):
-            if run.state == ScriptRunState.SUSPENDED:
-                break
-            time.sleep(0.01)
-
-        suspend_id = run.suspension.suspend_id
+        suspension = _wait_for_active_suspension(mgr, run)
+        suspend_id = suspension.suspend_id
         assert suspend_id in mgr._slots
 
         mgr.resume(ResumeCommand(
@@ -165,18 +172,14 @@ class TestResourceCleanup:
             set_run_context(run)
             try:
                 compose_pause(reason="r", timeout_ms=5000)
-            except:
+            except ScriptSuspendRejectedError:
                 pass
 
         t = threading.Thread(target=handler)
         t.start()
 
-        for _ in range(100):
-            if run.state == ScriptRunState.SUSPENDED:
-                break
-            time.sleep(0.01)
-
-        suspend_id = run.suspension.suspend_id
+        suspension = _wait_for_active_suspension(mgr, run)
+        suspend_id = suspension.suspend_id
         with pytest.raises(ScriptSuspendRejectedError):
             mgr.reject(RejectCommand(
                 script_run_id=run.run_id, suspend_id=suspend_id
@@ -193,7 +196,7 @@ class TestResourceCleanup:
             set_run_context(run)
             try:
                 compose_pause(reason="r", timeout_ms=50)
-            except:
+            except ScriptSuspendTimeoutError:
                 pass
 
         t = threading.Thread(target=handler)
@@ -218,10 +221,7 @@ class TestResourceCleanup:
         t = threading.Thread(target=handler)
         t.start()
 
-        for _ in range(100):
-            if run.state == ScriptRunState.SUSPENDED:
-                break
-            time.sleep(0.01)
+        _wait_for_active_suspension(mgr, run)
 
         assert len(mgr._slots) == 1
         mgr.abort_run(run.run_id)

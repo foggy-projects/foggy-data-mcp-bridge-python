@@ -429,6 +429,24 @@ P0-16 follow-up:
   evidence, SQL Server cascade oracle, and MySQL 5.7 live support-scope
   evidence.
 
+BUG-P0-17 follow-up:
+
+- P0-16 full-baseline runs exposed intermittent compose runtime pause/resume
+  failures where tests observed `run_ctx.state == SUSPENDED` before reading a
+  non-null `run_ctx.suspension`.
+- The fix keeps production runtime behavior unchanged and updates touched tests
+  to wait through `SuspensionManager.get_active_suspension()` /
+  `list_active_suspensions()`, which is the complete-publication boundary for
+  state + `SuspensionResult` + wait slot.
+- Focused pause/resume files passed:
+  `24 passed in 0.29s`.
+- Scoped ruff passed:
+  `All checks passed!`.
+- Compose runtime suite passed:
+  `293 passed, 16 warnings in 1.01s`.
+- Full Python pytest passed:
+  `4041 passed, 232 skipped, 43 warnings in 18.02s`.
+
 Odoo registry consumer baseline:
 
 - Python has `scripts/pull-odoo-models.py` and `scripts/check-model-drift.py`.
