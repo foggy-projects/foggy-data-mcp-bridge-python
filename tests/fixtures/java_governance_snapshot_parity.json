@@ -173,6 +173,77 @@
       "messageMarkers" : [ "salesAmount" ]
     }
   }, {
+    "id" : "pivot-denied-row-axis-refused",
+    "type" : "pivot-query-validation",
+    "model" : "FactSalesModel",
+    "request" : {
+      "pivot" : {
+        "rows" : [ {
+          "field" : "product$categoryName"
+        } ],
+        "columns" : [ ],
+        "metrics" : [ "salesAmount" ],
+        "outputFormat" : "flat"
+      }
+    },
+    "deniedColumns" : [ {
+      "table" : "dim_product",
+      "column" : "category_name"
+    } ],
+    "expected" : {
+      "passes" : false,
+      "messageMarkers" : [ "product$categoryName" ]
+    }
+  }, {
+    "id" : "pivot-parent-share-denied-native-metric-refused",
+    "type" : "pivot-query-validation",
+    "model" : "FactSalesModel",
+    "request" : {
+      "pivot" : {
+        "rows" : [ {
+          "field" : "product$categoryName"
+        }, {
+          "field" : "product$caption"
+        } ],
+        "columns" : [ ],
+        "metrics" : [ "salesAmount", {
+          "name" : "categoryShare",
+          "type" : "parentShare",
+          "of" : "salesAmount",
+          "axis" : "rows",
+          "level" : "product$categoryName"
+        } ],
+        "outputFormat" : "flat"
+      }
+    },
+    "deniedColumns" : [ {
+      "table" : "fact_sales",
+      "column" : "sales_amount"
+    } ],
+    "expected" : {
+      "passes" : false,
+      "messageMarkers" : [ "salesAmount" ]
+    }
+  }, {
+    "id" : "domain-transport-denied-domain-column-refused",
+    "type" : "domain-transport-query-validation",
+    "model" : "FactSalesModel",
+    "columns" : [ "product$categoryName", "salesAmount" ],
+    "orderBy" : [ ],
+    "deniedColumns" : [ {
+      "table" : "dim_product",
+      "column" : "category_name"
+    } ],
+    "domainTransportPlan" : {
+      "columns" : [ "product$categoryName" ],
+      "tuples" : [ [ "Electronics" ] ],
+      "threshold" : 0
+    },
+    "expected" : {
+      "passes" : false,
+      "messageMarkers" : [ "product$categoryName" ]
+    }
+  }, {
     "id" : "metadata-denied-measure-trims-sales-amount",
     "type" : "metadata-trimming",
     "model" : "FactSalesModel",

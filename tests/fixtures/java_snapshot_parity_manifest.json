@@ -196,20 +196,21 @@
         "missing visible-model binding fail-closed compile error",
         "deniedColumns physical-to-QM field mapping",
         "queryModel denied field validation for columns and orderBy",
-        "metadata visibleFields plus deniedColumns trimming contract"
+        "metadata visibleFields plus deniedColumns trimming contract",
+        "pivot/domain transport governance propagation for deniedColumns"
       ],
       "plannedExtensions": [
         "visible model allow/deny cases",
         "cross-model calculated field reference refusals",
         "sanitized error payloads without physical column leakage",
-        "pivot/domain transport governance propagation",
         "aggregate join governance propagation"
       ],
       "verification": [
         "Python replays Java binding three-state semantics",
         "Python captures forwarded fieldAccess, deniedColumns, and systemSlice on SemanticQueryRequest",
         "Python asserts missing-binding error code and phase",
-        "Python replays deniedColumns mapping, query validation, and metadata trimming against FactSalesModel"
+        "Python replays deniedColumns mapping, query validation, and metadata trimming against FactSalesModel",
+        "Python replays Pivot and domain transport deniedColumns fail-closed propagation"
       ]
     },
     {

@@ -23,6 +23,7 @@ from foggy.dataset_model.engine.compose.security import (
     AuthorityResolution,
     ModelBinding,
 )
+from foggy.dataset_model.semantic.pivot.domain_transport import DomainTransportPlan
 from foggy.dataset_model.semantic.service import QueryBuildResult, SemanticQueryService
 from foggy.demo.models.ecommerce_models import create_fact_sales_model
 from foggy.mcp_spi import SemanticQueryRequest
@@ -147,6 +148,10 @@ def _assert_case_replays(case: dict[str, Any]) -> None:
         _assert_denied_column_mapping(case)
     elif case_type == "query-validation":
         _assert_query_validation(case)
+    elif case_type == "pivot-query-validation":
+        _assert_pivot_query_validation(case)
+    elif case_type == "domain-transport-query-validation":
+        _assert_domain_transport_query_validation(case)
     elif case_type == "metadata-trimming":
         _assert_metadata_trimming(case)
     else:
@@ -218,12 +223,42 @@ def _assert_denied_column_mapping(case: dict[str, Any]) -> None:
 
 
 def _assert_query_validation(case: dict[str, Any]) -> None:
-    service = _sales_service()
     request = SemanticQueryRequest(
         columns=list(case.get("columns", [])),
         order_by=list(case.get("orderBy", [])),
         denied_columns=_denied_columns_from_snapshot(case.get("deniedColumns")),
     )
+    _assert_semantic_query_validation(case, request)
+
+
+def _assert_pivot_query_validation(case: dict[str, Any]) -> None:
+    request = SemanticQueryRequest(
+        **case["request"],
+        denied_columns=_denied_columns_from_snapshot(case.get("deniedColumns")),
+    )
+    _assert_semantic_query_validation(case, request)
+
+
+def _assert_domain_transport_query_validation(case: dict[str, Any]) -> None:
+    request = SemanticQueryRequest(
+        columns=list(case.get("columns", [])),
+        order_by=list(case.get("orderBy", [])),
+        denied_columns=_denied_columns_from_snapshot(case.get("deniedColumns")),
+    )
+    plan = case["domainTransportPlan"]
+    request.domain_transport_plan = DomainTransportPlan(
+        columns=tuple(plan["columns"]),
+        tuples=tuple(tuple(row) for row in plan["tuples"]),
+        threshold=int(plan["threshold"]),
+    )
+    _assert_semantic_query_validation(case, request)
+
+
+def _assert_semantic_query_validation(
+    case: dict[str, Any],
+    request: SemanticQueryRequest,
+) -> None:
+    service = _sales_service()
     response = service.query_model(case["model"], request, mode="validate")
 
     expected = case["expected"]
