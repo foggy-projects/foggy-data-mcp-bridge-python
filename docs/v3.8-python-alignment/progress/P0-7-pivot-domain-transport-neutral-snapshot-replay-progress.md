@@ -31,7 +31,7 @@ Date: 2026-06-06
 
 ## Follow-Up
 
-- Add real flat/grid output snapshots.
+- Real flat/grid output snapshots are covered by P0-8.
 - Add subtotal and grand-total output snapshots.
 - Add non-additive auxiliary requery shape snapshots.
 - Add `baselineRatio` output snapshots.

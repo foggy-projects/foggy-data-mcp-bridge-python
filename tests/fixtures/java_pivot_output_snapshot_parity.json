@@ -1,0 +1,105 @@
+{
+  "schemaVersion" : 1,
+  "feature" : "pivotOutput",
+  "source" : "JavaPivotOutputSnapshotTest",
+  "seed" : {
+    "slice" : {
+      "field" : "orderStatus",
+      "op" : "=",
+      "value" : "PY_ALIGN_PIVOT_OUT"
+    },
+    "rows" : [ {
+      "category" : "Align-Electronics",
+      "year" : 2099,
+      "sales" : 100
+    }, {
+      "category" : "Align-Electronics",
+      "year" : 2099,
+      "sales" : 50
+    }, {
+      "category" : "Align-Clothing",
+      "year" : 2098,
+      "sales" : 200
+    } ]
+  },
+  "cases" : [ {
+    "id" : "pivot-flat-rows",
+    "type" : "flat-output",
+    "request" : {
+      "outputFormat" : "flat",
+      "rows" : [ "product$categoryName" ],
+      "columns" : [ ],
+      "metrics" : [ "salesAmount" ],
+      "slice" : [ {
+        "field" : "orderStatus",
+        "op" : "=",
+        "value" : "PY_ALIGN_PIVOT_OUT"
+      } ]
+    },
+    "javaCanonical" : [ {
+      "category" : "Align-Clothing",
+      "sales" : 200
+    }, {
+      "category" : "Align-Electronics",
+      "sales" : 150
+    } ]
+  }, {
+    "id" : "pivot-flat-rows-columns",
+    "type" : "flat-output",
+    "request" : {
+      "outputFormat" : "flat",
+      "rows" : [ "product$categoryName" ],
+      "columns" : [ "salesDate$year" ],
+      "metrics" : [ "salesAmount" ],
+      "slice" : [ {
+        "field" : "orderStatus",
+        "op" : "=",
+        "value" : "PY_ALIGN_PIVOT_OUT"
+      } ]
+    },
+    "javaCanonical" : [ {
+      "category" : "Align-Clothing",
+      "year" : 2098,
+      "sales" : 200
+    }, {
+      "category" : "Align-Electronics",
+      "year" : 2099,
+      "sales" : 150
+    } ]
+  }, {
+    "id" : "pivot-grid-rows-columns",
+    "type" : "grid-output",
+    "request" : {
+      "outputFormat" : "grid",
+      "rows" : [ "product$categoryName" ],
+      "columns" : [ "salesDate$year" ],
+      "metrics" : [ "salesAmount" ],
+      "slice" : [ {
+        "field" : "orderStatus",
+        "op" : "=",
+        "value" : "PY_ALIGN_PIVOT_OUT"
+      } ]
+    },
+    "javaCanonical" : [ {
+      "category" : "Align-Clothing",
+      "year" : 2098,
+      "metric" : "salesAmount",
+      "value" : 200
+    }, {
+      "category" : "Align-Clothing",
+      "year" : 2099,
+      "metric" : "salesAmount",
+      "value" : null
+    }, {
+      "category" : "Align-Electronics",
+      "year" : 2098,
+      "metric" : "salesAmount",
+      "value" : null
+    }, {
+      "category" : "Align-Electronics",
+      "year" : 2099,
+      "metric" : "salesAmount",
+      "value" : 150
+    } ]
+  } ]
+}

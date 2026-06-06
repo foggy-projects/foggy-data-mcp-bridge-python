@@ -125,7 +125,6 @@
         "documented Java MySQL5.7 derived-table support vs Python mysql5.x fail-closed gap"
       ],
       "plannedExtensions": [
-        "real flat/grid output row contracts",
         "subtotal and grand total output contracts",
         "non-additive aux requery shape",
         "baselineRatio output cases",
@@ -137,6 +136,38 @@
         "Python validates ordinary flat pivot translation through validate_and_translate_pivot",
         "Python replays domain renderer fragments, params, and join predicate markers",
         "Python records MySQL5.7 as an explicit fail-closed parity gap"
+      ]
+    },
+    {
+      "id": "pivot-output-sqlite-snapshots",
+      "feature": "pivotOutput",
+      "status": "active",
+      "owner": "java",
+      "scope": "real SQLite Pivot flat/grid output replay over an isolated neutral seed",
+      "javaExporter": "foggy-dataset-model/src/test/java/com/foggyframework/dataset/db/model/engine/pivot/JavaPivotOutputSnapshotTest.java",
+      "pythonFixtures": [
+        "tests/fixtures/java_pivot_output_snapshot_parity.json"
+      ],
+      "pythonTests": [
+        "tests/integration/test_java_pivot_output_snapshot_parity.py"
+      ],
+      "javaExported": [
+        "isolated orderStatus-scoped seed rows for category/year/sales",
+        "flat rows + metric canonical output",
+        "flat rows + columns + metric canonical output",
+        "grid rowHeaders/columnHeaders/cells canonical output including sparse null cells"
+      ],
+      "plannedExtensions": [
+        "subtotal and grand-total output contracts",
+        "parentShare output contracts",
+        "baselineRatio output contracts",
+        "non-additive auxiliary requery output contracts",
+        "Python pivot cache-key collision fix for flat/grid same translated request"
+      ],
+      "verification": [
+        "Java exporter executes real Pivot against SQLite EcommerceTestSupport with -P!multi-db",
+        "Python seeds the same neutral rows into SQLite and replays flat/grid cases against FactSalesModel",
+        "Python canonicalizes aliases and numeric types before comparing with Java canonical output"
       ]
     },
     {

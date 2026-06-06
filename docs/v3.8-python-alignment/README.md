@@ -25,6 +25,7 @@ Current P0 execution records:
 - [P0-5-governance-neutral-snapshot-replay.md](workitems/P0-5-governance-neutral-snapshot-replay.md)
 - [P0-6-governance-denied-column-metadata-snapshot-replay.md](workitems/P0-6-governance-denied-column-metadata-snapshot-replay.md)
 - [P0-7-pivot-domain-transport-neutral-snapshot-replay.md](workitems/P0-7-pivot-domain-transport-neutral-snapshot-replay.md)
+- [P0-8-pivot-output-sqlite-snapshot-replay.md](workitems/P0-8-pivot-output-sqlite-snapshot-replay.md)
 
 Current active snapshot lanes:
 
@@ -34,3 +35,4 @@ Current active snapshot lanes:
 - Compose script tool/runtime neutral snapshots
 - Governance / permission visible-model neutral snapshots
 - Pivot / domain transport neutral snapshots
+- Pivot real flat/grid SQLite output snapshots
