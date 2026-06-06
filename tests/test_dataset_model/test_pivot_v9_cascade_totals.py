@@ -32,7 +32,7 @@ def test_append_row_subtotals_and_grand_total_over_surviving_domain():
 
     grand = [r for r in result if r.get("_sys_meta", {}).get("isGrandTotal")]
     assert grand == [
-        {"category": "ALL", "sub": "ALL", "sales": 130.0, "_sys_meta": {"isGrandTotal": True}},
+        {"category": "GRAND_TOTAL", "sub": "GRAND_TOTAL", "sales": 130.0, "_sys_meta": {"isGrandTotal": True}},
     ]
 
 
@@ -63,8 +63,8 @@ def test_grand_total_keeps_column_domain():
 
     grand = [r for r in result if r.get("_sys_meta", {}).get("isGrandTotal")]
     assert grand == [
-        {"category": "ALL", "sub": "ALL", "year": 2024, "sales": 100.0, "_sys_meta": {"isGrandTotal": True}},
-        {"category": "ALL", "sub": "ALL", "year": 2023, "sales": 40.0, "_sys_meta": {"isGrandTotal": True}},
+        {"category": "GRAND_TOTAL", "sub": "GRAND_TOTAL", "year": 2024, "sales": 100.0, "_sys_meta": {"isGrandTotal": True}},
+        {"category": "GRAND_TOTAL", "sub": "GRAND_TOTAL", "year": 2023, "sales": 40.0, "_sys_meta": {"isGrandTotal": True}},
     ]
 
 
@@ -87,5 +87,5 @@ def test_empty_surviving_domain_grand_total_is_null_metric_row():
     result = append_cascade_totals([], pivot, key_map)
 
     assert result == [
-        {"category": "ALL", "sub": "ALL", "sales": None, "_sys_meta": {"isGrandTotal": True}},
+        {"category": "GRAND_TOTAL", "sub": "GRAND_TOTAL", "sales": None, "_sys_meta": {"isGrandTotal": True}},
     ]

@@ -6,15 +6,16 @@ These tests verify the Stage 5B C2 cascade translation against SQLite (memory), 
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterable
+from decimal import Decimal
+from typing import Any
+
 import pytest
 
 from foggy.dataset.db.executor import DatabaseExecutor, MySQLExecutor, PostgreSQLExecutor, SQLiteExecutor
 from foggy.dataset_model.semantic.service import SemanticQueryService
 from foggy.demo.models.ecommerce_models import create_fact_sales_model
-from typing import Any, Iterable
-from decimal import Decimal
-from foggy.mcp_spi import SemanticQueryRequest, PivotRequest
-from foggy.mcp_spi.semantic import DeniedColumn
+from foggy.mcp_spi import PivotRequest, SemanticQueryRequest
 
 MYSQL8_CONFIG = {
     "host": "localhost",
@@ -80,7 +81,7 @@ def real_db_service(request, tmp_path):
             INSERT INTO dim_product VALUES (2, 'Clothing', 11);
             INSERT INTO dim_product VALUES (3, 'Food', 12);
             INSERT INTO dim_product VALUES (4, NULL, NULL);
-            
+
             INSERT INTO dim_customer VALUES (100, 'Gold');
             INSERT INTO dim_customer VALUES (101, 'Silver');
             INSERT INTO dim_customer VALUES (200, 'Gold');
@@ -105,7 +106,7 @@ def real_db_service(request, tmp_path):
     service = _service(executor)
     if request.param != "sqlite":
         _probe_or_skip(service)
-    
+
     yield request.param, service
     _close(service, executor)
 
@@ -285,7 +286,7 @@ WHERE rn <= 1
     # Use _norm_results to compare them consistently
     pivot_norm = _norm_results(res.items, "product$categoryName", "product$subCategoryId", "salesAmount")
     oracle_norm = _norm_results(oracle_rows, "cat", "sub", "val")
-    
+
     assert pivot_norm == oracle_norm
 
 
@@ -326,8 +327,8 @@ def test_cascade_flat_row_subtotals_and_grand_total_surviving_domain(real_db_ser
         if row.get("_sys_meta", {}).get("isGrandTotal")
     ]
     assert len(grand) == 1
-    assert grand[0]["product$categoryName"] == "ALL"
-    assert grand[0]["product$subCategoryId"] == "ALL"
+    assert grand[0]["product$categoryName"] == "GRAND_TOTAL"
+    assert grand[0]["product$subCategoryId"] == "GRAND_TOTAL"
     expected_grand = oracle_grand[0]["val"] if oracle_grand else None
     assert (
         _number(grand[0]["salesAmount"]) if grand[0]["salesAmount"] is not None else None
@@ -372,13 +373,13 @@ def test_cascade_grid_row_subtotals_and_grand_total_surviving_domain(real_db_ser
     }
 
     subtotal_headers = [h for h in headers if h.get("isSubtotal") and h.get("product$subCategoryId") == "ALL"
-                        and h.get("product$categoryName") != "ALL"]
+                        and h.get("product$categoryName") != "GRAND_TOTAL"]
     assert {
         h["product$categoryName"]: _number(metric_values[(("product$categoryName", h["product$categoryName"]), ("product$subCategoryId", "ALL"))])
         for h in subtotal_headers
     } == expected_sub
 
-    grand_key = (("product$categoryName", "ALL"), ("product$subCategoryId", "ALL"))
+    grand_key = (("product$categoryName", "GRAND_TOTAL"), ("product$subCategoryId", "GRAND_TOTAL"))
     assert grand_key in metric_values
     assert (
         _number(metric_values[grand_key]) if metric_values[grand_key] is not None else None

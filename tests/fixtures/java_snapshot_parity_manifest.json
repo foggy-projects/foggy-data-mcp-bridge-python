@@ -125,7 +125,7 @@
         "documented Java MySQL5.7 derived-table support vs Python mysql5.x fail-closed gap"
       ],
       "plannedExtensions": [
-        "subtotal and grand total output contracts",
+        "row subtotal output contracts",
         "non-additive aux requery shape",
         "baselineRatio output cases",
         "large-domain transport threshold and fail-closed limits",
@@ -143,7 +143,7 @@
       "feature": "pivotOutput",
       "status": "active",
       "owner": "java",
-      "scope": "real SQLite Pivot flat/grid output replay over an isolated neutral seed",
+      "scope": "real SQLite Pivot flat/grid/grandTotal output replay over an isolated neutral seed",
       "javaExporter": "foggy-dataset-model/src/test/java/com/foggyframework/dataset/db/model/engine/pivot/JavaPivotOutputSnapshotTest.java",
       "pythonFixtures": [
         "tests/fixtures/java_pivot_output_snapshot_parity.json"
@@ -155,10 +155,13 @@
         "isolated orderStatus-scoped seed rows for category/year/sales",
         "flat rows + metric canonical output",
         "flat rows + columns + metric canonical output",
-        "grid rowHeaders/columnHeaders/cells canonical output including sparse null cells"
+        "grid rowHeaders/columnHeaders/cells canonical output including sparse null cells",
+        "flat rows grandTotal canonical output with GRAND_TOTAL marker",
+        "flat rows + columns grandTotal canonical output per surviving column member",
+        "grid grandTotal rowHeader/cell canonical output"
       ],
       "plannedExtensions": [
-        "subtotal and grand-total output contracts",
+        "row subtotal output contracts",
         "parentShare output contracts",
         "baselineRatio output contracts",
         "non-additive auxiliary requery output contracts"
@@ -167,7 +170,8 @@
         "Java exporter executes real Pivot against SQLite EcommerceTestSupport with -P!multi-db",
         "Python seeds the same neutral rows into SQLite and replays flat/grid cases against FactSalesModel",
         "Python canonicalizes aliases and numeric types before comparing with Java canonical output",
-        "Python replays flat/grid cases through one cached service instance to guard output-shape cache keys"
+        "Python replays flat/grid/grandTotal cases through one cached service instance to guard output-shape cache keys",
+        "Python compares Java's GRAND_TOTAL marker directly without normalizing it away"
       ]
     },
     {

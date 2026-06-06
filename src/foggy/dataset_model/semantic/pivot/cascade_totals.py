@@ -7,16 +7,18 @@ rows domain. They do not rank, filter, or recover unsupported cascade shapes.
 from __future__ import annotations
 
 from collections import OrderedDict
+from collections.abc import Iterable
 from decimal import Decimal
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any
 
-from foggy.mcp_spi.semantic import PivotAxisField, PivotRequest
 from foggy.dataset_model.semantic.pivot.cascade_detector import (
     PIVOT_CASCADE_NON_ADDITIVE_REJECTED,
     PIVOT_CASCADE_SCOPE_UNSUPPORTED,
 )
+from foggy.mcp_spi.semantic import PivotAxisField, PivotRequest
 
 TOTAL_MEMBER = "ALL"
+GRAND_TOTAL_MEMBER = "GRAND_TOTAL"
 SYS_META_KEY = "_sys_meta"
 
 
@@ -83,10 +85,10 @@ def validate_cascade_totals_supported(service: Any, model_name: str, pivot: Pivo
 
 
 def append_cascade_totals(
-    items: List[Dict[str, Any]],
+    items: list[dict[str, Any]],
     pivot: PivotRequest,
-    key_map: Dict[str, str],
-) -> List[Dict[str, Any]]:
+    key_map: dict[str, str],
+) -> list[dict[str, Any]]:
     """Append additive subtotal/grandTotal rows over surviving cascade cells."""
     opts = pivot.options
     if not opts or (not opts.row_subtotals and not opts.grand_total):
@@ -114,22 +116,22 @@ def append_cascade_totals(
 
 
 def _build_row_subtotals(
-    items: List[Dict[str, Any]],
-    row_keys: List[str],
-    col_keys: List[str],
-    metric_keys: List[str],
-) -> List[Dict[str, Any]]:
+    items: list[dict[str, Any]],
+    row_keys: list[str],
+    col_keys: list[str],
+    metric_keys: list[str],
+) -> list[dict[str, Any]]:
     parent_keys = row_keys[:-1]
     leaf_key = row_keys[-1]
-    groups: "OrderedDict[Tuple[Any, ...], List[Dict[str, Any]]]" = OrderedDict()
+    groups: OrderedDict[tuple[Any, ...], list[dict[str, Any]]] = OrderedDict()
 
     for row in items:
         key = tuple(row.get(k) for k in parent_keys + col_keys)
         groups.setdefault(key, []).append(row)
 
-    subtotal_rows: List[Dict[str, Any]] = []
+    subtotal_rows: list[dict[str, Any]] = []
     for key, rows in groups.items():
-        subtotal: Dict[str, Any] = {}
+        subtotal: dict[str, Any] = {}
         parent_values = key[:len(parent_keys)]
         col_values = key[len(parent_keys):]
         for field, value in zip(parent_keys, parent_values):
@@ -146,12 +148,12 @@ def _build_row_subtotals(
 
 
 def _build_grand_totals(
-    items: List[Dict[str, Any]],
-    row_keys: List[str],
-    col_keys: List[str],
-    metric_keys: List[str],
-) -> List[Dict[str, Any]]:
-    groups: "OrderedDict[Tuple[Any, ...], List[Dict[str, Any]]]" = OrderedDict()
+    items: list[dict[str, Any]],
+    row_keys: list[str],
+    col_keys: list[str],
+    metric_keys: list[str],
+) -> list[dict[str, Any]]:
+    groups: OrderedDict[tuple[Any, ...], list[dict[str, Any]]] = OrderedDict()
 
     if items:
         for row in items:
@@ -160,11 +162,11 @@ def _build_grand_totals(
     else:
         groups[tuple()] = []
 
-    grand_rows: List[Dict[str, Any]] = []
+    grand_rows: list[dict[str, Any]] = []
     for key, rows in groups.items():
-        grand: Dict[str, Any] = {}
+        grand: dict[str, Any] = {}
         for field in row_keys:
-            grand[field] = TOTAL_MEMBER
+            grand[field] = GRAND_TOTAL_MEMBER
         for field, value in zip(col_keys, key):
             grand[field] = value
         for metric in metric_keys:

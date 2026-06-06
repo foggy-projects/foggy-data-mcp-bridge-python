@@ -53,7 +53,7 @@ def test_java_pivot_output_snapshot_replays_in_python(tmp_path) -> None:
             request_payload = case["request"]
             pivot_payload = {
                 key: request_payload[key]
-                for key in ("outputFormat", "rows", "columns", "metrics")
+                for key in ("outputFormat", "rows", "columns", "metrics", "options")
                 if key in request_payload
             }
             request = SemanticQueryRequest(
