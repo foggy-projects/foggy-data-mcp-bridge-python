@@ -19,6 +19,7 @@ from foggy.mcp.routers.admin import create_admin_router
 from foggy.mcp.routers.analyst import create_analyst_router
 from foggy.mcp.routers.health import create_health_router
 from foggy.mcp.routers.mcp_rpc import create_mcp_router
+from foggy.mcp.routers.runtime_api_v1 import create_runtime_api_v1_router
 from foggy.mcp.routers.semantic_v3 import create_semantic_v3_router
 from foggy.mcp.audit.service import ToolAuditService
 from foggy.mcp_spi import LocalDatasetAccessor, SemanticRequestContext
@@ -240,6 +241,14 @@ def create_app(
         prefix="/semantic/v3",
     )
 
+    # Runtime API v1 router consumed by the standalone CLI and Skill workflow.
+    # It is mounted before legacy /api/v1 endpoints so shared Runtime API
+    # contract routes return the unified envelope.
+    app.include_router(
+        create_runtime_api_v1_router(state_getter=lambda: state),
+        prefix="/api/v1",
+    )
+
     # Exception handlers
     from fastapi.responses import JSONResponse
     from fastapi import Request
@@ -409,18 +418,29 @@ def main() -> None:
             )
         ]
 
-    # Store configs in a module-level variable for the factory function
-    _app_config["properties"] = properties
-    _app_config["data_source_configs"] = data_source_configs
-    _app_config["load_demo_models"] = not args.no_demo_models
+    if args.reload:
+        # Reload mode needs an import string. Console-script execution keeps
+        # this module importable as foggy.mcp.launcher.app.
+        _app_config["properties"] = properties
+        _app_config["data_source_configs"] = data_source_configs
+        _app_config["load_demo_models"] = not args.no_demo_models
+        uvicorn.run(
+            "foggy.mcp.launcher.app:_create_app_from_config",
+            host=args.host,
+            port=args.port,
+            reload=True,
+            factory=True,
+        )
+        return
 
-    # Run server using uvicorn with factory
     uvicorn.run(
-        "foggy.mcp.launcher.app:_create_app_from_config",
+        create_app(
+            properties=properties,
+            data_source_configs=data_source_configs,
+            load_demo_models=not args.no_demo_models,
+        ),
         host=args.host,
         port=args.port,
-        reload=args.reload,
-        factory=True,
     )
 
 
