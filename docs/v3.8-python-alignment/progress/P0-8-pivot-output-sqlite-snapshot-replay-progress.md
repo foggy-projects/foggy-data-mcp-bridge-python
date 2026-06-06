@@ -35,6 +35,5 @@ Date: 2026-06-06
 - Add `parentShare` output snapshots.
 - Add `baselineRatio` output snapshots.
 - Add non-additive auxiliary requery output snapshots.
-- Fix or explicitly key Python Pivot cache by output format before combining
-  multiple output-shape cases in one service instance.
+- Python Pivot output cache-key isolation is covered by BUG-P0-9.
 - Add pivot/domain governance propagation snapshots.

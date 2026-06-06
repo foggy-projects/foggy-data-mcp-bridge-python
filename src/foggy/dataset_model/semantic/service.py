@@ -876,8 +876,10 @@ class SemanticQueryService(SemanticServiceResolver):
         is_pivot = False
         _pivot_parent_share_metrics = []
         pivot_request = getattr(request, "pivot", None)
+        pivot_cache_fragment = None
         if pivot_request:
             is_pivot = True
+            pivot_cache_fragment = self._pivot_cache_fragment(pivot_request)
             
             from foggy.dataset_model.semantic.pivot.cascade_detector import is_rows_two_level_cascade
             if is_rows_two_level_cascade(pivot_request):
@@ -932,7 +934,11 @@ class SemanticQueryService(SemanticServiceResolver):
             )
 
         # Check cache
-        cache_key = self._get_cache_key(model, request)
+        cache_key = self._get_cache_key(
+            model,
+            request,
+            pivot_cache_fragment=pivot_cache_fragment,
+        )
         if self._enable_cache and cache_key in self._cache:
             cached_response, cached_time = self._cache[cache_key]
             if time.time() - cached_time < self._cache_ttl:
@@ -5883,7 +5889,23 @@ class SemanticQueryService(SemanticServiceResolver):
 
     # ==================== Caching ====================
 
-    def _get_cache_key(self, model: str, request: SemanticQueryRequest) -> str:
+    @staticmethod
+    def _pivot_cache_fragment(pivot_request: Any) -> Any:
+        """Return the original Pivot request shape for result-cache isolation."""
+        if hasattr(pivot_request, "model_dump"):
+            return pivot_request.model_dump(
+                mode="json",
+                by_alias=True,
+                exclude_none=True,
+            )
+        return pivot_request
+
+    def _get_cache_key(
+        self,
+        model: str,
+        request: SemanticQueryRequest,
+        pivot_cache_fragment: Optional[Any] = None,
+    ) -> str:
         """Generate cache key for a query."""
         import hashlib
         import json
@@ -5900,6 +5922,8 @@ class SemanticQueryService(SemanticServiceResolver):
             "limit": request.limit,
             "start": request.start,
         }
+        if pivot_cache_fragment is not None:
+            key_data["pivot"] = pivot_cache_fragment
 
         key_str = json.dumps(key_data, sort_keys=True)
         return hashlib.md5(key_str.encode()).hexdigest()

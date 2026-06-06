@@ -42,17 +42,14 @@ def test_snapshot_schema() -> None:
 
 def test_java_pivot_output_snapshot_replays_in_python(tmp_path) -> None:
     snapshot = _load_snapshot()
+    db_path = tmp_path / "java_pivot_output_snapshot.sqlite"
+    _seed_db(db_path, snapshot["seed"])
+    executor = SQLiteExecutor(str(db_path))
+    service = SemanticQueryService(executor=executor)
+    service.register_model(create_fact_sales_model())
 
-    for index, case in enumerate(snapshot["cases"]):
-        # Use a fresh service per case. Python currently caches the translated
-        # non-pivot request before output shaping, so flat/grid requests with
-        # the same axes can collide in one service instance.
-        db_path = tmp_path / f"java_pivot_output_snapshot_{index}.sqlite"
-        _seed_db(db_path, snapshot["seed"])
-        executor = SQLiteExecutor(str(db_path))
-        service = SemanticQueryService(executor=executor)
-        service.register_model(create_fact_sales_model())
-        try:
+    try:
+        for case in snapshot["cases"]:
             request_payload = case["request"]
             pivot_payload = {
                 key: request_payload[key]
@@ -79,8 +76,8 @@ def test_java_pivot_output_snapshot_replays_in_python(tmp_path) -> None:
                 )
 
             assert actual == case["javaCanonical"], case["id"]
-        finally:
-            service._run_async_in_sync(executor.close())
+    finally:
+        service._run_async_in_sync(executor.close())
 
 
 def _seed_db(db_path: Path, seed: dict[str, Any]) -> None:

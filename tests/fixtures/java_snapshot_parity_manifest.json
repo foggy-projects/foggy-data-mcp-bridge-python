@@ -161,13 +161,13 @@
         "subtotal and grand-total output contracts",
         "parentShare output contracts",
         "baselineRatio output contracts",
-        "non-additive auxiliary requery output contracts",
-        "Python pivot cache-key collision fix for flat/grid same translated request"
+        "non-additive auxiliary requery output contracts"
       ],
       "verification": [
         "Java exporter executes real Pivot against SQLite EcommerceTestSupport with -P!multi-db",
         "Python seeds the same neutral rows into SQLite and replays flat/grid cases against FactSalesModel",
-        "Python canonicalizes aliases and numeric types before comparing with Java canonical output"
+        "Python canonicalizes aliases and numeric types before comparing with Java canonical output",
+        "Python replays flat/grid cases through one cached service instance to guard output-shape cache keys"
       ]
     },
     {
