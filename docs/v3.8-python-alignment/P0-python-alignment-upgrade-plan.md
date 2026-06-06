@@ -1,0 +1,469 @@
+# P0 Python Alignment Upgrade Plan
+
+Date: 2026-06-06
+
+Scope: Python engine capability alignment against the current Java 3.x / 9.x
+engine line. Productization and Odoo business model expansion are explicitly out
+of scope for the first phase unless needed as read-only fixtures.
+
+## Repository State
+
+Checked before this audit. Existing changes were not reverted, cleaned,
+committed, or pushed.
+
+| Repo | Branch/status summary |
+| --- | --- |
+| Java mainline `foggy-data-mcp-bridge-wt-dev-compose` | `main...origin/main`, with existing modified Odoo templates, docs, demo SQL/data, Java test resources, scripts, and many untracked Odoo/domain skill/model/fixture files. Left untouched. |
+| Python `foggy-data-mcp-bridge-python` | `v3.0/engine-skill-next...origin/v3.0/engine-skill-next`, with existing modified `dict_def.py`, loader `__init__.py`, `semantic/service.py`, and untracked `tests/test_dataset_model/test_dictionary_discovery_metadata.py`. Left untouched. |
+| Model registry `foggy-model-registry` | `main...origin/main`, clean at final status check. Left untouched. |
+
+This document lives under `docs/v3.8-python-alignment` to keep the Python
+alignment iteration isolated from both the older Python `v1.x` docs and any
+future Python `v3.0` mainline docs. The active Python branch is already
+`v3.0/engine-skill-next`, while the Java alignment targets include
+`docs/v3.0` plus 9.x engine docs.
+
+## Documents Reviewed
+
+Python:
+
+- `CLAUDE.md`, `README.md`, `pyproject.toml`
+- `docs/8.2.0.beta/README.md`
+- `docs/8.2.0.beta/P0-ComposeQuery-QueryPlan派生查询与关系复用规范-progress.md`
+- `docs/v1.15/README.md`
+- `docs/v1.15/acceptance/java-python-engine-parity-baseline.md`
+- `docs/v1.15/coverage/java-python-test-parity-coverage-audit.md`
+- `docs/v1.16/BUG-compose-derived-plan-having-contract-gap.md`
+- `src/`, `tests/`, and `scripts/` structure
+
+Java:
+
+- `docs/dev-guide/compose-query.md`
+- `docs/9.0.0.beta/README.md`
+- `docs/9.0.0.beta/detailed_design/00-*.md`
+- `docs/9.0.0.beta/detailed_design/01-*.md`
+- `docs/9.0.0.beta/detailed_design/02-*.md`
+- `docs/9.0.0.beta/detailed_design/04-*.md`
+- `docs/9.0.0.beta/detailed_design/07-*.md`
+- `docs/9.1.0/README.md`
+- `docs/9.1.0/detailed_design/10-*.md`
+- `docs/9.1.0/detailed_design/13-*.md`
+- `docs/9.1.0/domain_models/*`
+- `docs/9.1.0/workitems/P1-odoo-model-registry-promotion-20260606.md`
+- `docs/9.1.0/workitems/P2-ai-llm-report-tool-business-error-observability-20260604.md`
+- `docs/9.2.0/README.md`
+- `docs/9.2.0/workitems/query-model-aggregate-join.md`
+- `docs/9.2.0/acceptance/query-model-aggregate-join-acceptance.md`
+- `docs/v3.0/README.md`
+- `docs/v3.0/workitems/REQ-compose-join-qualified-field-references-java-parity.md`
+- `docs/v3.0/workitems/REQ-compose-source-alias-lexical-scope-and-ambiguity.md`
+
+Registry:
+
+- Git status only in this round. Registry contents were not edited.
+
+## Current Python Baseline
+
+Static baseline:
+
+- Runtime requirement: Python 3.11+.
+- `pyproject.toml` package version remains `0.1.0`.
+- README historical baseline says `1322 passed, 76 skipped`, but versioned docs
+  show later engine baselines:
+  - v1.15 accepted baseline: `3977 passed`.
+  - v1.16 progress note: `4100 passed, 4 failed`, with failures recorded
+    outside the compose same-stage-alias fix path.
+
+Current command results:
+
+| Command | Result |
+| --- | --- |
+| `python -m pytest --tb=short -q` | Failed before collection: `python` not found in this shell. |
+| `python3 -m pytest --tb=short -q` | Failed before collection: system Python 3.12 has no `pytest`. |
+| `.venv/bin/python -m pytest --tb=short -q` | Initial baseline: `4048 passed, 159 skipped, 7 failed, 43 warnings in 18.27s`. |
+| `.venv/bin/python -m pytest --tb=short -q -rs` | After P0-1 baseline repair: `4095 passed, 162 skipped, 43 warnings in 17.44s`. |
+
+Initial failures:
+
+| Area | Failing tests | Observed reason |
+| --- | --- | --- |
+| Formula Java snapshot catalog | `tests/integration/test_formula_parity.py::{test_catalog_has_coverage_targets,test_committed_snapshot_not_hand_edited,test_parity_matches_java_snapshot}` | Catalog/snapshot drift: catalog has 0 comparable cases, while committed snapshot still contains formula case ids such as `ari-*`, `cmp-*`, `bool-*`, `agg-*`, `ar-*`. |
+| PostgreSQL conditional aggregate real DB | Four parameterized cases in `tests/test_dataset_model/test_conditional_aggregate_if_alignment.py::TestConditionalAggregateIfRealDbAlignment::test_postgres_alignment_against_native_sql` | Local Postgres fixture is unavailable at `localhost:15432`; connection refused on `::1` and `127.0.0.1`. |
+
+P0-1 follow-up:
+
+- `BUG-P0-1A` fixed formula catalog resolution for the current Java worktree.
+- `BUG-P0-1B` added external DB profile probes for conditional aggregate IF.
+- Current local full baseline passes with optional unavailable DB/resource lanes
+  skipped.
+
+P0-2 follow-up:
+
+- Added `tests/fixtures/java_snapshot_parity_manifest.json` as the active and
+  planned Java snapshot lane manifest.
+- Added `tests/integration/test_java_snapshot_parity_manifest.py` as the
+  always-on manifest gate.
+- Active lanes currently cover formula and timeWindow. Planned lanes reserve
+  compose query, script runtime tool, pivot/domain transport, governance, and
+  neutral domain fixture runner exports.
+- Focused active-lane check passed:
+  `74 passed in 0.54s`.
+
+P0-3 follow-up:
+
+- Added optional compose replay harness at
+  `tests/integration/test_java_compose_snapshot_parity.py`.
+- Added Java snapshot producer in the Java worktree:
+  `foggy-dataset-model/src/test/java/com/foggyframework/dataset/db/model/engine/compose/compilation/JavaComposeSnapshotTest.java`.
+- Generated fixture:
+  `tests/fixtures/java_compose_snapshot_parity.json`.
+- Compose manifest lane is now active and points to the fixture plus replay
+  test.
+- Snapshot currently covers base, derived filter/order/limit, union all,
+  qualified source-alias join, dropped-column source alias refusal, and SQL
+  Server fallback forbidden `FROM (WITH` shape.
+- Focused Java producer passed:
+  `mvn test -pl foggy-dataset-model -Dtest=JavaComposeSnapshotTest`.
+- Focused Python replay passed:
+  `2 passed in 0.46s`.
+- Manifest + compose replay after lane activation passed:
+  `6 passed in 0.45s`.
+- Current full baseline after activating the compose snapshot fixture:
+  `4101 passed, 162 skipped, 43 warnings in 17.85s`.
+
+P0-4 follow-up:
+
+- Added Java snapshot producer in the Java worktree:
+  `foggy-dataset-model/src/test/java/com/foggyframework/dataset/db/model/engine/compose/runtime/JavaComposeScriptSnapshotTest.java`.
+- Generated fixture:
+  `tests/fixtures/java_compose_script_snapshot_parity.json`.
+- Added Python replay harness:
+  `tests/integration/test_java_compose_script_snapshot_parity.py`.
+- Compose script manifest lane is now active and validates MCP resource markers,
+  Java runtime global surface, literal return, empty plans envelope,
+  preview-mode SQL capture, and security-parameter fail-closed behavior.
+- Java producer passed:
+  `mvn test -pl foggy-dataset-model -Dtest=JavaComposeScriptSnapshotTest`.
+- Focused Python replay passed:
+  `4 passed in 0.41s`.
+- Manifest + P0-4 replay passed:
+  `8 passed in 0.41s`.
+- Current full baseline after activating the compose script snapshot fixture:
+  first run had one intermittent `test_suspend_limits.py` cleanup failure; the
+  failing test and file passed directly, and the second full run passed with
+  `4105 passed, 162 skipped, 43 warnings in 17.36s`.
+- Known remaining script/runtime gaps: DataSetResult row-shape parity,
+  MCP host-misconfig payload snapshots, capability allow/deny snapshots, and a
+  decision on whether Python's extra fsscript global surface should remain an
+  accepted divergence.
+
+P0-5 follow-up:
+
+- Added Java snapshot producer in the Java worktree:
+  `foggy-dataset-model/src/test/java/com/foggyframework/dataset/db/model/engine/compose/security/JavaGovernanceSnapshotTest.java`.
+- Generated fixture:
+  `tests/fixtures/java_governance_snapshot_parity.json`.
+- Added Python replay harness:
+  `tests/integration/test_java_governance_snapshot_parity.py`.
+- Governance manifest lane is now active and validates `fieldAccess` null vs
+  empty-list semantics, per-base governance forwarding, and missing
+  visible-model binding fail-closed compile errors.
+- Java producer passed:
+  `mvn test -pl foggy-dataset-model -Dtest=JavaGovernanceSnapshotTest`.
+- Manifest + P0-5 replay passed:
+  `6 passed in 0.44s`.
+- Current full baseline after activating the governance snapshot fixture:
+  `4107 passed, 162 skipped, 43 warnings in 17.48s`.
+- Remaining governance gaps after P0-5: queryModel denied-column SQL refusal,
+  metadata visible-model trimming, cross-model calculated-field refusals, and
+  sanitized error payload snapshots.
+
+P0-6 follow-up:
+
+- Extended the active governance snapshot producer/replay instead of creating a
+  parallel fixture:
+  `JavaGovernanceSnapshotTest.java`,
+  `tests/fixtures/java_governance_snapshot_parity.json`, and
+  `tests/integration/test_java_governance_snapshot_parity.py`.
+- Added neutral Java cases for denied physical-column to QM-field mapping,
+  query validation refusals for `columns` and `orderBy`, unrelated physical
+  column pass-through, metadata `deniedColumns` trimming, and
+  `visibleFields - deniedColumns` trimming.
+- Python replay now uses the real `SemanticQueryService` plus demo
+  `FactSalesModel` to validate mapping, query validation, and
+  `get_metadata_v3` behavior.
+- Manifest `permission-visible-model-snapshots` now advertises these P0-6
+  contracts as active coverage.
+- Focused Java producer passed:
+  `mvn test -pl foggy-dataset-model -Dtest=JavaGovernanceSnapshotTest`.
+- Focused Python replay plus manifest passed:
+  `6 passed in 0.44s`.
+- Remaining governance gaps: visible model allow/deny cases from authority
+  resolution, cross-model calculated-field refusals, sanitized error payloads,
+  pivot/domain governance propagation, and aggregate-join governance
+  propagation.
+
+P0-7 follow-up:
+
+- Added Java snapshot producer in the Java worktree:
+  `foggy-dataset-model/src/test/java/com/foggyframework/dataset/db/model/engine/pivot/JavaPivotDomainSnapshotTest.java`.
+- Generated fixture:
+  `tests/fixtures/java_pivot_domain_snapshot_parity.json`.
+- Added Python replay harness:
+  `tests/integration/test_java_pivot_domain_snapshot_parity.py`.
+- Pivot/domain manifest lane is now active and validates Pivot DTO parsing,
+  ordinary flat pivot translation, SQLite/Postgres/MySQL8 domain renderer
+  fragments, params, NULL-safe join predicates, and empty-column fail-closed
+  behavior.
+- The lane records a concrete gap: Java supports MySQL 5.7 domain transport via
+  `DERIVED_TABLE`; Python currently refuses `mysql5.x` domain transport.
+- Focused Java producer passed:
+  `mvn test -pl foggy-dataset-model -Dtest=JavaPivotDomainSnapshotTest`.
+- Focused Python replay plus manifest passed:
+  `6 passed in 0.41s`.
+- Ruff passed for the new Python replay.
+- First full pytest run hit an intermittent compose pause/resume failure in
+  `tests/compose/runtime/test_handler_pause.py::TestFailClosed::test_resume_after_reject`;
+  the same test passed directly, and the second full run passed with
+  `4109 passed, 162 skipped, 43 warnings in 17.59s`.
+- Remaining pivot/domain gaps: real flat/grid result snapshots, subtotal and
+  grand-total output snapshots, non-additive auxiliary requery snapshots,
+  `baselineRatio` output snapshots, large-domain threshold/limit refusal
+  snapshots, and pivot/domain governance propagation.
+
+Odoo registry consumer baseline:
+
+- Python has `scripts/pull-odoo-models.py` and `scripts/check-model-drift.py`.
+- Current `src/foggy/demo/models/odoo/models.lock.json` points to
+  `foggy.odoo.community@1.1.9`.
+- Java/registry promotion docs show current Odoo bundles at `1.1.10`.
+- `scripts/check-model-drift.py --model-dir src/foggy/demo/models/odoo` fails:
+  lock expects content checksum
+  `sha256:93a4a5bee662baf1892a68e6196fdca9057a0215c66b97ad92de6ff48888219b`,
+  directory is
+  `sha256:584aa35377f23690f77670a203bb01a1d405c44d835550d88c1ecd2e762c39e4`.
+
+## Gap Matrix
+
+Risk levels:
+
+- High: likely correctness/security/parity regression if implemented or exposed.
+- Medium: implemented core exists but current Java snapshot parity is not proven.
+- Low: mostly documentation/test harness/status drift.
+
+Priorities:
+
+- P0: phase-one validation and low-risk alignment foundation.
+- P1: bounded engine parity fixes after P0 evidence is stable.
+- P2: larger feature work or business/domain-heavy work.
+
+| Capability | Java current status | Python current status | Parity gap | Risk | Priority | Recommended verification |
+| --- | --- | --- | --- | --- | --- | --- |
+| Compose Query / derived query / relation reuse | `compose-query.md` marks QueryPlan base/derived/union/join, CTE/subquery, script runtime, second-stage compute, and cross-DB `joinInMemory` complete. Java v3.0 adds qualified join field/source alias parity and has lexical-scope ambiguity follow-up open. | Python has `engine/compose` with plan, schema, relation, compilation, runtime, security, sandbox, authority, and MCP `ComposeScriptTool`. v1.16 fixed derived same-stage alias handling but records unrelated baseline failures. | Core exists, but current Java v3.0 alias/source-scope snapshots and relation reuse edge cases need a fresh cross-language fixture run. Lexical scope/ambiguity remains unresolved on both sides and should stay fail-closed until contract is frozen. | Medium | P0 | Export Java v3.0 compose alias fixtures and replay in Python against plan schema, SQL, error code, and script output. Include derived slice alias, join qualified refs, source alias inheritance, and ambiguous/shadowed alias refusals. |
+| SQL compilation / CTE / union / join | Java supports Base/Derived/Union/Join QueryPlan, dialect CTE/subquery strategy, real SQL parity, and SQL Server subquery fallback. Java 9.2 additionally accepted QueryModel aggregate join on Java only. | Python M6/M7 implemented `compile_plan_to_sql`, CTE/subquery fallback, union/join tests, relation outer runtime, and stable relation snapshots. | General compile path is close, but current Java dialect fallback matrix and aggregate-join feature are not aligned. Stable relation join/union-as-source remains a known follow-up from v1.15. | High | P0 for snapshot parity, P2 for aggregate join | P0: cross-dialect golden SQL snapshot for base/derived/union/join and SQL Server fallback. P2: separate aggregate-join Python design with RHS preaggregation, permission propagation, and real DB parity. |
+| Script/runtime tool | Java has `dataset.compose_script`, `DataSetResult`, `ComposedDataSetResult`, `QueryPlan.execute/to_sql`, script parity tests, and tool-level MCP entry. P0-4 now exports tool markers, runtime globals, basic result shape, preview SQL capture, and security fail-closed cases. | Python has `ComposeScriptTool`, ContextVar runtime bundle, `execute_sql`, plan execution, capability registry/library loader, JS fixture parity tests, and MCP binding tests. P0-4 replay validates shared tool markers and runtime cases. README still says `dataset.compose_query` is pending. | First neutral snapshot lane is active. Remaining gaps are DataSetResult row-shape parity, MCP host-misconfig payload snapshots, capability allow/deny snapshots, and a decision on Python's extra fsscript globals. | Medium | P0/P1 | Keep P0-4 replay active; extend it with Java row/DataSetResult, host-misconfig, and capability fail-closed fixtures before changing production runtime behavior. |
+| Permission / visible model / denied columns | Java 9.x preserves governance across queryModel, pivot, domain transport, and aggregate join; visible model and denied column behavior is fail-closed. P0-5/P0-6 now export neutral `ModelBinding`, compiler forwarding, missing-binding fail-closed, denied-column mapping, query validation, and metadata trimming snapshots. | Python has authorization tests, compose authority/security tests, visible/denied logic in semantic service, and v1.15 acceptance for governance cross-path behavior. P0-5/P0-6 replay validates the corresponding Python boundary plus real Python `SemanticQueryService` mapping/query/metadata behavior. | Neutral governance lane is active through queryModel denied-column validation and metadata trimming. Remaining gaps are visible model allow/deny cases from authority resolution, cross-model calculated-field refusals, sanitized error payloads, pivot/domain governance propagation, and aggregate join governance. Current Odoo/domain fixture layer is stale and cannot prove latest visible model coverage. | High | P0/P1 for regression evidence, P2 for aggregate join governance | Keep P0-5/P0-6 replay active. Next export Java snapshots for authority-visible model allow/deny, cross-model calculated fields, sanitized errors, and pivot/domain transport governance. |
+| Inline formula / calculated fields / alias behavior | Java includes formula compiler parity, predefined formula fixes, inline formula/calculated fields, alias behavior, v3.0 semantic money scale, and 9.2 formula follow-ups. | Python has formula compiler/capability tests, formula field extraction, semantic service formula compiler, timeWindow/calculatedFields history, and v1.16 same-stage alias fix. Current pytest has formula parity snapshot/catalog failures. Existing dirty Python files touch dict/loader/service and may be related to metadata/semantic scale work. | This is the clearest active drift: current parity snapshot tests fail, Java has newer formula/money-scale work, and Python has uncommitted local changes in related modules that must not be overwritten. | High | P0/P1 | P0: repair or regenerate Java formula snapshot catalog evidence without changing engine behavior. P1: implement bounded formula gaps only after current dirty changes are understood; include alias-in-slice/order/group tests and semantic scale golden cases. |
+| Time window / relative date | Java supports timeWindow in query paths; pivot forbids direct timeWindow and routes time intelligence through calculated fields. Compose docs mention rolling windows and pending MySQL8 lane evidence. | Python has `time_window.py`, Java parity catalog fixture, SQLite execution, real DB matrix tests, and v1.15 acceptance for timeWindow. | Mostly aligned. Need current Java snapshot refresh for relative dates and dialect behavior, plus confirm pivot rejection remains stable. | Medium | P1 | Replay Java time window catalog and real DB matrix where DB fixtures are available. Keep pivot+timeWindow refusal tests in P0 smoke set. |
+| Pivot / subtotal / non-additive / baseline ratio | Java 9.0/9.1 has Pivot DSL, flat/grid/tree boundaries, subtotals/grand totals, non-additive aux requery, parentShare, baselineRatio, Stage5A domain transport, Stage5B rows two-level cascade, and explicit fail-closed cases. P0-7 now exports neutral Pivot DTO and ordinary flat translation contracts. Tree+cascade, outer pivot cache, SQL Server cascade, and conservative MySQL/MySQL5.7 cascade remain deferred/refused. | Python v1.8-v1.15 docs and tests show Pivot V9 flat/grid, contract shell, domain transport, cascade semantics/totals, MySQL57 and SQL Server refusal matrices, and v1.15 accepted parity baseline. P0-7 replay validates Pivot DTO parsing and ordinary flat translation through `validate_and_translate_pivot`. | DTO/ordinary translation evidence is now active. Still missing Java snapshot replay for real flat/grid results, subtotals/grand total output, non-additive auxiliary requery, `baselineRatio` output, and cascade totals against current Java. Any cache/tree/cascade extension should remain out of phase one. | High | P0 for more evidence, P2 for deferred features | Keep P0-7 active. Next export real flat/grid, subtotal/grandTotal, parentShare output, baselineRatio, and non-additive snapshots. P2: tree+cascade, outer cache, SQL Server cascade, MySQL5.7 live evidence. |
+| Domain transport / large domain fail-closed | Java 9.1 Stage5A uses internal `DomainTransportPlan`, request/context carriers, dialect renderers for SQLite/Postgres/MySQL8/MySQL5.7, OR-of-AND threshold, large-domain transport, and fail-closed limits. P0-7 exports SQLite/Postgres/MySQL8 renderer contracts plus Java MySQL5.7 derived-table support. | Python has `semantic/pivot/domain_transport.py`, domain transport queryModel tests, real DB matrix tests, and v1.15 acceptance for SQLite/MySQL8/Postgres plus MySQL5.7 refusal. P0-7 replay validates SQLite/Postgres/MySQL8 fragments, params, NULL-safe predicates, and empty-column refusal. | Shared renderer evidence is active. Two explicit gaps remain: Java MySQL8 uses `VALUES ROW(?)` while Python uses CTE `UNION ALL SELECT`, and Java supports MySQL5.7 derived-table transport while Python intentionally fails closed for `mysql5.x`. Direct oversized axis-domain API and threshold path still need snapshots. | High | P0/P1 | Keep P0-7 active. Next export <=500 OR path, >500 transport path, unsupported dialect refusal, MySQL version gates, max tuple/param/sql-size limits, and live DB result parity where fixtures are available. |
+| Model registry consumer | Java and registry have current Odoo package promotion at `foggy.odoo.community@1.1.10` and `foggy.odoo.pro@1.1.10`, pull scripts, addon sync, lock update, and drift checks. | Python has pull and drift scripts from earlier v1.0 work, but current lock is `foggy.odoo.community@1.1.9`; local directory fails drift check; no evidence in this round that Python has consumed `1.1.10`. | Not absent, but stale and currently drifted. Since first phase avoids Odoo business model expansion, this should be treated as validation infrastructure debt, not first engine code work. | High | P1/P2 | P1: dry-run pull from local registry into a temp directory and verify checksum/loader compatibility. P2: update committed Odoo bundle only after engine snapshot gates pass and user approves touching generated Odoo files. |
+| Domain fixtures and question runner | Java 9.1 has domain fixture packs, `scripts/run-ai-domain-direct.sh`, Odoo direct baseline suites, report/warning collection, tool argument rule warnings, and model registry promotion evidence. | Python has unit/integration tests and Odoo demo models, but no equivalent AI domain direct runner found under `scripts/`; compose runtime has JS fixtures, and tests include Java timeWindow/formula parity fixtures. | Major validation gap. Python cannot yet replay Java domain question packs end-to-end without a new adapter. This is more important than importing Odoo business models first. | High | P0/P1 | P0: define a neutral fixture adapter that can replay Java snapshot/request/expected-tool-argument cases through Python MCP/semantic service. P1: add domain runner for non-Odoo engine cases. P2: add Odoo packs after registry/model drift is resolved. |
+| Semantic scale / money units | Java v3.0 introduces `semanticScaleFactor` for monetary/unit semantics and rejects arbitrary SQL fragment shortcuts. | Python branch has local dirty changes in dictionary/loader/semantic service files, and an untracked dictionary discovery metadata test. No acceptance evidence was found in docs. | Status is in progress/unknown and must be reconciled with the user-owned local changes before implementation. | High | P1 | Read current dirty diff only when this item is explicitly started; then compare Java v3.0 semantic scale fixtures against Python loader, metadata, formula, and query output. |
+| QueryModel aggregate join | Java 9.2 accepted Java-only aggregate join: RHS preaggregation before LEFT JOIN, same datasource, fixed slice, permissions/system slice preserved, AND-only runtime pushdown, real SQLite/MySQL evidence. | No Python implementation evidence found in this audit. | Full feature gap. It is engine-level but not low risk, so it should not be phase-one implementation work. | High | P2 | New Python design doc and tests: AST/API contract, RHS aggregate plan, SQL generation, permission propagation, pushdown/refusal matrix, SQLite/MySQL/Postgres parity. |
+
+## Phase One Recommendation
+
+Phase one should avoid large engine rewrites and avoid Odoo business model
+expansion. The highest return is to make Python able to prove parity against the
+current Java snapshots first.
+
+Recommended first three work items:
+
+1. **Java snapshot replay harness for engine-neutral cases**
+   - Import or generate read-only Java snapshots for compose SQL/runtime,
+     formula/catalog, timeWindow, pivot contract, and domain transport.
+   - Keep fixtures engine-neutral: sales/orders/service-ticket style cases, not
+     Odoo-specific business semantics.
+   - Acceptance: Python pytest can run a focused `java_snapshot_parity` suite
+     and either pass or produce explicit fail-closed mismatch records.
+
+2. **Formula and calculated-field baseline repair**
+   - Current pytest already fails in formula parity due snapshot/catalog drift.
+   - First repair evidence generation/fixture integrity, not formula behavior.
+   - Acceptance: `tests/integration/test_formula_parity.py` has non-zero Java
+     compare cases and no orphan committed snapshot entries.
+
+3. **Compose + Pivot smoke parity pack**
+   - Compose: derived/union/join, source aliases, qualified join refs, SQL
+     Server fallback, script tool schema, and host-misconfig errors.
+   - Pivot: flat/grid contract, domain transport large-domain behavior,
+     subtotal/non-additive/baselineRatio fail-closed or parity snapshots.
+   - Acceptance: targeted tests pass locally without requiring external DBs;
+     external DB lanes are marked/skipped consistently when fixtures are absent.
+
+4. **Governance neutral snapshot pack**
+   - Start with non-Odoo snapshots for `ModelBinding`, compile forwarding, and
+     missing-binding fail-closed behavior.
+   - P0-6 has extended the lane with denied physical-column mapping,
+     queryModel column/orderBy refusal, and metadata trimming.
+   - Remaining extensions are visible model authority allow/deny, cross-model
+     calculated-field refusals, sanitized error payloads, and pivot/domain
+     governance propagation.
+   - Acceptance: Java producer and Python replay agree on structured error codes
+     and governance request/context payloads.
+
+## Executable Plan
+
+### P0: Evidence and Low-Risk Harness
+
+Expected modules/files:
+
+- `tests/integration/` for Java snapshot parity tests.
+- `tests/fixtures/` for normalized Java snapshot inputs/expected outputs.
+- Possibly a small test utility under `tests/support/` if the repo already has a
+  suitable convention; avoid production engine changes unless required.
+- Docs under `docs/v3.8-python-alignment/` for evidence updates.
+
+Tasks:
+
+1. Freeze current baseline:
+   - Record `.venv/bin/python -m pytest --tb=short -q` result.
+   - Record formula snapshot failures and Postgres fixture absence.
+   - Record Odoo model drift but do not resync generated Odoo files.
+2. Define Java snapshot export list:
+   - Compose query SQL/runtime: derived, union, join, source aliases, qualified
+     refs, relation reuse, SQL Server fallback.
+   - Formula/calculated fields: scalar/aggregate, alias in slice/order/group,
+     predefined formulas, semantic scale if snapshot exists.
+   - Time window: fixed date ranges, relative dates, rolling windows, pivot
+     refusal.
+   - Pivot/domain transport: flat/grid, baselineRatio, parentShare,
+     non-additive totals, large-domain transport/refusal.
+3. Add Python replay tests that do not require Odoo or live external DBs.
+4. Normalize external DB tests:
+   - Local SQLite is mandatory.
+   - MySQL/Postgres/SQL Server lanes must skip or be separately profiled when
+     endpoints are unavailable.
+
+Exit criteria:
+
+- Focused parity suite exists and can be run in local Python `.venv`.
+- Full pytest no longer has evidence-only failures from broken formula snapshots.
+- Remaining external DB failures are either fixed by local service availability
+  or correctly skipped with explicit fixture prerequisites.
+
+### P1: Bounded Engine Alignment
+
+Expected modules/files:
+
+- `src/foggy/dataset_model/semantic/`
+- `src/foggy/dataset_model/engine/compose/`
+- `src/foggy/dataset_model/semantic/pivot/`
+- `scripts/pull-odoo-models.py` and `scripts/check-model-drift.py` only for
+  dry-run/temp-dir validation, not committed generated Odoo updates.
+
+Tasks:
+
+1. Fix formula/calculated-field parity gaps proven by P0 snapshots.
+2. Align compose dialect fallback and source alias behavior where Java snapshots
+   show drift.
+3. Refresh timeWindow relative-date and pivot/domain-transport edge behavior.
+4. Add neutral domain fixture runner that can replay Java request/expected tool
+   argument cases without Odoo models.
+5. Dry-run model registry consumer against `1.1.10` into temp output and verify
+   loader compatibility.
+
+Exit criteria:
+
+- Targeted Java snapshot parity tests pass for engine-neutral cases.
+- Model registry consumer compatibility is proven without touching generated
+  Odoo files.
+- Any remaining differences have explicit Java/Python contract decisions.
+
+### P2: Larger Feature Parity
+
+Expected modules/files:
+
+- Compose/query plan SQL compilation and runtime modules.
+- Semantic query service and permission propagation.
+- Pivot advanced semantics.
+- Registry-generated Odoo models only after explicit approval.
+
+Tasks:
+
+1. Implement QueryModel aggregate join in Python if required:
+   - RHS preaggregation, fixed slice, group-key validation, permission/system
+     slice preservation, runtime pushdown/refusal matrix.
+2. Align semantic scale/money units after current dirty loader/service changes
+   are understood and reconciled.
+3. Add Odoo domain fixture packs and direct runner only after neutral fixture
+   runner is stable.
+4. Consider deferred pivot features:
+   - tree+cascade,
+   - outer pivot cache,
+   - SQL Server cascade,
+   - MySQL5.7 live large-domain evidence.
+
+Exit criteria:
+
+- Feature-specific design docs, tests, and acceptance evidence exist before
+  production behavior is exposed.
+- Odoo business model updates are isolated from engine parity work and gated by
+  registry drift checks.
+
+## Snapshot / Fixture Needs From Java
+
+Required for P0:
+
+- Compose query snapshots:
+  - base/derived/union/join SQL and params,
+  - source alias inheritance,
+  - qualified `left.` / `right.` refs,
+  - ambiguous alias refusals,
+  - SQL Server fallback expected SQL shape.
+- Formula/calculated field snapshots:
+  - catalog cases with stable ids,
+  - generated SQL and params by dialect,
+  - expected refusal/error codes,
+  - predefined formula and alias placement cases.
+- Time window snapshots:
+  - fixed-date and relative-date requests,
+  - generated SQL/params,
+  - pivot refusal cases.
+- Pivot/domain transport snapshots:
+  - flat/grid output,
+  - subtotal/grand total,
+  - non-additive aux requery shape,
+  - baselineRatio/parentShare cases,
+  - large-domain transport and fail-closed limits.
+
+Optional for P1/P2:
+
+- Registry dry-run fixture for `foggy.odoo.community@1.1.10` and
+  `foggy.odoo.pro@1.1.10`.
+- Domain question packs only after neutral runner support exists.
+
+## Current Largest Gaps
+
+1. **Validation infrastructure lags Java 9.1.**
+   Java has domain runner/report/warning infrastructure; Python has unit and
+   integration tests but not an equivalent cross-language domain fixture runner.
+2. **Registry/Odoo consumer is stale and drifted.**
+   Python has consumer scripts, but the committed lock is `1.1.9`, Java/registry
+   current is `1.1.10`, and local Odoo model files do not match the lock.
+3. **Aggregate join and semantic scale are not proven in Python.**
+   Aggregate join is Java-only in 9.2. Semantic scale appears in Java v3.0, while
+   Python has related dirty files but no accepted evidence in docs.
+4. **External resource coverage remains environment-dependent.**
+   P0-1 fixed one missing profile gate, but many Java-resource and external DB
+   lanes still skip locally. Java snapshot replay should make the always-on
+   engine-neutral subset stronger before product-facing claims.
+
+## Non-Goals For This Round
+
+- No commit or push.
+- No rollback/cleanup of existing Java, Python, or registry dirty work.
+- No generated Odoo model resync.
+- No large production engine rewrite before Java snapshot parity gates exist.
+- No Odoo business-model-first implementation.

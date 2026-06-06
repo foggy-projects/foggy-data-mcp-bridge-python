@@ -1,0 +1,201 @@
+{
+  "schemaVersion" : 1,
+  "feature" : "governance",
+  "source" : "JavaGovernanceSnapshotTest",
+  "cases" : [ {
+    "id" : "binding-field-access-null-is-unrestricted",
+    "type" : "binding-semantics",
+    "binding" : {
+      "deniedColumns" : [ ],
+      "systemSlice" : [ ]
+    },
+    "expected" : {
+      "fieldAccessIsNull" : true,
+      "deniedColumnsSize" : 0,
+      "systemSliceSize" : 0
+    }
+  }, {
+    "id" : "binding-empty-field-access-denies-all",
+    "type" : "binding-semantics",
+    "binding" : {
+      "fieldAccess" : [ ],
+      "deniedColumns" : [ ],
+      "systemSlice" : [ ]
+    },
+    "expected" : {
+      "fieldAccessIsNull" : false,
+      "fieldAccess" : [ ],
+      "deniedColumnsSize" : 0,
+      "systemSliceSize" : 0
+    }
+  }, {
+    "id" : "compile-forwards-binding-governance-to-v13-boundary",
+    "type" : "compile-forwarding",
+    "binding" : {
+      "fieldAccess" : [ "orderStatus$caption", "salesAmount" ],
+      "deniedColumns" : [ {
+        "table" : "fact_sales",
+        "column" : "secret_margin"
+      } ],
+      "systemSlice" : [ {
+        "field" : "tenant_id",
+        "op" : "=",
+        "value" : "demo"
+      } ]
+    },
+    "plan" : {
+      "type" : "base",
+      "model" : "FactSalesModel",
+      "columns" : [ "orderStatus$caption", "salesAmount" ],
+      "slice" : [ {
+        "field" : "orderStatus$caption",
+        "op" : "=",
+        "value" : "COMPLETED"
+      } ]
+    },
+    "expected" : {
+      "sqlMarkers" : [ "WITH ", "cte_0 AS", "__governance_stub__" ],
+      "forwardedColumns" : [ "orderStatus$caption", "salesAmount" ],
+      "forwardedFieldAccess" : [ "orderStatus$caption", "salesAmount" ],
+      "forwardedDeniedColumns" : [ {
+        "table" : "fact_sales",
+        "column" : "secret_margin"
+      } ],
+      "forwardedSystemSlice" : [ {
+        "field" : "tenant_id",
+        "op" : "=",
+        "value" : "demo"
+      } ]
+    }
+  }, {
+    "id" : "missing-visible-model-binding-fails-closed",
+    "type" : "compile-error",
+    "plan" : {
+      "type" : "base",
+      "model" : "HiddenModel",
+      "columns" : [ "secretAmount" ]
+    },
+    "expected" : {
+      "errorCode" : "compose-compile-error/missing-binding",
+      "phase" : "plan-lower"
+    }
+  }, {
+    "id" : "denied-physical-measure-maps-to-qm-field",
+    "type" : "denied-column-mapping",
+    "model" : "FactSalesModel",
+    "deniedColumns" : [ {
+      "schema" : "public",
+      "table" : "fact_sales",
+      "column" : "sales_amount"
+    } ],
+    "expected" : {
+      "deniedQmFields" : [ "salesAmount" ]
+    }
+  }, {
+    "id" : "denied-physical-dimension-property-maps-to-qm-field",
+    "type" : "denied-column-mapping",
+    "model" : "FactSalesModel",
+    "deniedColumns" : [ {
+      "table" : "dim_product",
+      "column" : "category_name"
+    } ],
+    "expected" : {
+      "deniedQmFields" : [ "product$categoryName" ]
+    }
+  }, {
+    "id" : "denied-unknown-physical-column-maps-to-empty-set",
+    "type" : "denied-column-mapping",
+    "model" : "FactSalesModel",
+    "deniedColumns" : [ {
+      "table" : "dim_customer",
+      "column" : "email"
+    } ],
+    "expected" : {
+      "deniedQmFields" : [ ]
+    }
+  }, {
+    "id" : "query-denied-measure-select-refused",
+    "type" : "query-validation",
+    "model" : "FactSalesModel",
+    "columns" : [ "product$caption", "salesAmount" ],
+    "orderBy" : [ ],
+    "deniedColumns" : [ {
+      "table" : "fact_sales",
+      "column" : "sales_amount"
+    } ],
+    "expected" : {
+      "passes" : false,
+      "messageMarkers" : [ "salesAmount" ]
+    }
+  }, {
+    "id" : "query-denied-dimension-property-select-refused",
+    "type" : "query-validation",
+    "model" : "FactSalesModel",
+    "columns" : [ "product$caption", "product$categoryName" ],
+    "orderBy" : [ ],
+    "deniedColumns" : [ {
+      "table" : "dim_product",
+      "column" : "category_name"
+    } ],
+    "expected" : {
+      "passes" : false,
+      "messageMarkers" : [ "product$categoryName" ]
+    }
+  }, {
+    "id" : "query-denied-unrelated-column-passes",
+    "type" : "query-validation",
+    "model" : "FactSalesModel",
+    "columns" : [ "product$caption", "salesAmount" ],
+    "orderBy" : [ ],
+    "deniedColumns" : [ {
+      "table" : "dim_customer",
+      "column" : "email"
+    } ],
+    "expected" : {
+      "passes" : true,
+      "messageMarkers" : [ ]
+    }
+  }, {
+    "id" : "query-denied-order-by-refused",
+    "type" : "query-validation",
+    "model" : "FactSalesModel",
+    "columns" : [ "product$caption" ],
+    "orderBy" : [ {
+      "field" : "salesAmount",
+      "dir" : "DESC"
+    } ],
+    "deniedColumns" : [ {
+      "table" : "fact_sales",
+      "column" : "sales_amount"
+    } ],
+    "expected" : {
+      "passes" : false,
+      "messageMarkers" : [ "salesAmount" ]
+    }
+  }, {
+    "id" : "metadata-denied-measure-trims-sales-amount",
+    "type" : "metadata-trimming",
+    "model" : "FactSalesModel",
+    "deniedColumns" : [ {
+      "table" : "fact_sales",
+      "column" : "sales_amount"
+    } ],
+    "expected" : {
+      "presentFields" : [ "product$caption", "product$categoryName" ],
+      "absentFields" : [ "salesAmount" ]
+    }
+  }, {
+    "id" : "metadata-visible-and-denied-intersection",
+    "type" : "metadata-trimming",
+    "model" : "FactSalesModel",
+    "visibleFields" : [ "product$caption", "salesAmount", "costAmount" ],
+    "deniedColumns" : [ {
+      "table" : "fact_sales",
+      "column" : "sales_amount"
+    } ],
+    "expected" : {
+      "presentFields" : [ "product$caption", "costAmount" ],
+      "absentFields" : [ "salesAmount", "product$categoryName" ]
+    }
+  } ]
+}

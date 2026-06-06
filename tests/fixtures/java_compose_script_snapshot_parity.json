@@ -1,0 +1,65 @@
+{
+  "schemaVersion" : 1,
+  "feature" : "scriptRuntimeTool",
+  "source" : "JavaComposeScriptSnapshotTest",
+  "tool" : {
+    "name" : "dataset.compose_script",
+    "schemaFile" : "compose_query_schema.json",
+    "descriptionFile" : "compose_script_m2.md",
+    "required" : [ "script" ],
+    "schemaMarkers" : [ "SemanticDSL compose script", "single-model pivot", "baselineRatio", "return { plans:" ],
+    "descriptionMarkers" : [ "dataset.compose_script", "跨模型 Join / Union", "dataset.query_model.payload.pivot", "timeRole=business_date", "不要直接 `.execute()`" ],
+    "forbiddenMarkers" : [ "Query.from" ]
+  },
+  "runtime" : {
+    "allowedScriptGlobals" : [ "from", "subquery", "Query", "dsl" ],
+    "acceptedPythonExtraGlobals" : [ "JSON", "parseInt", "parseFloat", "toString", "String", "Number", "Boolean", "isNaN", "isFinite", "Array", "Object", "Function", "typeof", "params" ]
+  },
+  "cases" : [ {
+    "id" : "literal-return",
+    "dialect" : "mysql",
+    "previewMode" : false,
+    "script" : "return 42;",
+    "expected" : {
+      "valueType" : "number",
+      "value" : 42,
+      "hasSql" : false,
+      "sqlMarkers" : [ ],
+      "params" : [ ]
+    }
+  }, {
+    "id" : "empty-plans-envelope",
+    "dialect" : "mysql",
+    "previewMode" : false,
+    "script" : "return { plans: [] };",
+    "expected" : {
+      "valueType" : "map",
+      "hasSql" : false,
+      "sqlMarkers" : [ ],
+      "params" : [ ]
+    }
+  }, {
+    "id" : "preview-base-plan-sql",
+    "dialect" : "mysql",
+    "previewMode" : true,
+    "script" : "return { plans: dsl({\n  model: \"FactSalesModel\",\n  columns: [\"orderStatus$caption\"]\n}) };\n",
+    "expected" : {
+      "valueType" : "map",
+      "hasSql" : true,
+      "sqlMarkers" : [ "SELECT 1 AS __stub__" ],
+      "params" : [ ]
+    }
+  }, {
+    "id" : "security-param-denied",
+    "dialect" : "mysql",
+    "previewMode" : false,
+    "script" : "        return dsl({\n          model: \"FactSalesModel\",\n          columns: [\"orderStatus$caption\"],\n          systemSlice: [{ field: \"tenant_id\", op: \"=\", value: \"demo\" }]\n        });\n",
+    "expected" : {
+      "valueType" : "error",
+      "hasSql" : false,
+      "sqlMarkers" : [ ],
+      "params" : [ ],
+      "errorMarker" : "Security parameters"
+    }
+  } ]
+}

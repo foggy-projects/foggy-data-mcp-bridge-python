@@ -6,8 +6,8 @@ raw CASE WHEN DSL, and lowers to standard SQL with real DB reconciliation.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Dict, Iterable, Tuple
 
 import pytest
 
@@ -19,7 +19,6 @@ from foggy.dataset_model.semantic import SemanticQueryService
 from foggy.demo.models.ecommerce_models import create_fact_sales_model
 from foggy.mcp_spi import SemanticQueryRequest
 from foggy.mcp_spi.semantic import DeniedColumn, FieldAccessDef
-
 
 MYSQL_CONFIG = {
     "host": "localhost",
@@ -43,19 +42,23 @@ GROUP_FIELD = "orderStatus$caption"
 GROUP_ALIAS = "订单状态"
 
 
-def _normalize_row(row: Dict[str, object], metric_alias: str) -> Tuple[str, object]:
+def _normalize_row(row: dict[str, object], metric_alias: str) -> tuple[str, object]:
     return row[GROUP_ALIAS], row[metric_alias]
 
 
-def _normalize_rows(rows: Iterable[Dict[str, object]], metric_alias: str) -> Dict[str, object]:
-    normalized: Dict[str, object] = {}
+def _normalize_rows(rows: Iterable[dict[str, object]], metric_alias: str) -> dict[str, object]:
+    normalized: dict[str, object] = {}
     for row in rows:
         key, value = _normalize_row(row, metric_alias)
         normalized[key] = value
     return normalized
 
 
-def _assert_rows_match(actual_rows: Iterable[Dict[str, object]], expected_rows: Iterable[Dict[str, object]], metric_alias: str) -> None:
+def _assert_rows_match(
+    actual_rows: Iterable[dict[str, object]],
+    expected_rows: Iterable[dict[str, object]],
+    metric_alias: str,
+) -> None:
     actual = _normalize_rows(actual_rows, metric_alias)
     expected = _normalize_rows(expected_rows, metric_alias)
     assert actual == expected
@@ -65,6 +68,18 @@ def _build_service(dialect, executor):
     service = SemanticQueryService(dialect=dialect, executor=executor)
     service.register_model(create_fact_sales_model())
     return service
+
+
+def _database_unavailable_reason(service: SemanticQueryService, label: str) -> str | None:
+    try:
+        result = service._get_sync_loop().run_until_complete(
+            service._executor.execute("SELECT 1 AS ok")
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"{label} demo database unavailable: {exc}"
+    if result.error is not None:
+        return f"{label} demo database unavailable: {result.error}"
+    return None
 
 
 def _build_request(expression: str, alias: str) -> SemanticQueryRequest:
@@ -254,6 +269,9 @@ class TestConditionalAggregateIfRealDbAlignment:
     def mysql_service(self):
         executor = MySQLExecutor(**MYSQL_CONFIG)
         service = _build_service(MySqlDialect(), executor)
+        if reason := _database_unavailable_reason(service, "MySQL"):
+            service._get_sync_loop().run_until_complete(executor.close())
+            pytest.skip(reason)
         yield service
         service._get_sync_loop().run_until_complete(executor.close())
 
@@ -261,6 +279,9 @@ class TestConditionalAggregateIfRealDbAlignment:
     def postgres_service(self):
         executor = PostgreSQLExecutor(**POSTGRES_CONFIG)
         service = _build_service(PostgresDialect(), executor)
+        if reason := _database_unavailable_reason(service, "PostgreSQL"):
+            service._get_sync_loop().run_until_complete(executor.close())
+            pytest.skip(reason)
         yield service
         service._get_sync_loop().run_until_complete(executor.close())
 

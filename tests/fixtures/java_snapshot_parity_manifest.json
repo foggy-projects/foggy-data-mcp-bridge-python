@@ -1,0 +1,194 @@
+{
+  "schemaVersion": 1,
+  "purpose": "P0 Java snapshot parity manifest for Python engine alignment.",
+  "javaWorktreeEnv": "FOGGY_JAVA_WORKTREE",
+  "defaultJavaWorktrees": [
+    "../foggy-data-mcp-bridge-wt-dev-compose",
+    "../foggy-data-mcp-bridge"
+  ],
+  "entries": [
+    {
+      "id": "formula-compiler-catalog",
+      "feature": "formula",
+      "status": "active",
+      "owner": "java",
+      "scope": "compiler catalog and committed Java snapshot replay",
+      "javaResource": "foggy-dataset-model/src/test/resources/parity/formula-parity-expressions.json",
+      "pythonSnapshots": [
+        "tests/integration/_parity_snapshot.json"
+      ],
+      "pythonTests": [
+        "tests/integration/test_formula_parity.py"
+      ],
+      "verification": [
+        "catalog positive cases >= 30",
+        "committed Java snapshot schema/version/source checks",
+        "Python compiler output canonicalized against Java catalog SQL/params"
+      ]
+    },
+    {
+      "id": "time-window-catalog",
+      "feature": "timeWindow",
+      "status": "active",
+      "owner": "java",
+      "scope": "timeWindow request/catalog parity and committed Java snapshot markers",
+      "pythonFixtures": [
+        "tests/fixtures/java_time_window_parity_catalog.json"
+      ],
+      "pythonSnapshots": [
+        "tests/integration/_time_window_parity_snapshot.json"
+      ],
+      "pythonTests": [
+        "tests/test_dataset_model/test_time_window_java_parity_catalog.py",
+        "tests/integration/test_time_window_golden_diff.py"
+      ],
+      "verification": [
+        "expected columns and Java structural assertions",
+        "negative fixture expected error contract",
+        "committed Java snapshot schema/version/source checks"
+      ]
+    },
+    {
+      "id": "compose-query-neutral-snapshots",
+      "feature": "composeQuery",
+      "status": "active",
+      "owner": "java",
+      "scope": "engine-neutral compose plan/SQL/runtime snapshots",
+      "javaExporter": "foggy-dataset-model/src/test/java/com/foggyframework/dataset/db/model/engine/compose/compilation/JavaComposeSnapshotTest.java",
+      "pythonFixtures": [
+        "tests/fixtures/java_compose_snapshot_parity.json"
+      ],
+      "pythonTests": [
+        "tests/integration/test_java_compose_snapshot_parity.py"
+      ],
+      "javaExported": [
+        "base/derived/union/join SQL and params",
+        "source alias inheritance",
+        "qualified left/right join references",
+        "shadowed alias/dropped-column refusal",
+        "SQL Server fallback shape"
+      ],
+      "verification": [
+        "Python compiles JSON plans through compile_plan_to_sql",
+        "SQL markers, forbidden markers, params, and expected error codes are checked"
+      ]
+    },
+    {
+      "id": "compose-script-tool-snapshots",
+      "feature": "scriptRuntimeTool",
+      "status": "active",
+      "owner": "java",
+      "scope": "MCP compose script schema, runtime result, and error payload parity",
+      "javaExporter": "foggy-dataset-model/src/test/java/com/foggyframework/dataset/db/model/engine/compose/runtime/JavaComposeScriptSnapshotTest.java",
+      "pythonFixtures": [
+        "tests/fixtures/java_compose_script_snapshot_parity.json"
+      ],
+      "pythonTests": [
+        "tests/integration/test_java_compose_script_snapshot_parity.py"
+      ],
+      "javaExported": [
+        "MCP compose script schema and description markers",
+        "Java allowed script global surface",
+        "literal return and empty plans envelope",
+        "preview-mode SQL capture shape",
+        "security-parameter fail-closed runtime error"
+      ],
+      "plannedExtensions": [
+        "script output rows/DataSetResult shape",
+        "host-misconfig MCP error payloads",
+        "capability registry fail-closed errors"
+      ],
+      "verification": [
+        "Python ToolConfigLoader matches Java tool markers",
+        "Python runtime covers Java injected globals with documented accepted extras",
+        "Python run_script replays success, SQL capture, and fail-closed cases"
+      ]
+    },
+    {
+      "id": "pivot-domain-transport-neutral-snapshots",
+      "feature": "pivotDomainTransport",
+      "status": "active",
+      "owner": "java",
+      "scope": "pivot request/translation contracts and offline domain transport renderer parity/gap evidence",
+      "javaExporter": "foggy-dataset-model/src/test/java/com/foggyframework/dataset/db/model/engine/pivot/JavaPivotDomainSnapshotTest.java",
+      "pythonFixtures": [
+        "tests/fixtures/java_pivot_domain_snapshot_parity.json"
+      ],
+      "pythonTests": [
+        "tests/integration/test_java_pivot_domain_snapshot_parity.py"
+      ],
+      "javaExported": [
+        "Pivot DTO contract for rows/columns/native metrics/parentShare/options/layout",
+        "ordinary flat pivot translation contract into groupBy/columns/grandTotal/parentShare sidecar",
+        "SQLite/Postgres/MySQL8 domain renderer shape, params, and NULL-safe predicates",
+        "empty-column domain transport fail-closed behavior",
+        "documented Java MySQL5.7 derived-table support vs Python mysql5.x fail-closed gap"
+      ],
+      "plannedExtensions": [
+        "real flat/grid output row contracts",
+        "subtotal and grand total output contracts",
+        "non-additive aux requery shape",
+        "baselineRatio output cases",
+        "large-domain transport threshold and fail-closed limits",
+        "pivot/domain governance propagation"
+      ],
+      "verification": [
+        "Python parses Java Pivot request contract through SemanticQueryRequest",
+        "Python validates ordinary flat pivot translation through validate_and_translate_pivot",
+        "Python replays domain renderer fragments, params, and join predicate markers",
+        "Python records MySQL5.7 as an explicit fail-closed parity gap"
+      ]
+    },
+    {
+      "id": "permission-visible-model-snapshots",
+      "feature": "governance",
+      "status": "active",
+      "owner": "java",
+      "scope": "permission, visible model, denied columns, and sanitized error parity",
+      "javaExporter": "foggy-dataset-model/src/test/java/com/foggyframework/dataset/db/model/engine/compose/security/JavaGovernanceSnapshotTest.java",
+      "pythonFixtures": [
+        "tests/fixtures/java_governance_snapshot_parity.json"
+      ],
+      "pythonTests": [
+        "tests/integration/test_java_governance_snapshot_parity.py"
+      ],
+      "javaExported": [
+        "ModelBinding fieldAccess null vs empty-list semantics",
+        "compile-time governance forwarding into the v1.3 query boundary",
+        "missing visible-model binding fail-closed compile error",
+        "deniedColumns physical-to-QM field mapping",
+        "queryModel denied field validation for columns and orderBy",
+        "metadata visibleFields plus deniedColumns trimming contract"
+      ],
+      "plannedExtensions": [
+        "visible model allow/deny cases",
+        "cross-model calculated field reference refusals",
+        "sanitized error payloads without physical column leakage",
+        "pivot/domain transport governance propagation",
+        "aggregate join governance propagation"
+      ],
+      "verification": [
+        "Python replays Java binding three-state semantics",
+        "Python captures forwarded fieldAccess, deniedColumns, and systemSlice on SemanticQueryRequest",
+        "Python asserts missing-binding error code and phase",
+        "Python replays deniedColumns mapping, query validation, and metadata trimming against FactSalesModel"
+      ]
+    },
+    {
+      "id": "domain-question-neutral-runner",
+      "feature": "domainFixtures",
+      "status": "planned",
+      "owner": "java",
+      "scope": "neutral request and expected tool-argument replay without Odoo models",
+      "javaExportNeeded": [
+        "request payload",
+        "expected tool arguments",
+        "expected SQL/result/error summary",
+        "warning/report metadata"
+      ],
+      "plannedPythonTests": [
+        "tests/integration/test_java_domain_fixture_runner.py"
+      ]
+    }
+  ]
+}

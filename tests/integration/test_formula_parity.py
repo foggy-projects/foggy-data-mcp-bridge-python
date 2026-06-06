@@ -20,8 +20,8 @@ guard Python-side parity on their own.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
-from typing import List
 
 import pytest
 
@@ -30,7 +30,6 @@ from foggy.dataset_model.semantic.formula_compiler import (
     FormulaCompiler,
 )
 from foggy.dataset_model.semantic.formula_dialect import SqlDialect
-
 from tests.integration._sql_normalizer import (
     canonicalize_params,
     to_canonical,
@@ -41,12 +40,11 @@ from tests.integration._sql_normalizer import (
 # --------------------------------------------------------------------------- #
 
 # Java side is the source of truth for the catalog file so both ends read the
-# same bytes.  We locate it via repo-root relative path.
+# same bytes.  Prefer an explicit Java worktree override, then known sibling
+# worktree names used in local development.
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_CATALOG_PATH = (
-    _REPO_ROOT
-    / "foggy-data-mcp-bridge"
-    / "foggy-dataset-model"
+_CATALOG_RELATIVE_PATH = (
+    Path("foggy-dataset-model")
     / "src"
     / "test"
     / "resources"
@@ -55,7 +53,30 @@ _CATALOG_PATH = (
 )
 
 
-def _load_catalog() -> List[dict]:
+def _resolve_catalog_path() -> Path:
+    candidates: list[Path] = []
+    if os.environ.get("FOGGY_JAVA_WORKTREE"):
+        candidates.append(
+            Path(os.environ["FOGGY_JAVA_WORKTREE"]) / _CATALOG_RELATIVE_PATH
+        )
+
+    candidates.extend(
+        [
+            _REPO_ROOT / "foggy-data-mcp-bridge-wt-dev-compose" / _CATALOG_RELATIVE_PATH,
+            _REPO_ROOT / "foggy-data-mcp-bridge" / _CATALOG_RELATIVE_PATH,
+        ]
+    )
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0] if candidates else _REPO_ROOT / _CATALOG_RELATIVE_PATH
+
+
+_CATALOG_PATH = _resolve_catalog_path()
+
+
+def _load_catalog() -> list[dict]:
     if not _CATALOG_PATH.exists():
         pytest.skip(
             f"parity catalog missing: {_CATALOG_PATH} "
@@ -71,7 +92,7 @@ def _load_catalog() -> List[dict]:
 
 
 # Eager load at collection time so pytest's parametrize decorator can see ids.
-_CATALOG: List[dict] = _load_catalog() if _CATALOG_PATH.exists() else []
+_CATALOG: list[dict] = _load_catalog() if _CATALOG_PATH.exists() else []
 
 
 # --------------------------------------------------------------------------- #
@@ -88,7 +109,7 @@ def test_python_matches_catalog(entry: dict) -> None:
     expr: str = entry["expression"]
     dialect_name: str = entry["dialect"]
     expected_sql: str = entry["expected_sql"]
-    expected_params: List[object] = list(entry["expected_params"])
+    expected_params: list[object] = list(entry["expected_params"])
 
     compiler = FormulaCompiler(SqlDialect.of(dialect_name))
     result: CompiledFormula = compiler.compile(expr, lambda name: name)

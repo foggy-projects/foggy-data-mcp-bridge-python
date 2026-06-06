@@ -1,0 +1,187 @@
+{
+  "schemaVersion" : 1,
+  "feature" : "pivotDomainTransport",
+  "source" : "JavaPivotDomainSnapshotTest",
+  "cases" : [ {
+    "id" : "pivot-flat-native-parent-share-contract",
+    "type" : "pivot-request-contract",
+    "request" : {
+      "pivot" : {
+        "rows" : [ {
+          "field" : "product$categoryName"
+        } ],
+        "columns" : [ {
+          "field" : "orderStatus$caption"
+        } ],
+        "metrics" : [ "salesAmount", {
+          "name" : "categoryShare",
+          "type" : "parentShare",
+          "of" : "salesAmount",
+          "axis" : "rows",
+          "level" : "product$categoryName"
+        } ],
+        "options" : {
+          "grandTotal" : true
+        },
+        "outputFormat" : "flat",
+        "layout" : {
+          "metricPlacement" : "columns"
+        }
+      }
+    },
+    "expected" : {
+      "rowFields" : [ "product$categoryName" ],
+      "columnFields" : [ "orderStatus$caption" ],
+      "nativeMetrics" : [ "salesAmount" ],
+      "sqlMetrics" : [ "salesAmount" ],
+      "allOutputMetrics" : [ "salesAmount", "categoryShare" ],
+      "parentShareMetrics" : [ "categoryShare" ],
+      "baselineRatioMetrics" : [ ],
+      "outputFormat" : "flat",
+      "rowLevelCount" : 1,
+      "columnLevelCount" : 1,
+      "grandTotal" : true,
+      "metricPlacement" : "columns"
+    }
+  }, {
+    "id" : "pivot-flat-translation-contract",
+    "type" : "pivot-translation-contract",
+    "request" : {
+      "pivot" : {
+        "rows" : [ {
+          "field" : "product$categoryName"
+        } ],
+        "columns" : [ {
+          "field" : "orderStatus$caption"
+        } ],
+        "metrics" : [ "salesAmount", {
+          "name" : "categoryShare",
+          "type" : "parentShare",
+          "of" : "salesAmount",
+          "axis" : "rows",
+          "level" : "product$categoryName"
+        } ],
+        "options" : {
+          "grandTotal" : true
+        },
+        "outputFormat" : "flat",
+        "layout" : {
+          "metricPlacement" : "columns"
+        }
+      }
+    },
+    "expected" : {
+      "translatedGroupBy" : [ "product$categoryName", "orderStatus$caption" ],
+      "translatedColumns" : [ "product$categoryName", "orderStatus$caption", "salesAmount" ],
+      "wantGrandTotal" : true,
+      "parentShareMetricNames" : [ "categoryShare" ]
+    }
+  }, {
+    "id" : "domain-postgres-single-field",
+    "type" : "domain-renderer-contract",
+    "renderer" : "postgres",
+    "dialect" : "postgres",
+    "plan" : {
+      "fields" : [ "category" ],
+      "tuples" : [ [ "A" ], [ "B" ], [ null ] ]
+    },
+    "javaExpected" : {
+      "placement" : "CTE",
+      "sqlMarkers" : [ "_pivot_domain_transport(\"category\") AS (", "VALUES (?)" ],
+      "joinPredicateMarkers" : [ "_base.\"category\" IS NOT DISTINCT FROM _d.\"category\"" ],
+      "paramCount" : 3,
+      "params" : [ "A", "B", null ]
+    },
+    "pythonExpected" : {
+      "placement" : "CTE",
+      "sqlMarkers" : [ "WITH _pivot_domain_transport(\"category\") AS (", "VALUES (?), (?), (?)" ],
+      "joinPredicateMarkers" : [ "_base.\"category\" IS NOT DISTINCT FROM _d.\"category\"" ],
+      "paramCount" : 3,
+      "params" : [ "A", "B", null ]
+    }
+  }, {
+    "id" : "domain-sqlite-two-field-null-safe",
+    "type" : "domain-renderer-contract",
+    "renderer" : "sqlite",
+    "dialect" : "sqlite",
+    "plan" : {
+      "fields" : [ "category", "product" ],
+      "tuples" : [ [ "A", "p1" ], [ "A", null ], [ "B", "p2" ] ]
+    },
+    "javaExpected" : {
+      "placement" : "CTE",
+      "sqlMarkers" : [ "_pivot_domain_transport(\"category\", \"product\") AS (", "VALUES (?, ?)" ],
+      "joinPredicateMarkers" : [ "_base.\"category\" IS _d.\"category\"", "_base.\"product\" IS _d.\"product\"" ],
+      "paramCount" : 6,
+      "params" : [ "A", "p1", "A", null, "B", "p2" ]
+    },
+    "pythonExpected" : {
+      "placement" : "CTE",
+      "sqlMarkers" : [ "WITH _pivot_domain_transport(\"category\", \"product\") AS (", "VALUES (?, ?), (?, ?), (?, ?)" ],
+      "joinPredicateMarkers" : [ "_base.\"category\" IS _d.\"category\"", "_base.\"product\" IS _d.\"product\"" ],
+      "paramCount" : 6,
+      "params" : [ "A", "p1", "A", null, "B", "p2" ]
+    }
+  }, {
+    "id" : "domain-mysql8-versioned-null-safe",
+    "type" : "domain-renderer-contract",
+    "renderer" : "mysql8",
+    "dialect" : "mysql",
+    "plan" : {
+      "fields" : [ "category" ],
+      "tuples" : [ [ "A" ], [ "B" ], [ null ] ]
+    },
+    "databaseVersion" : "8.0.19-commercial",
+    "acceptedDivergence" : "Java emits VALUES ROW(?); Python emits CTE UNION ALL SELECT for MySQL8 stability.",
+    "javaExpected" : {
+      "placement" : "CTE",
+      "sqlMarkers" : [ "_pivot_domain_transport(`category`) AS (", "VALUES ROW(?)" ],
+      "joinPredicateMarkers" : [ "_base.`category` <=> _d.`category`" ],
+      "paramCount" : 3,
+      "params" : [ "A", "B", null ]
+    },
+    "pythonExpected" : {
+      "placement" : "CTE",
+      "sqlMarkers" : [ "WITH _pivot_domain_transport(`category`) AS (", "SELECT ?", "UNION ALL SELECT ?" ],
+      "joinPredicateMarkers" : [ "_base.`category` <=> _d.`category`" ],
+      "paramCount" : 3,
+      "params" : [ "A", "B", null ]
+    }
+  }, {
+    "id" : "domain-empty-columns-refused",
+    "type" : "domain-renderer-refusal",
+    "renderer" : "postgres",
+    "dialect" : "postgres",
+    "plan" : {
+      "fields" : [ ],
+      "tuples" : [ [ "A" ] ]
+    },
+    "javaExpected" : {
+      "messageMarkers" : [ "Empty domain plan" ]
+    },
+    "pythonExpected" : {
+      "messageMarkers" : [ "PIVOT_DOMAIN_TRANSPORT_REFUSED", "empty columns" ]
+    }
+  }, {
+    "id" : "domain-mysql57-derived-table-java-only-gap",
+    "type" : "documented-gap",
+    "renderer" : "mysql57",
+    "dialect" : "mysql",
+    "plan" : {
+      "fields" : [ "category" ],
+      "tuples" : [ [ "A" ], [ "B" ], [ null ] ]
+    },
+    "parityGap" : "Java renders MySQL 5.7 domain transport as DERIVED_TABLE; Python currently fails closed for mysql5.x.",
+    "javaExpected" : {
+      "placement" : "DERIVED_TABLE",
+      "sqlMarkers" : [ "SELECT ? AS `category`", "UNION ALL\n  SELECT ?" ],
+      "joinPredicateMarkers" : [ "_base.`category` <=> _d.`category`" ],
+      "paramCount" : 3,
+      "params" : [ "A", "B", null ]
+    },
+    "pythonExpected" : {
+      "status" : "refused",
+      "messageMarkers" : [ "PIVOT_DOMAIN_TRANSPORT_REFUSED", "mysql5.7" ]
+    }
+  } ]
+}

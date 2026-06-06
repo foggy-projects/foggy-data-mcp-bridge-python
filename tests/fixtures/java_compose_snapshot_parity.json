@@ -1,0 +1,155 @@
+{
+  "schemaVersion" : 1,
+  "feature" : "composeQuery",
+  "source" : "JavaComposeSnapshotTest",
+  "cases" : [ {
+    "id" : "base-mysql8",
+    "dialect" : "mysql8",
+    "plan" : {
+      "type" : "base",
+      "model" : "FactSalesModel",
+      "columns" : [ "orderStatus$caption", "salesAmount" ]
+    },
+    "expected" : {
+      "sqlMarkers" : [ "WITH ", "cte_0 AS", "salesAmount" ],
+      "forbiddenSqlMarkers" : [ ],
+      "params" : [ ]
+    }
+  }, {
+    "id" : "derived-filter-order-limit-mysql8",
+    "dialect" : "mysql8",
+    "plan" : {
+      "type" : "derived",
+      "source" : {
+        "type" : "base",
+        "model" : "FactSalesModel",
+        "columns" : [ "orderStatus$caption", "salesAmount" ]
+      },
+      "columns" : [ "orderStatus$caption", "salesAmount" ],
+      "slice" : [ {
+        "field" : "orderStatus$caption",
+        "op" : "=",
+        "value" : "COMPLETED"
+      } ],
+      "orderBy" : [ "-salesAmount" ],
+      "limit" : 5
+    },
+    "expected" : {
+      "sqlMarkers" : [ "WITH ", "WHERE", "ORDER BY", "LIMIT" ],
+      "forbiddenSqlMarkers" : [ ],
+      "params" : [ "COMPLETED" ]
+    }
+  }, {
+    "id" : "union-all-sales-orders-mysql8",
+    "dialect" : "mysql8",
+    "plan" : {
+      "type" : "union",
+      "left" : {
+        "type" : "base",
+        "model" : "FactSalesModel",
+        "columns" : [ "orderStatus$caption AS bucket", "salesAmount AS amount" ]
+      },
+      "right" : {
+        "type" : "base",
+        "model" : "FactOrderModel",
+        "columns" : [ "orderStatus$caption AS bucket", "totalAmount AS amount" ]
+      },
+      "all" : true
+    },
+    "expected" : {
+      "sqlMarkers" : [ "UNION ALL", "order_status" ],
+      "forbiddenSqlMarkers" : [ ],
+      "params" : [ ]
+    }
+  }, {
+    "id" : "qualified-source-alias-join-postgres",
+    "dialect" : "postgres",
+    "plan" : {
+      "type" : "derived",
+      "source" : {
+        "type" : "join",
+        "left" : {
+          "type" : "base",
+          "model" : "FactSalesModel",
+          "columns" : [ "orderStatus$caption", "salesAmount" ],
+          "aliases" : [ "sales" ]
+        },
+        "right" : {
+          "type" : "base",
+          "model" : "FactOrderModel",
+          "columns" : [ "orderStatus$caption", "totalAmount" ],
+          "aliases" : [ "orders" ]
+        },
+        "joinType" : "inner",
+        "on" : [ {
+          "left" : "left.orderStatus$caption",
+          "op" : "=",
+          "right" : "right.orderStatus$caption"
+        } ]
+      },
+      "columns" : [ "sales.salesAmount", "orders.totalAmount" ],
+      "orderBy" : [ "-orders.totalAmount" ]
+    },
+    "expected" : {
+      "sqlMarkers" : [ "INNER JOIN", "salesAmount", "totalAmount", "ORDER BY" ],
+      "forbiddenSqlMarkers" : [ "sales.salesAmount", "orders.totalAmount" ],
+      "params" : [ ]
+    }
+  }, {
+    "id" : "source-alias-dropped-column-refused",
+    "dialect" : "mysql8",
+    "plan" : {
+      "type" : "derived",
+      "source" : {
+        "type" : "join",
+        "left" : {
+          "type" : "derived",
+          "source" : {
+            "type" : "base",
+            "model" : "FactSalesModel",
+            "columns" : [ "orderStatus$caption", "salesAmount" ],
+            "aliases" : [ "sales" ]
+          },
+          "columns" : [ "orderStatus$caption" ]
+        },
+        "right" : {
+          "type" : "base",
+          "model" : "FactOrderModel",
+          "columns" : [ "orderStatus$caption", "totalAmount" ],
+          "aliases" : [ "orders" ]
+        },
+        "joinType" : "left",
+        "on" : [ {
+          "left" : "left.orderStatus$caption",
+          "op" : "=",
+          "right" : "right.orderStatus$caption"
+        } ]
+      },
+      "columns" : [ "sales.salesAmount", "orders.totalAmount" ]
+    },
+    "expected" : {
+      "errorCode" : "unknown field"
+    }
+  }, {
+    "id" : "sqlserver-derived-chain-top-level-with",
+    "dialect" : "sqlserver",
+    "plan" : {
+      "type" : "derived",
+      "source" : {
+        "type" : "derived",
+        "source" : {
+          "type" : "base",
+          "model" : "FactSalesModel",
+          "columns" : [ "orderStatus$caption", "salesAmount" ]
+        },
+        "columns" : [ "orderStatus$caption", "salesAmount" ]
+      },
+      "columns" : [ "orderStatus$caption" ]
+    },
+    "expected" : {
+      "sqlMarkers" : [ "SELECT" ],
+      "forbiddenSqlMarkers" : [ "FROM (WITH" ],
+      "params" : [ ]
+    }
+  } ]
+}
