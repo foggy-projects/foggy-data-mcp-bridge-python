@@ -74,7 +74,8 @@
       "translatedGroupBy" : [ "product$categoryName", "orderStatus$caption" ],
       "translatedColumns" : [ "product$categoryName", "orderStatus$caption", "salesAmount" ],
       "wantGrandTotal" : true,
-      "parentShareMetricNames" : [ "categoryShare" ]
+      "parentShareMetricNames" : [ "categoryShare" ],
+      "baselineRatioMetricNames" : [ ]
     }
   }, {
     "id" : "domain-postgres-single-field",

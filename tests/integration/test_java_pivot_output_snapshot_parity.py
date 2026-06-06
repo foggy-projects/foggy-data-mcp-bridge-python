@@ -71,7 +71,7 @@ def test_java_pivot_output_snapshot_replays_in_python(tmp_path) -> None:
                         pivot_payload,
                         "product$subCategoryName",
                     ),
-                    include_share=_has_metric(pivot_payload, "share"),
+                    extra_metrics=_derived_metric_names(pivot_payload),
                 )
             elif case["type"] == "grid-output":
                 actual = _canonical_grid(
@@ -184,7 +184,7 @@ def _canonical_flat(
     *,
     include_year: bool,
     include_subcategory: bool,
-    include_share: bool,
+    extra_metrics: list[str],
 ) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for item in items:
@@ -200,8 +200,8 @@ def _canonical_flat(
         if include_year:
             row["year"] = _number(_pick(item, "salesDate$year", "年"))
         row["sales"] = _number(_pick(item, "salesAmount", "销售金额"))
-        if include_share:
-            row["share"] = _number(_pick(item, "share"))
+        for metric in extra_metrics:
+            row[metric] = _number(_pick(item, metric))
         out.append(row)
     return sorted(
         out,
@@ -266,13 +266,15 @@ def _has_row_field(pivot_payload: dict[str, Any], field: str) -> bool:
     return field in pivot_payload.get("rows", [])
 
 
-def _has_metric(pivot_payload: dict[str, Any], name: str) -> bool:
+def _derived_metric_names(pivot_payload: dict[str, Any]) -> list[str]:
+    names: list[str] = []
     for metric in pivot_payload.get("metrics", []):
-        if metric == name:
-            return True
-        if isinstance(metric, dict) and metric.get("name") == name:
-            return True
-    return False
+        if isinstance(metric, dict) and metric.get("type") in {
+            "parentShare",
+            "baselineRatio",
+        }:
+            names.append(metric["name"])
+    return names
 
 
 def _pick(row: dict[str, Any], *keys: str) -> Any:

@@ -98,9 +98,12 @@ def _assert_pivot_request_contract(case: dict[str, Any]) -> None:
 
 def _assert_pivot_translation_contract(case: dict[str, Any]) -> None:
     request = SemanticQueryRequest(**case["request"])
-    translated, want_grand_total, parent_share_metrics = validate_and_translate_pivot(
-        request
-    )
+    (
+        translated,
+        want_grand_total,
+        parent_share_metrics,
+        baseline_ratio_metrics,
+    ) = validate_and_translate_pivot(request)
 
     expected = case["expected"]
     assert translated.pivot is None
@@ -109,6 +112,9 @@ def _assert_pivot_translation_contract(case: dict[str, Any]) -> None:
     assert want_grand_total is expected["wantGrandTotal"]
     assert [metric.name for metric in parent_share_metrics] == expected[
         "parentShareMetricNames"
+    ]
+    assert [metric.name for metric in baseline_ratio_metrics] == expected[
+        "baselineRatioMetricNames"
     ]
 
 

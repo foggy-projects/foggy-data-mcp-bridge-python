@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 from foggy.mcp_spi.enums import AccessMode
 
@@ -441,8 +441,8 @@ class PivotAxisField(BaseModel):
 class PivotMetricItem(BaseModel):
     """Unified Pivot V9 metric item.
 
-    Runtime support is fail-closed in Python S1. The DTO exists so MCP and
-    parity tests can accept the same contract shape as the Java engine.
+    Supports native, parentShare, and baselineRatio metric contracts aligned
+    with the Java Pivot V9 engine.
     """
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
@@ -465,8 +465,8 @@ class PivotMetricItem(BaseModel):
     @field_validator("axis")
     @classmethod
     def _validate_axis(cls, value: Optional[str]) -> Optional[str]:
-        if value is not None and value != "rows":
-            raise ValueError("pivot derived metrics only support rows axis")
+        if value is not None and value not in {"rows", "columns"}:
+            raise ValueError("pivot derived metric axis must be rows or columns")
         return value
 
     @field_validator("baseline")
@@ -475,6 +475,17 @@ class PivotMetricItem(BaseModel):
         if value is not None and value not in {"first", "last"}:
             raise ValueError("baselineRatio baseline must be first or last")
         return value
+
+    @model_validator(mode="after")
+    def _validate_metric_shape(self) -> "PivotMetricItem":
+        if self.type == "baselineRatio":
+            if self.axis != "columns":
+                raise ValueError("baselineRatio axis must be columns")
+            if self.baseline is None:
+                raise ValueError("baselineRatio baseline is required")
+        elif self.type == "parentShare" and self.axis == "columns":
+            raise ValueError("parentShare only supports rows axis")
+        return self
 
 
 class PivotOptions(BaseModel):

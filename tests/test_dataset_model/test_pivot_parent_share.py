@@ -20,7 +20,6 @@ from foggy.dataset_model.semantic.service import SemanticQueryService
 from foggy.demo.models.ecommerce_models import create_fact_sales_model
 from foggy.mcp_spi import SemanticQueryRequest
 from foggy.dataset.db.executor import SQLiteExecutor
-from foggy.dataset_model.semantic.pivot.flat_executor import PIVOT_FEATURE_NOT_IMPLEMENTED_IN_PYTHON
 
 
 def _seed_parent_share_db(db_path) -> None:
@@ -280,18 +279,20 @@ class TestParentShareRejections:
         assert response.error is not None
         assert "2" in response.error or "level" in response.error.lower()
 
-    def test_baselineRatio_still_rejected(self, service_and_db):
-        """baselineRatio should still be rejected."""
+    def test_baseline_ratio_columns_first(self, service_and_db):
+        """baselineRatio computes current / first column baseline."""
         service, _ = service_and_db
         payload = {
             "outputFormat": "flat",
             "rows": ["product$categoryName"],
+            "columns": ["salesDate$year"],
             "metrics": [
                 "salesAmount",
                 {
                     "name": "ratio",
                     "type": "baselineRatio",
                     "of": "salesAmount",
+                    "axis": "columns",
                     "baseline": "first",
                 },
             ],
@@ -299,8 +300,9 @@ class TestParentShareRejections:
         request = SemanticQueryRequest(pivot=payload)
         response = service.query_model("FactSalesModel", request, mode="execute")
 
-        assert response.error is not None
-        assert PIVOT_FEATURE_NOT_IMPLEMENTED_IN_PYTHON in response.error
+        assert response.error is None
+        assert response.items
+        assert all(row.get("ratio") == 1.0 for row in response.items)
 
 
 class TestParentShareGrandTotal:

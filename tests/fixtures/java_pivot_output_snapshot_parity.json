@@ -477,5 +477,97 @@
       "metric" : "share",
       "value" : 0.75
     } ]
+  }, {
+    "id" : "pivot-flat-rows-columns-baseline-ratio-first",
+    "type" : "flat-output",
+    "request" : {
+      "outputFormat" : "flat",
+      "rows" : [ "product$categoryName" ],
+      "columns" : [ "salesDate$year" ],
+      "metrics" : [ "salesAmount", {
+        "name" : "index",
+        "type" : "baselineRatio",
+        "of" : "salesAmount",
+        "axis" : "columns",
+        "baseline" : "first"
+      } ],
+      "slice" : [ {
+        "field" : "orderStatus",
+        "op" : "=",
+        "value" : "PY_ALIGN_PIVOT_OUT"
+      } ]
+    },
+    "javaCanonical" : [ {
+      "category" : "Align-Clothing",
+      "year" : 2098,
+      "sales" : 200,
+      "index" : 1
+    }, {
+      "category" : "Align-Electronics",
+      "year" : 2099,
+      "sales" : 200,
+      "index" : null
+    } ]
+  }, {
+    "id" : "pivot-grid-rows-columns-baseline-ratio-last",
+    "type" : "grid-output",
+    "request" : {
+      "outputFormat" : "grid",
+      "rows" : [ "product$categoryName" ],
+      "columns" : [ "salesDate$year" ],
+      "metrics" : [ "salesAmount", {
+        "name" : "indexLast",
+        "type" : "baselineRatio",
+        "of" : "salesAmount",
+        "axis" : "columns",
+        "baseline" : "last"
+      } ],
+      "slice" : [ {
+        "field" : "orderStatus",
+        "op" : "=",
+        "value" : "PY_ALIGN_PIVOT_OUT"
+      } ]
+    },
+    "javaCanonical" : [ {
+      "category" : "Align-Clothing",
+      "year" : 2098,
+      "metric" : "indexLast",
+      "value" : null
+    }, {
+      "category" : "Align-Clothing",
+      "year" : 2098,
+      "metric" : "salesAmount",
+      "value" : 200
+    }, {
+      "category" : "Align-Clothing",
+      "year" : 2099,
+      "metric" : "indexLast",
+      "value" : null
+    }, {
+      "category" : "Align-Clothing",
+      "year" : 2099,
+      "metric" : "salesAmount",
+      "value" : null
+    }, {
+      "category" : "Align-Electronics",
+      "year" : 2098,
+      "metric" : "indexLast",
+      "value" : null
+    }, {
+      "category" : "Align-Electronics",
+      "year" : 2098,
+      "metric" : "salesAmount",
+      "value" : null
+    }, {
+      "category" : "Align-Electronics",
+      "year" : 2099,
+      "metric" : "indexLast",
+      "value" : 1
+    }, {
+      "category" : "Align-Electronics",
+      "year" : 2099,
+      "metric" : "salesAmount",
+      "value" : 200
+    } ]
   } ]
 }

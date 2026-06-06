@@ -3,24 +3,25 @@
 Provides validation and translation logic for the S2 Flat Pivot MVP.
 """
 
-from typing import Any, Union, Tuple
+from foggy.dataset_model.semantic.pivot.cascade_detector import detect_cascade_and_raise
 from foggy.mcp_spi.semantic import (
-    SemanticQueryRequest,
-    PivotRequest,
     PivotAxisField,
     PivotMetricItem,
+    PivotRequest,
+    SemanticQueryRequest,
 )
-from foggy.dataset_model.semantic.pivot.cascade_detector import detect_cascade_and_raise
 
 PIVOT_FEATURE_NOT_IMPLEMENTED_IN_PYTHON = "PIVOT_FEATURE_NOT_IMPLEMENTED_IN_PYTHON: "
 
-def _extract_field_name(item: Union[str, PivotAxisField]) -> str:
+def _extract_field_name(item: str | PivotAxisField) -> str:
     if isinstance(item, str):
         return item
     return item.field
 
 
-def validate_and_translate_pivot(request: SemanticQueryRequest) -> Tuple[SemanticQueryRequest, bool]:
+def validate_and_translate_pivot(
+    request: SemanticQueryRequest,
+) -> tuple[SemanticQueryRequest, bool, list[PivotMetricItem], list[PivotMetricItem]]:
     """Validate Pivot support and translate into a standard semantic query request.
 
     Raises:
@@ -71,6 +72,7 @@ def validate_and_translate_pivot(request: SemanticQueryRequest) -> Tuple[Semanti
     # Validate metrics
     native_metrics = []
     parent_share_metrics: list = []
+    baseline_ratio_metrics: list = []
     native_metric_set: set = set()
     for metric_item in pivot.metrics:
         if isinstance(metric_item, str):
@@ -81,6 +83,26 @@ def validate_and_translate_pivot(request: SemanticQueryRequest) -> Tuple[Semanti
                 parent_share_metrics.append(metric_item)
                 # Ensure the 'of' base metric is included in SQL even if
                 # not explicitly listed as a standalone metric.
+                if metric_item.of not in native_metric_set:
+                    native_metrics.append(metric_item.of)
+                    native_metric_set.add(metric_item.of)
+            elif metric_item.type == "baselineRatio":
+                if metric_item.axis != "columns":
+                    raise NotImplementedError(
+                        f"{PIVOT_FEATURE_NOT_IMPLEMENTED_IN_PYTHON}"
+                        "baselineRatio only supports axis='columns'"
+                    )
+                if metric_item.baseline not in {"first", "last"}:
+                    raise NotImplementedError(
+                        f"{PIVOT_FEATURE_NOT_IMPLEMENTED_IN_PYTHON}"
+                        "baselineRatio requires baseline='first' or baseline='last'"
+                    )
+                if not pivot.columns:
+                    raise NotImplementedError(
+                        f"{PIVOT_FEATURE_NOT_IMPLEMENTED_IN_PYTHON}"
+                        "baselineRatio requires at least one columns axis field"
+                    )
+                baseline_ratio_metrics.append(metric_item)
                 if metric_item.of not in native_metric_set:
                     native_metrics.append(metric_item.of)
                     native_metric_set.add(metric_item.of)
@@ -106,4 +128,4 @@ def validate_and_translate_pivot(request: SemanticQueryRequest) -> Tuple[Semanti
     # We do NOT touch slice, system_slice, field_access, denied_columns, start, limit etc.
     # They are preserved.
 
-    return translated_request, want_grand_total, parent_share_metrics
+    return translated_request, want_grand_total, parent_share_metrics, baseline_ratio_metrics

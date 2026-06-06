@@ -32,6 +32,7 @@ def _pivot_payload() -> dict:
                 "orderBy": [{"field": "salesAmount", "dir": "desc"}],
             },
         ],
+        "columns": ["salesDate$month"],
         "metrics": [
             "salesAmount",
             {
@@ -48,7 +49,7 @@ def _pivot_payload() -> dict:
                 "of": "salesAmount",
                 "level": "salesDate$month",
                 "baseline": "first",
-                "axis": "rows",
+                "axis": "columns",
                 "orderBy": [{"field": "salesDate$month", "dir": "asc"}],
             },
         ],

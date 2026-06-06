@@ -875,6 +875,7 @@ class SemanticQueryService(SemanticServiceResolver):
         # --- v1.4 Pivot: Validate and Translate Pivot Request ---
         is_pivot = False
         _pivot_parent_share_metrics = []
+        _pivot_baseline_ratio_metrics = []
         pivot_request = getattr(request, "pivot", None)
         pivot_cache_fragment = None
         if pivot_request:
@@ -888,7 +889,12 @@ class SemanticQueryService(SemanticServiceResolver):
                 
             from foggy.dataset_model.semantic.pivot.executor import validate_and_translate_pivot
             try:
-                request, _pivot_want_grand_total, _pivot_parent_share_metrics = validate_and_translate_pivot(request)
+                (
+                    request,
+                    _pivot_want_grand_total,
+                    _pivot_parent_share_metrics,
+                    _pivot_baseline_ratio_metrics,
+                ) = validate_and_translate_pivot(request)
             except NotImplementedError as e:
                 return SemanticQueryResponse.from_error(str(e))
 
@@ -1034,6 +1040,26 @@ class SemanticQueryService(SemanticServiceResolver):
                         f"parentShare calculation failed: {e}"
                     )
 
+            if _pivot_baseline_ratio_metrics:
+                from foggy.dataset_model.semantic.pivot.baseline_ratio import apply as _apply_baseline_ratio
+                _br_row_fields = [
+                    _f if isinstance(_f, str) else _f.field
+                    for _f in (pivot_request.rows or [])
+                ]
+                _br_col_fields = [
+                    _f if isinstance(_f, str) else _f.field
+                    for _f in (pivot_request.columns or [])
+                ]
+                try:
+                    response.items = _apply_baseline_ratio(
+                        response.items, pivot_request,
+                        _br_row_fields, _br_col_fields, key_map,
+                    )
+                except ValueError as e:
+                    return SemanticQueryResponse.from_error(
+                        f"baselineRatio calculation failed: {e}"
+                    )
+
             if getattr(pivot_request, "output_format", "flat") == "grid":
                 shaper = GridShaper(response.items, pivot_request, key_map)
                 response.items = [shaper.shape()]
@@ -1137,7 +1163,7 @@ class SemanticQueryService(SemanticServiceResolver):
         if pivot_request:
             is_pivot = True
             from foggy.dataset_model.semantic.pivot.executor import validate_and_translate_pivot
-            request, _, _ps_metrics = validate_and_translate_pivot(request)
+            request, _, _ps_metrics, _br_metrics = validate_and_translate_pivot(request)
 
         if self._auto_case_insensitive_field_resolve:
             ci_result = self._resolve_request_fields_case_insensitive(

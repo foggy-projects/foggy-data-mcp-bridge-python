@@ -270,9 +270,10 @@ class TestCascadeRejected:
         payload = {
             "outputFormat": "flat",
             "rows": [{"field": "product$categoryName", "limit": 2, "orderBy": ["-salesAmount"]}],
+            "columns": ["salesDate$year"],
             "metrics": [
                 {"name": "salesAmount_base", "type": "baselineRatio", "of": "salesAmount",
-                 "axis": "rows", "baseline": "first"}
+                 "axis": "columns", "baseline": "first"}
             ],
         }
         err = _query(svc, payload)
