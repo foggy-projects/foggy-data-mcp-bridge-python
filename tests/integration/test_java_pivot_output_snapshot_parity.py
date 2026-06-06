@@ -67,9 +67,19 @@ def test_java_pivot_output_snapshot_replays_in_python(tmp_path) -> None:
                 actual = _canonical_flat(
                     response.items,
                     include_year=bool(pivot_payload["columns"]),
+                    include_subcategory=_has_row_field(
+                        pivot_payload,
+                        "product$subCategoryName",
+                    ),
                 )
             elif case["type"] == "grid-output":
-                actual = _canonical_grid(response.items)
+                actual = _canonical_grid(
+                    response.items,
+                    include_subcategory=_has_row_field(
+                        pivot_payload,
+                        "product$subCategoryName",
+                    ),
+                )
             else:
                 raise AssertionError(
                     f"Unsupported pivot output case type: {case['type']!r}"
@@ -95,7 +105,9 @@ def _seed_db(db_path: Path, seed: dict[str, Any]) -> None:
                 product_name TEXT,
                 product_id TEXT,
                 category_id TEXT,
-                category_name TEXT
+                category_name TEXT,
+                sub_category_id TEXT,
+                sub_category_name TEXT
             );
             CREATE TABLE fact_sales (
                 date_key INTEGER,
@@ -105,24 +117,35 @@ def _seed_db(db_path: Path, seed: dict[str, Any]) -> None:
             );
             """
         )
-        category_keys: dict[str, int] = {}
+        product_keys: dict[tuple[str, str], int] = {}
         date_keys: dict[int, int] = {}
         next_product_key = 1
         for row in seed["rows"]:
             category = row["category"]
+            sub_category = row.get("subCategory") or f"{category}-Sub"
             year = int(row["year"])
-            if category not in category_keys:
-                category_keys[category] = next_product_key
+            product_key = (category, sub_category)
+            if product_key not in product_keys:
+                product_keys[product_key] = next_product_key
                 next_product_key += 1
             if year not in date_keys:
                 date_keys[year] = year * 10000 + 101
 
         conn.executemany(
-            "INSERT INTO dim_product (product_key, product_name, product_id, category_id, category_name) "
-            "VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO dim_product "
+            "(product_key, product_name, product_id, category_id, category_name, sub_category_id, sub_category_name) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
             [
-                (key, category, f"P{key}", f"C{key}", category)
-                for category, key in category_keys.items()
+                (
+                    key,
+                    sub_category,
+                    f"P{key}",
+                    f"C{key}",
+                    category,
+                    f"S{key}",
+                    sub_category,
+                )
+                for (category, sub_category), key in product_keys.items()
             ],
         )
         conn.executemany(
@@ -138,7 +161,12 @@ def _seed_db(db_path: Path, seed: dict[str, Any]) -> None:
             [
                 (
                     date_keys[int(row["year"])],
-                    category_keys[row["category"]],
+                    product_keys[
+                        (
+                            row["category"],
+                            row.get("subCategory") or f"{row['category']}-Sub",
+                        )
+                    ],
                     seed["slice"]["value"],
                     float(row["sales"]),
                 )
@@ -154,20 +182,38 @@ def _canonical_flat(
     items: list[dict[str, Any]],
     *,
     include_year: bool,
+    include_subcategory: bool,
 ) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for item in items:
         row: dict[str, Any] = {
             "category": _pick(item, "product$categoryName", "一级品类名称"),
         }
+        if include_subcategory:
+            row["subCategory"] = _pick(
+                item,
+                "product$subCategoryName",
+                "二级品类名称",
+            )
         if include_year:
             row["year"] = _number(_pick(item, "salesDate$year", "年"))
         row["sales"] = _number(_pick(item, "salesAmount", "销售金额"))
         out.append(row)
-    return sorted(out, key=lambda row: (row["category"], row.get("year", 0)))
+    return sorted(
+        out,
+        key=lambda row: (
+            row["category"],
+            row.get("subCategory", ""),
+            row.get("year", 0),
+        ),
+    )
 
 
-def _canonical_grid(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _canonical_grid(
+    items: list[dict[str, Any]],
+    *,
+    include_subcategory: bool,
+) -> list[dict[str, Any]]:
     assert len(items) == 1
     grid = items[0]
     assert grid["format"] == "grid"
@@ -178,22 +224,42 @@ def _canonical_grid(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for row_index, row_header in enumerate(row_headers):
         for column_index, column_header in enumerate(column_headers):
-            out.append(
+            row = {
+                "category": _pick(
+                    row_header,
+                    "product$categoryName",
+                    "一级品类名称",
+                ),
+            }
+            if include_subcategory:
+                row["subCategory"] = _pick(
+                    row_header,
+                    "product$subCategoryName",
+                    "二级品类名称",
+                )
+            row.update(
                 {
-                    "category": _pick(
-                        row_header,
-                        "product$categoryName",
-                        "一级品类名称",
+                    "year": _number(
+                        _pick(column_header, "salesDate$year", "年"),
                     ),
-                    "year": _number(_pick(column_header, "salesDate$year", "年")),
                     "metric": _pick(column_header, "metric"),
                     "value": _number(cells[row_index][column_index]),
-                }
+                },
             )
+            out.append(row)
     return sorted(
         out,
-        key=lambda row: (row["category"], row["year"], row["metric"]),
+        key=lambda row: (
+            row["category"],
+            row.get("subCategory", ""),
+            row["year"],
+            row["metric"],
+        ),
     )
+
+
+def _has_row_field(pivot_payload: dict[str, Any], field: str) -> bool:
+    return field in pivot_payload.get("rows", [])
 
 
 def _pick(row: dict[str, Any], *keys: str) -> Any:

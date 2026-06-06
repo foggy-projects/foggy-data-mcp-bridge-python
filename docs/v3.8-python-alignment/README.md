@@ -28,6 +28,7 @@ Current P0 execution records:
 - [P0-8-pivot-output-sqlite-snapshot-replay.md](workitems/P0-8-pivot-output-sqlite-snapshot-replay.md)
 - [BUG-P0-9-pivot-output-cache-key-collision.md](workitems/BUG-P0-9-pivot-output-cache-key-collision.md)
 - [P0-10-pivot-grand-total-output-snapshot-replay.md](workitems/P0-10-pivot-grand-total-output-snapshot-replay.md)
+- [P0-11-pivot-row-subtotal-output-snapshot-replay.md](workitems/P0-11-pivot-row-subtotal-output-snapshot-replay.md)
 
 Current active snapshot lanes:
 
@@ -37,4 +38,5 @@ Current active snapshot lanes:
 - Compose script tool/runtime neutral snapshots
 - Governance / permission visible-model neutral snapshots
 - Pivot / domain transport neutral snapshots
-- Pivot real flat/grid SQLite output snapshots, including grandTotal output
+- Pivot real flat/grid SQLite output snapshots, including grandTotal and
+  rowSubtotals output

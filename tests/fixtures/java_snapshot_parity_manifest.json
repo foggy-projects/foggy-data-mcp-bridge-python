@@ -125,7 +125,6 @@
         "documented Java MySQL5.7 derived-table support vs Python mysql5.x fail-closed gap"
       ],
       "plannedExtensions": [
-        "row subtotal output contracts",
         "non-additive aux requery shape",
         "baselineRatio output cases",
         "large-domain transport threshold and fail-closed limits",
@@ -143,7 +142,7 @@
       "feature": "pivotOutput",
       "status": "active",
       "owner": "java",
-      "scope": "real SQLite Pivot flat/grid/grandTotal output replay over an isolated neutral seed",
+      "scope": "real SQLite Pivot flat/grid/grandTotal/rowSubtotals output replay over an isolated neutral seed",
       "javaExporter": "foggy-dataset-model/src/test/java/com/foggyframework/dataset/db/model/engine/pivot/JavaPivotOutputSnapshotTest.java",
       "pythonFixtures": [
         "tests/fixtures/java_pivot_output_snapshot_parity.json"
@@ -158,10 +157,11 @@
         "grid rowHeaders/columnHeaders/cells canonical output including sparse null cells",
         "flat rows grandTotal canonical output with GRAND_TOTAL marker",
         "flat rows + columns grandTotal canonical output per surviving column member",
-        "grid grandTotal rowHeader/cell canonical output"
+        "grid grandTotal rowHeader/cell canonical output",
+        "flat two-level rows rowSubtotals + grandTotal canonical output",
+        "grid two-level rows + columns rowSubtotals + grandTotal canonical output"
       ],
       "plannedExtensions": [
-        "row subtotal output contracts",
         "parentShare output contracts",
         "baselineRatio output contracts",
         "non-additive auxiliary requery output contracts"
@@ -171,7 +171,7 @@
         "Python seeds the same neutral rows into SQLite and replays flat/grid cases against FactSalesModel",
         "Python canonicalizes aliases and numeric types before comparing with Java canonical output",
         "Python replays flat/grid/grandTotal cases through one cached service instance to guard output-shape cache keys",
-        "Python compares Java's GRAND_TOTAL marker directly without normalizing it away"
+        "Python compares Java's ALL row-subtotal and GRAND_TOTAL markers directly without normalizing them away"
       ]
     },
     {

@@ -985,8 +985,14 @@ class SemanticQueryService(SemanticServiceResolver):
             processor = MemoryCubeProcessor(response.items, pivot_request, key_map)
             response.items = processor.process()
 
-            # --- grandTotal post-processing for ordinary (non-cascade) pivot ---
-            if _pivot_want_grand_total and response.items:
+            # --- rowSubtotals/grandTotal post-processing for ordinary (non-cascade) pivot ---
+            _pivot_want_row_subtotals = bool(
+                getattr(getattr(pivot_request, "options", None), "row_subtotals", False)
+            )
+            if _pivot_want_row_subtotals and response.items:
+                from foggy.dataset_model.semantic.pivot.cascade_totals import append_cascade_totals
+                response.items = append_cascade_totals(response.items, pivot_request, key_map)
+            elif _pivot_want_grand_total and response.items:
                 from foggy.dataset_model.semantic.pivot.cascade_totals import _build_grand_totals
                 row_fields = [
                     _f if isinstance(_f, str) else _f.field
