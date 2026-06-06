@@ -12,22 +12,26 @@
       "category" : "Align-Electronics",
       "subCategory" : "Align-Electronics-Sub",
       "year" : 2099,
-      "sales" : 100
+      "sales" : 100,
+      "customer" : 501
     }, {
       "category" : "Align-Electronics",
       "subCategory" : "Align-Electronics-Sub",
       "year" : 2099,
-      "sales" : 50
+      "sales" : 50,
+      "customer" : 501
     }, {
       "category" : "Align-Clothing",
       "subCategory" : "Align-Clothing-Sub",
       "year" : 2098,
-      "sales" : 200
+      "sales" : 200,
+      "customer" : 502
     }, {
       "category" : "Align-Electronics",
       "subCategory" : "Align-Electronics-Alt",
       "year" : 2099,
-      "sales" : 50
+      "sales" : 50,
+      "customer" : 501
     } ]
   },
   "cases" : [ {
@@ -260,6 +264,55 @@
       "category" : "GRAND_TOTAL",
       "subCategory" : "GRAND_TOTAL",
       "sales" : 400
+    } ]
+  }, {
+    "id" : "pivot-flat-rows-subtotals-grand-total-non-additive",
+    "type" : "flat-output",
+    "request" : {
+      "outputFormat" : "flat",
+      "rows" : [ "product$categoryName", "product$subCategoryName" ],
+      "columns" : [ ],
+      "metrics" : [ "salesAmount", "uniqueCustomers" ],
+      "options" : {
+        "rowSubtotals" : true,
+        "grandTotal" : true
+      },
+      "slice" : [ {
+        "field" : "orderStatus",
+        "op" : "=",
+        "value" : "PY_ALIGN_PIVOT_OUT"
+      } ]
+    },
+    "javaCanonical" : [ {
+      "category" : "Align-Clothing",
+      "subCategory" : "ALL",
+      "sales" : 200,
+      "uniqueCustomers" : 1
+    }, {
+      "category" : "Align-Clothing",
+      "subCategory" : "Align-Clothing-Sub",
+      "sales" : 200,
+      "uniqueCustomers" : 1
+    }, {
+      "category" : "Align-Electronics",
+      "subCategory" : "ALL",
+      "sales" : 200,
+      "uniqueCustomers" : 1
+    }, {
+      "category" : "Align-Electronics",
+      "subCategory" : "Align-Electronics-Alt",
+      "sales" : 50,
+      "uniqueCustomers" : 1
+    }, {
+      "category" : "Align-Electronics",
+      "subCategory" : "Align-Electronics-Sub",
+      "sales" : 150,
+      "uniqueCustomers" : 1
+    }, {
+      "category" : "GRAND_TOTAL",
+      "subCategory" : "GRAND_TOTAL",
+      "sales" : 400,
+      "uniqueCustomers" : 2
     } ]
   }, {
     "id" : "pivot-grid-rows-columns-subtotals-grand-total",

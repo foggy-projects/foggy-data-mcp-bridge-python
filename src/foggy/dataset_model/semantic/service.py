@@ -1018,6 +1018,24 @@ class SemanticQueryService(SemanticServiceResolver):
                 metric_keys = [key_map.get(m, m) for m in metric_names]
                 grand_rows = _build_grand_totals(response.items, row_keys, col_keys, metric_keys)
                 response.items = response.items + grand_rows
+            if (_pivot_want_row_subtotals or _pivot_want_grand_total) and response.items:
+                from foggy.dataset_model.semantic.pivot.non_additive_totals import (
+                    apply_auxiliary_totals,
+                )
+                try:
+                    response.items = apply_auxiliary_totals(
+                        self,
+                        model,
+                        request,
+                        pivot_request,
+                        response.items,
+                        key_map,
+                        context,
+                    )
+                except ValueError as e:
+                    return SemanticQueryResponse.from_error(
+                        f"Pivot non-additive auxiliary total query failed: {e}"
+                    )
 
             # --- Phase 2.8: parentShare post-processing ---
             if _pivot_parent_share_metrics:

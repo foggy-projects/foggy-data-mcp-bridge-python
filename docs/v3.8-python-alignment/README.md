@@ -31,6 +31,7 @@ Current P0 execution records:
 - [P0-11-pivot-row-subtotal-output-snapshot-replay.md](workitems/P0-11-pivot-row-subtotal-output-snapshot-replay.md)
 - [P0-12-pivot-parent-share-output-snapshot-replay.md](workitems/P0-12-pivot-parent-share-output-snapshot-replay.md)
 - [P0-13-pivot-baseline-ratio-output-snapshot-replay.md](workitems/P0-13-pivot-baseline-ratio-output-snapshot-replay.md)
+- [P0-14-pivot-non-additive-output-snapshot-replay.md](workitems/P0-14-pivot-non-additive-output-snapshot-replay.md)
 
 Current active snapshot lanes:
 
@@ -41,16 +42,15 @@ Current active snapshot lanes:
 - Governance / permission visible-model neutral snapshots
 - Pivot / domain transport neutral snapshots
 - Pivot real flat/grid SQLite output snapshots, including grandTotal,
-  rowSubtotals, parentShare, and baselineRatio output
+  rowSubtotals, parentShare, baselineRatio output, and ordinary flat
+  non-additive subtotal/grandTotal output
 
-Latest P0-13 status:
+Latest P0-14 status:
 
 - Python focused replay passed:
-  `17 passed in 0.53s`.
-- Java exporter is pending rerun after the Java module testCompile baseline is
-  clean. In this workspace, `foggy-dataset-model` testCompile fails before
-  `JavaPivotOutputSnapshotTest` executes on existing classpath issues outside
-  this workitem.
-- Remaining Pivot output gaps after P0-13: non-additive auxiliary requery
-  snapshots, large-domain threshold/limit refusal snapshots, and pivot/domain
+  `2 passed in 0.43s`.
+- Java exporter passed with SQLite-focused execution:
+  `Tests run: 1, Failures: 0, Errors: 0, Skipped: 0`.
+- Remaining Pivot output gaps after P0-14: grid/cascade/tree non-additive
+  evidence, large-domain threshold/limit refusal snapshots, and pivot/domain
   governance propagation.

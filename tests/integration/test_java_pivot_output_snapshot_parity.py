@@ -71,7 +71,7 @@ def test_java_pivot_output_snapshot_replays_in_python(tmp_path) -> None:
                         pivot_payload,
                         "product$subCategoryName",
                     ),
-                    extra_metrics=_derived_metric_names(pivot_payload),
+                    metric_names=_canonical_metric_names(pivot_payload),
                 )
             elif case["type"] == "grid-output":
                 actual = _canonical_grid(
@@ -113,6 +113,7 @@ def _seed_db(db_path: Path, seed: dict[str, Any]) -> None:
             CREATE TABLE fact_sales (
                 date_key INTEGER,
                 product_key INTEGER,
+                customer_key INTEGER,
                 order_status TEXT,
                 sales_amount REAL
             );
@@ -157,8 +158,8 @@ def _seed_db(db_path: Path, seed: dict[str, Any]) -> None:
             ],
         )
         conn.executemany(
-            "INSERT INTO fact_sales (date_key, product_key, order_status, sales_amount) "
-            "VALUES (?, ?, ?, ?)",
+            "INSERT INTO fact_sales (date_key, product_key, customer_key, order_status, sales_amount) "
+            "VALUES (?, ?, ?, ?, ?)",
             [
                 (
                     date_keys[int(row["year"])],
@@ -168,6 +169,7 @@ def _seed_db(db_path: Path, seed: dict[str, Any]) -> None:
                             row.get("subCategory") or f"{row['category']}-Sub",
                         )
                     ],
+                    row.get("customer"),
                     seed["slice"]["value"],
                     float(row["sales"]),
                 )
@@ -184,7 +186,7 @@ def _canonical_flat(
     *,
     include_year: bool,
     include_subcategory: bool,
-    extra_metrics: list[str],
+    metric_names: list[tuple[str, str]],
 ) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for item in items:
@@ -199,9 +201,10 @@ def _canonical_flat(
             )
         if include_year:
             row["year"] = _number(_pick(item, "salesDate$year", "年"))
-        row["sales"] = _number(_pick(item, "salesAmount", "销售金额"))
-        for metric in extra_metrics:
-            row[metric] = _number(_pick(item, metric))
+        for source_name, canonical_name in metric_names:
+            row[canonical_name] = _number(
+                _pick(item, source_name, _metric_alias(source_name)),
+            )
         out.append(row)
     return sorted(
         out,
@@ -266,15 +269,32 @@ def _has_row_field(pivot_payload: dict[str, Any], field: str) -> bool:
     return field in pivot_payload.get("rows", [])
 
 
-def _derived_metric_names(pivot_payload: dict[str, Any]) -> list[str]:
-    names: list[str] = []
+def _canonical_metric_names(pivot_payload: dict[str, Any]) -> list[tuple[str, str]]:
+    names: list[tuple[str, str]] = []
     for metric in pivot_payload.get("metrics", []):
+        if isinstance(metric, str):
+            names.append((metric, _canonical_metric_name(metric)))
+            continue
         if isinstance(metric, dict) and metric.get("type") in {
+            "native",
             "parentShare",
             "baselineRatio",
         }:
-            names.append(metric["name"])
+            names.append((metric["name"], _canonical_metric_name(metric["name"])))
     return names
+
+
+def _canonical_metric_name(metric: str) -> str:
+    if metric == "salesAmount":
+        return "sales"
+    return metric
+
+
+def _metric_alias(metric: str) -> str:
+    return {
+        "salesAmount": "销售金额",
+        "uniqueCustomers": "独立客户数",
+    }.get(metric, metric)
 
 
 def _pick(row: dict[str, Any], *keys: str) -> Any:
