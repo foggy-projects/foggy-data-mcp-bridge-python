@@ -142,7 +142,7 @@
       "feature": "pivotOutput",
       "status": "active",
       "owner": "java",
-      "scope": "real SQLite Pivot flat/grid/grandTotal/rowSubtotals output replay over an isolated neutral seed",
+      "scope": "real SQLite Pivot flat/grid/grandTotal/rowSubtotals/parentShare output replay over an isolated neutral seed",
       "javaExporter": "foggy-dataset-model/src/test/java/com/foggyframework/dataset/db/model/engine/pivot/JavaPivotOutputSnapshotTest.java",
       "pythonFixtures": [
         "tests/fixtures/java_pivot_output_snapshot_parity.json"
@@ -151,7 +151,7 @@
         "tests/integration/test_java_pivot_output_snapshot_parity.py"
       ],
       "javaExported": [
-        "isolated orderStatus-scoped seed rows for category/year/sales",
+        "isolated orderStatus-scoped seed rows for category/subCategory/year/sales",
         "flat rows + metric canonical output",
         "flat rows + columns + metric canonical output",
         "grid rowHeaders/columnHeaders/cells canonical output including sparse null cells",
@@ -159,10 +159,11 @@
         "flat rows + columns grandTotal canonical output per surviving column member",
         "grid grandTotal rowHeader/cell canonical output",
         "flat two-level rows rowSubtotals + grandTotal canonical output",
-        "grid two-level rows + columns rowSubtotals + grandTotal canonical output"
+        "grid two-level rows + columns rowSubtotals + grandTotal canonical output",
+        "flat two-level rows parentShare canonical output",
+        "grid two-level rows + columns parentShare canonical output including sparse null cells"
       ],
       "plannedExtensions": [
-        "parentShare output contracts",
         "baselineRatio output contracts",
         "non-additive auxiliary requery output contracts"
       ],
@@ -171,7 +172,8 @@
         "Python seeds the same neutral rows into SQLite and replays flat/grid cases against FactSalesModel",
         "Python canonicalizes aliases and numeric types before comparing with Java canonical output",
         "Python replays flat/grid/grandTotal cases through one cached service instance to guard output-shape cache keys",
-        "Python compares Java's ALL row-subtotal and GRAND_TOTAL markers directly without normalizing them away"
+        "Python compares Java's ALL row-subtotal and GRAND_TOTAL markers directly without normalizing them away",
+        "Python compares Java parentShare metric values including 1, 0.75, 0.25, and sparse null grid cells"
       ]
     },
     {

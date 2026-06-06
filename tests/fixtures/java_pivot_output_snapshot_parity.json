@@ -23,6 +23,11 @@
       "subCategory" : "Align-Clothing-Sub",
       "year" : 2098,
       "sales" : 200
+    }, {
+      "category" : "Align-Electronics",
+      "subCategory" : "Align-Electronics-Alt",
+      "year" : 2099,
+      "sales" : 50
     } ]
   },
   "cases" : [ {
@@ -44,7 +49,7 @@
       "sales" : 200
     }, {
       "category" : "Align-Electronics",
-      "sales" : 150
+      "sales" : 200
     } ]
   }, {
     "id" : "pivot-flat-rows-columns",
@@ -67,7 +72,7 @@
     }, {
       "category" : "Align-Electronics",
       "year" : 2099,
-      "sales" : 150
+      "sales" : 200
     } ]
   }, {
     "id" : "pivot-grid-rows-columns",
@@ -102,7 +107,7 @@
       "category" : "Align-Electronics",
       "year" : 2099,
       "metric" : "salesAmount",
-      "value" : 150
+      "value" : 200
     } ]
   }, {
     "id" : "pivot-flat-rows-grand-total",
@@ -126,10 +131,10 @@
       "sales" : 200
     }, {
       "category" : "Align-Electronics",
-      "sales" : 150
+      "sales" : 200
     }, {
       "category" : "GRAND_TOTAL",
-      "sales" : 350
+      "sales" : 400
     } ]
   }, {
     "id" : "pivot-flat-rows-columns-grand-total",
@@ -155,7 +160,7 @@
     }, {
       "category" : "Align-Electronics",
       "year" : 2099,
-      "sales" : 150
+      "sales" : 200
     }, {
       "category" : "GRAND_TOTAL",
       "year" : 2098,
@@ -163,7 +168,7 @@
     }, {
       "category" : "GRAND_TOTAL",
       "year" : 2099,
-      "sales" : 150
+      "sales" : 200
     } ]
   }, {
     "id" : "pivot-grid-rows-columns-grand-total",
@@ -201,7 +206,7 @@
       "category" : "Align-Electronics",
       "year" : 2099,
       "metric" : "salesAmount",
-      "value" : 150
+      "value" : 200
     }, {
       "category" : "GRAND_TOTAL",
       "year" : 2098,
@@ -211,7 +216,7 @@
       "category" : "GRAND_TOTAL",
       "year" : 2099,
       "metric" : "salesAmount",
-      "value" : 150
+      "value" : 200
     } ]
   }, {
     "id" : "pivot-flat-rows-subtotals-grand-total",
@@ -242,7 +247,11 @@
     }, {
       "category" : "Align-Electronics",
       "subCategory" : "ALL",
-      "sales" : 150
+      "sales" : 200
+    }, {
+      "category" : "Align-Electronics",
+      "subCategory" : "Align-Electronics-Alt",
+      "sales" : 50
     }, {
       "category" : "Align-Electronics",
       "subCategory" : "Align-Electronics-Sub",
@@ -250,7 +259,7 @@
     }, {
       "category" : "GRAND_TOTAL",
       "subCategory" : "GRAND_TOTAL",
-      "sales" : 350
+      "sales" : 400
     } ]
   }, {
     "id" : "pivot-grid-rows-columns-subtotals-grand-total",
@@ -305,7 +314,19 @@
       "subCategory" : "ALL",
       "year" : 2099,
       "metric" : "salesAmount",
-      "value" : 150
+      "value" : 200
+    }, {
+      "category" : "Align-Electronics",
+      "subCategory" : "Align-Electronics-Alt",
+      "year" : 2098,
+      "metric" : "salesAmount",
+      "value" : null
+    }, {
+      "category" : "Align-Electronics",
+      "subCategory" : "Align-Electronics-Alt",
+      "year" : 2099,
+      "metric" : "salesAmount",
+      "value" : 50
     }, {
       "category" : "Align-Electronics",
       "subCategory" : "Align-Electronics-Sub",
@@ -329,7 +350,132 @@
       "subCategory" : "GRAND_TOTAL",
       "year" : 2099,
       "metric" : "salesAmount",
+      "value" : 200
+    } ]
+  }, {
+    "id" : "pivot-flat-rows-parent-share",
+    "type" : "flat-output",
+    "request" : {
+      "outputFormat" : "flat",
+      "rows" : [ "product$categoryName", "product$subCategoryName" ],
+      "columns" : [ ],
+      "metrics" : [ "salesAmount", {
+        "name" : "share",
+        "type" : "parentShare",
+        "of" : "salesAmount"
+      } ],
+      "slice" : [ {
+        "field" : "orderStatus",
+        "op" : "=",
+        "value" : "PY_ALIGN_PIVOT_OUT"
+      } ]
+    },
+    "javaCanonical" : [ {
+      "category" : "Align-Clothing",
+      "subCategory" : "Align-Clothing-Sub",
+      "sales" : 200,
+      "share" : 1
+    }, {
+      "category" : "Align-Electronics",
+      "subCategory" : "Align-Electronics-Alt",
+      "sales" : 50,
+      "share" : 0.25
+    }, {
+      "category" : "Align-Electronics",
+      "subCategory" : "Align-Electronics-Sub",
+      "sales" : 150,
+      "share" : 0.75
+    } ]
+  }, {
+    "id" : "pivot-grid-rows-columns-parent-share",
+    "type" : "grid-output",
+    "request" : {
+      "outputFormat" : "grid",
+      "rows" : [ "product$categoryName", "product$subCategoryName" ],
+      "columns" : [ "salesDate$year" ],
+      "metrics" : [ "salesAmount", {
+        "name" : "share",
+        "type" : "parentShare",
+        "of" : "salesAmount"
+      } ],
+      "slice" : [ {
+        "field" : "orderStatus",
+        "op" : "=",
+        "value" : "PY_ALIGN_PIVOT_OUT"
+      } ]
+    },
+    "javaCanonical" : [ {
+      "category" : "Align-Clothing",
+      "subCategory" : "Align-Clothing-Sub",
+      "year" : 2098,
+      "metric" : "salesAmount",
+      "value" : 200
+    }, {
+      "category" : "Align-Clothing",
+      "subCategory" : "Align-Clothing-Sub",
+      "year" : 2098,
+      "metric" : "share",
+      "value" : 1
+    }, {
+      "category" : "Align-Clothing",
+      "subCategory" : "Align-Clothing-Sub",
+      "year" : 2099,
+      "metric" : "salesAmount",
+      "value" : null
+    }, {
+      "category" : "Align-Clothing",
+      "subCategory" : "Align-Clothing-Sub",
+      "year" : 2099,
+      "metric" : "share",
+      "value" : null
+    }, {
+      "category" : "Align-Electronics",
+      "subCategory" : "Align-Electronics-Alt",
+      "year" : 2098,
+      "metric" : "salesAmount",
+      "value" : null
+    }, {
+      "category" : "Align-Electronics",
+      "subCategory" : "Align-Electronics-Alt",
+      "year" : 2098,
+      "metric" : "share",
+      "value" : null
+    }, {
+      "category" : "Align-Electronics",
+      "subCategory" : "Align-Electronics-Alt",
+      "year" : 2099,
+      "metric" : "salesAmount",
+      "value" : 50
+    }, {
+      "category" : "Align-Electronics",
+      "subCategory" : "Align-Electronics-Alt",
+      "year" : 2099,
+      "metric" : "share",
+      "value" : 0.25
+    }, {
+      "category" : "Align-Electronics",
+      "subCategory" : "Align-Electronics-Sub",
+      "year" : 2098,
+      "metric" : "salesAmount",
+      "value" : null
+    }, {
+      "category" : "Align-Electronics",
+      "subCategory" : "Align-Electronics-Sub",
+      "year" : 2098,
+      "metric" : "share",
+      "value" : null
+    }, {
+      "category" : "Align-Electronics",
+      "subCategory" : "Align-Electronics-Sub",
+      "year" : 2099,
+      "metric" : "salesAmount",
       "value" : 150
+    }, {
+      "category" : "Align-Electronics",
+      "subCategory" : "Align-Electronics-Sub",
+      "year" : 2099,
+      "metric" : "share",
+      "value" : 0.75
     } ]
   } ]
 }
