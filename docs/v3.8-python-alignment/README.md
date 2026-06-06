@@ -32,6 +32,7 @@ Current P0 execution records:
 - [P0-12-pivot-parent-share-output-snapshot-replay.md](workitems/P0-12-pivot-parent-share-output-snapshot-replay.md)
 - [P0-13-pivot-baseline-ratio-output-snapshot-replay.md](workitems/P0-13-pivot-baseline-ratio-output-snapshot-replay.md)
 - [P0-14-pivot-non-additive-output-snapshot-replay.md](workitems/P0-14-pivot-non-additive-output-snapshot-replay.md)
+- [P0-15-pivot-domain-large-domain-snapshot-replay.md](workitems/P0-15-pivot-domain-large-domain-snapshot-replay.md)
 
 Current active snapshot lanes:
 
@@ -44,13 +45,20 @@ Current active snapshot lanes:
 - Pivot real flat/grid SQLite output snapshots, including grandTotal,
   rowSubtotals, parentShare, baselineRatio output, and ordinary flat
   non-additive subtotal/grandTotal output
+- Pivot domain transport large-domain threshold and SQLite bind-limit
+  fail-closed snapshots
 
-Latest P0-14 status:
+Latest P0-15 status:
 
 - Python focused replay passed:
-  `2 passed in 0.43s`.
+  `2 passed in 0.39s`.
 - Java exporter passed with SQLite-focused execution:
   `Tests run: 1, Failures: 0, Errors: 0, Skipped: 0`.
-- Remaining Pivot output gaps after P0-14: grid/cascade/tree non-additive
-  evidence, large-domain threshold/limit refusal snapshots, and pivot/domain
-  governance propagation.
+- Full Python pytest passed:
+  `4041 passed, 232 skipped, 43 warnings in 17.66s`.
+- `java_pivot_domain_snapshot_parity.json` now contains nine cases, including
+  `domain-sqlite-large-501-transport` and
+  `domain-sqlite-python-bind-limit-gap`.
+- Remaining Pivot/domain gaps after P0-15: grid/cascade/tree non-additive
+  evidence, pivot/domain governance propagation, SQL Server cascade oracle,
+  and MySQL 5.7 live support-scope evidence.

@@ -113,9 +113,8 @@ def _assert_pivot_translation_contract(case: dict[str, Any]) -> None:
     assert [metric.name for metric in parent_share_metrics] == expected[
         "parentShareMetricNames"
     ]
-    assert [metric.name for metric in baseline_ratio_metrics] == expected[
-        "baselineRatioMetricNames"
-    ]
+    expected_baseline_ratio_metrics = expected.get("baselineRatioMetricNames", [])
+    assert [metric.name for metric in baseline_ratio_metrics] == expected_baseline_ratio_metrics
 
 
 def _assert_domain_renderer_contract(case: dict[str, Any]) -> None:
@@ -154,7 +153,17 @@ def _assert_domain_renderer_refusal(case: dict[str, Any]) -> None:
 def _assert_documented_gap(case: dict[str, Any]) -> None:
     assert case["parityGap"]
     expected = case["pythonExpected"]
-    assert expected["status"] == "refused"
+    assert expected["status"] in {"refused", "renderer-refused"}
+
+    if expected["status"] == "renderer-refused":
+        renderer = _renderer_from(case["renderer"])
+        plan = _plan_from(case["plan"])
+        with pytest.raises(NotImplementedError) as exc_info:
+            renderer.render(plan)
+        message = str(exc_info.value)
+        for marker in expected.get("messageMarkers", []):
+            assert marker in message
+        return
 
     class _Mysql57Dialect:
         name = "mysql5.7"
