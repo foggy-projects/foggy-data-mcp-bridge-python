@@ -546,18 +546,26 @@ def create_runtime_api_v1_router(
         if clear_existing and request_namespace and hasattr(svc, "unregister_by_namespace"):
             svc.unregister_by_namespace(request_namespace)
 
+        requested_models = [
+            str(model).strip()
+            for model in request.get("models", []) or []
+            if str(model).strip()
+        ]
         loaded_summary = []
+        loaded_names = []
         loaded_total = 0
         try:
             for path, namespace in sources:
                 loaded = _load_models(path, namespace)
                 _register_loaded_models(svc, loaded, namespace)
+                source_names = [getattr(model, "name", None) for model in loaded]
+                loaded_names.extend(name for name in source_names if name)
                 loaded_total += len(loaded)
                 loaded_summary.append({
                     "path": path,
                     "namespace": namespace or "default",
                     "modelCount": len(loaded),
-                    "models": [getattr(model, "name", None) for model in loaded],
+                    "models": source_names,
                 })
         except Exception as exc:  # noqa: BLE001 - contract endpoint must envelope failures.
             error = {
@@ -571,14 +579,46 @@ def create_runtime_api_v1_router(
                 error["stackTrace"] = repr(exc)
             return _envelope(success=False, error=error)
 
+        scope = "models" if requested_models else "namespace"
+        refreshed_models = list(dict.fromkeys(requested_models or loaded_names))
+        failures = []
+        if requested_models:
+            loaded_name_set = set(loaded_names)
+            failures = [
+                {"model": model, "message": f"QM model was not refreshed: {model}"}
+                for model in requested_models
+                if model not in loaded_name_set
+            ]
+            refreshed_models = [model for model in requested_models if model in loaded_name_set]
+
+        refresh_data = {
+            "namespace": request_namespace or "default",
+            "scope": scope,
+            "clearedCaches": ["model-catalog"],
+            "refreshedModels": refreshed_models,
+            "loadedCount": len(refreshed_models),
+            "failedCount": len(failures),
+            "failures": failures,
+            "warnings": [],
+        }
+
+        if failures:
+            return _envelope(
+                success=False,
+                diagnostics={"warnings": [], "attributes": {"refresh": refresh_data, "sources": loaded_summary}},
+                error={
+                    "code": "MODEL_REFRESH_FAILED",
+                    "phase": "models.refresh",
+                    "model": failures[0]["model"],
+                    "safeToAutoRepair": False,
+                    "message": failures[0]["message"],
+                },
+            )
+
         return _envelope(
             success=True,
-            data={
-                "namespace": request_namespace or "default",
-                "modelCount": loaded_total,
-                "sources": loaded_summary,
-                "models": svc.get_all_model_names() if hasattr(svc, "get_all_model_names") else [],
-            },
+            data=refresh_data,
+            diagnostics={"warnings": [], "attributes": {"sources": loaded_summary, "modelCount": loaded_total}},
         )
 
     @router.post("/tables/inspect")

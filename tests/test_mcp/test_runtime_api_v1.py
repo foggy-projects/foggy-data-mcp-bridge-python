@@ -227,11 +227,45 @@ def test_models_refresh_reloads_configured_sources_and_registers_models(monkeypa
 
     body = response.json()
     assert body["success"] is True
-    assert body["data"]["modelCount"] == 1
-    assert body["data"]["sources"][0]["namespace"] == "default"
+    assert body["data"]["scope"] == "namespace"
+    assert body["data"]["loadedCount"] == 1
+    assert body["data"]["failedCount"] == 0
+    assert body["data"]["refreshedModels"] == ["FactOrderQueryModel"]
+    assert body["diagnostics"]["attributes"]["sources"][0]["namespace"] == "default"
     assert service.registered == ["FactOrderQueryModel"]
     assert service.cache_invalidations == 1
     assert calls == [{"path": str(tmp_path), "namespace": None}]
+
+
+def test_models_refresh_fails_when_requested_model_is_missing(monkeypatch, tmp_path):
+    from foggy.dataset_model.impl import loader
+
+    def fake_load(path, namespace=None):
+        return [SimpleNamespace(name="FactOrderQueryModel")]
+
+    monkeypatch.setattr(loader, "load_models_from_directory", fake_load)
+    service = _FakeSemanticService()
+    state = SimpleNamespace(
+        semantic_service=service,
+        accessor=_FakeAccessor(SemanticQueryResponse(items=[])),
+        properties=SimpleNamespace(model_directories=[str(tmp_path)], model_bundles=[]),
+    )
+    client = _client(state=state)
+
+    response = client.post(
+        "/api/v1/models/refresh",
+        json={"namespace": "default", "models": ["MissingQueryModel"]},
+    )
+
+    body = response.json()
+    assert body["success"] is False
+    assert body["error"]["code"] == "MODEL_REFRESH_FAILED"
+    assert body["error"]["phase"] == "models.refresh"
+    assert body["error"]["model"] == "MissingQueryModel"
+    assert body["error"]["safeToAutoRepair"] is False
+    assert body["diagnostics"]["attributes"]["refresh"]["loadedCount"] == 0
+    assert body["diagnostics"]["attributes"]["refresh"]["failedCount"] == 1
+    assert body["diagnostics"]["attributes"]["refresh"]["failures"][0]["model"] == "MissingQueryModel"
 
 
 def test_table_inspect_sqlite_returns_column_metadata():
