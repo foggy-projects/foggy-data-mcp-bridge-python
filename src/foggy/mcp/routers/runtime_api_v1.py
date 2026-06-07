@@ -308,6 +308,7 @@ def create_runtime_api_v1_router(
             "enabled": True,
             "securityMode": "none-dev-test-only",
             "capabilities": {
+                "runtime.capabilities": "supported",
                 "models.list": "supported",
                 "models.describe": "supported",
                 "models.validate": "supported",

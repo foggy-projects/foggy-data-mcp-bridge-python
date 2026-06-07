@@ -109,7 +109,14 @@ def test_capabilities_returns_runtime_envelope_and_honest_unsupported_states():
     assert body["success"] is True
     assert body["engine"] == "python"
     assert body["runtimeApiVersion"] == "foggy-runtime-api/v1"
+    assert body["data"]["engine"] == body["engine"]
+    assert body["data"]["runtimeApiVersion"] == body["runtimeApiVersion"]
+    assert body["data"]["schemaVersion"] == "2026-06-06"
+    assert body["data"]["enabled"] is True
     assert body["data"]["securityMode"] == "none-dev-test-only"
+    assert body["diagnostics"] == {"warnings": []}
+    assert body["error"] is None
+    assert body["data"]["capabilities"]["runtime.capabilities"] == "supported"
     assert body["data"]["capabilities"]["query.validate"] == "supported"
     assert body["data"]["capabilities"]["models.validate"] == "supported"
     assert body["data"]["capabilities"]["models.refresh"] == "supported"
