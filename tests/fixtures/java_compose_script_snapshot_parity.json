@@ -46,7 +46,7 @@
     "expected" : {
       "valueType" : "map",
       "hasSql" : true,
-      "sqlMarkers" : [ "SELECT 1 AS __stub__" ],
+      "sqlMarkers" : [ "SELECT 'FactSalesModel' AS __model__" ],
       "params" : [ ]
     }
   }, {
@@ -61,6 +61,88 @@
       "params" : [ ],
       "hasRows" : true,
       "rows" : [ {
+        "routeModel" : "FactSalesModel",
+        "stub" : 1
+      } ]
+    }
+  }, {
+    "id" : "preview-derived-plan-sql",
+    "dialect" : "mysql",
+    "previewMode" : true,
+    "script" : "const base = dsl({\n  model: \"FactSalesModel\",\n  columns: [\"orderStatus$caption\", \"salesAmount\"],\n  groupBy: [\"orderStatus$caption\"]\n});\nreturn { plans: dsl({\n  source: base,\n  columns: [\"orderStatus$caption\", \"salesAmount\"],\n  slice: [{ field: \"salesAmount\", op: \">\", value: 1000 }]\n}) };\n",
+    "expected" : {
+      "valueType" : "map",
+      "hasSql" : true,
+      "sqlMarkers" : [ "SELECT 'FactSalesModel' AS __model__", "FROM (", "salesAmount" ],
+      "params" : [ ]
+    }
+  }, {
+    "id" : "execute-derived-plan-rows-envelope",
+    "dialect" : "mysql",
+    "previewMode" : false,
+    "script" : "const base = dsl({\n  model: \"FactSalesModel\",\n  columns: [\"orderStatus$caption\", \"salesAmount\"],\n  groupBy: [\"orderStatus$caption\"]\n});\nreturn { plans: dsl({\n  source: base,\n  columns: [\"orderStatus$caption\", \"salesAmount\"],\n  slice: [{ field: \"salesAmount\", op: \">\", value: 1000 }]\n}) };\n",
+    "expected" : {
+      "valueType" : "map",
+      "hasSql" : false,
+      "sqlMarkers" : [ ],
+      "params" : [ ],
+      "hasRows" : true,
+      "rows" : [ {
+        "routeModel" : "FactSalesModel",
+        "stub" : 1
+      } ]
+    }
+  }, {
+    "id" : "preview-union-plan-sql",
+    "dialect" : "mysql",
+    "previewMode" : true,
+    "script" : "const current = dsl({\n  model: \"FactSalesModel\",\n  columns: [\"orderStatus$caption\"]\n});\nconst archived = dsl({\n  model: \"ArchivedSalesModel\",\n  columns: [\"orderStatus$caption\"]\n});\nreturn { plans: current.union(archived, { all: true }) };\n",
+    "expected" : {
+      "valueType" : "map",
+      "hasSql" : true,
+      "sqlMarkers" : [ "SELECT 'FactSalesModel' AS __model__", "SELECT 'ArchivedSalesModel' AS __model__", "UNION ALL" ],
+      "params" : [ ]
+    }
+  }, {
+    "id" : "execute-union-plan-rows-envelope",
+    "dialect" : "mysql",
+    "previewMode" : false,
+    "script" : "const current = dsl({\n  model: \"FactSalesModel\",\n  columns: [\"orderStatus$caption\"]\n});\nconst archived = dsl({\n  model: \"ArchivedSalesModel\",\n  columns: [\"orderStatus$caption\"]\n});\nreturn { plans: current.union(archived, { all: true }) };\n",
+    "expected" : {
+      "valueType" : "map",
+      "hasSql" : false,
+      "sqlMarkers" : [ ],
+      "params" : [ ],
+      "hasRows" : true,
+      "rows" : [ {
+        "routeModel" : "FactSalesModel",
+        "stub" : 1
+      } ]
+    }
+  }, {
+    "id" : "preview-join-plan-sql",
+    "dialect" : "mysql",
+    "previewMode" : true,
+    "script" : "const sales = dsl({\n  model: \"FactSalesModel\",\n  columns: [\"orderId\", \"salesAmount\"]\n});\nconst returns = dsl({\n  model: \"FactReturnModel\",\n  columns: [\"orderId\", \"returnAmount\"]\n});\nreturn { plans: sales.join(returns, \"left\", [\n  { left: \"orderId\", op: \"=\", right: \"orderId\" }\n]) };\n",
+    "expected" : {
+      "valueType" : "map",
+      "hasSql" : true,
+      "sqlMarkers" : [ "SELECT 'FactSalesModel' AS __model__", "SELECT 'FactReturnModel' AS __model__", "LEFT JOIN", "orderId" ],
+      "params" : [ ]
+    }
+  }, {
+    "id" : "execute-join-plan-rows-envelope",
+    "dialect" : "mysql",
+    "previewMode" : false,
+    "script" : "const sales = dsl({\n  model: \"FactSalesModel\",\n  columns: [\"orderId\", \"salesAmount\"]\n});\nconst returns = dsl({\n  model: \"FactReturnModel\",\n  columns: [\"orderId\", \"returnAmount\"]\n});\nreturn { plans: sales.join(returns, \"left\", [\n  { left: \"orderId\", op: \"=\", right: \"orderId\" }\n]) };\n",
+    "expected" : {
+      "valueType" : "map",
+      "hasSql" : false,
+      "sqlMarkers" : [ ],
+      "params" : [ ],
+      "hasRows" : true,
+      "rows" : [ {
+        "routeModel" : "FactSalesModel",
         "stub" : 1
       } ]
     }

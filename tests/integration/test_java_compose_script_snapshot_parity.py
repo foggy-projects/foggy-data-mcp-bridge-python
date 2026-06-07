@@ -10,6 +10,13 @@ import pytest
 
 from foggy.dataset_model.engine.compose import ComposedSql
 from foggy.dataset_model.engine.compose.context import ComposeQueryContext, Principal
+from foggy.dataset_model.engine.compose.plan.plan import (
+    BaseModelPlan,
+    DerivedQueryPlan,
+    JoinPlan,
+    QueryPlan,
+    UnionPlan,
+)
 from foggy.dataset_model.engine.compose.runtime import (
     ALLOWED_SCRIPT_GLOBALS,
     run_script,
@@ -47,7 +54,7 @@ class _PermissiveResolver:
 
 class _StubSemanticService:
     def execute_sql(self, sql, params, *, route_model=None):
-        return [{"stub": 1}]
+        return [{"routeModel": route_model, "stub": 1}]
 
 
 def _compose_context() -> ComposeQueryContext:
@@ -102,20 +109,50 @@ def test_java_runtime_global_surface_is_covered_by_python() -> None:
 def test_java_compose_script_runtime_snapshot_replays_in_python(monkeypatch) -> None:
     snapshot = _load_snapshot()
 
-    def stub_compile(*_args, **_kwargs) -> ComposedSql:
-        return ComposedSql(sql="SELECT 1 AS __stub__", params=[])
+    monkeypatch.setattr(
+        "foggy.dataset_model.engine.compose.runtime.plan_execution.compile_plan_to_sql",
+        _stub_compile,
+    )
+    monkeypatch.setattr(
+        "foggy.dataset_model.engine.compose.compilation.compiler.compile_plan_to_sql",
+        _stub_compile,
+    )
 
     for case in snapshot.get("cases", []):
-        if case.get("previewMode"):
-            monkeypatch.setattr(
-                "foggy.dataset_model.engine.compose.runtime.plan_execution.compile_plan_to_sql",
-                stub_compile,
-            )
-            monkeypatch.setattr(
-                "foggy.dataset_model.engine.compose.compilation.compiler.compile_plan_to_sql",
-                stub_compile,
-            )
         _assert_case_replays(case)
+
+
+def _stub_compile(plan: QueryPlan, *_args, **_kwargs) -> ComposedSql:
+    return ComposedSql(sql=_stub_sql(plan), params=[])
+
+
+def _stub_sql(plan: QueryPlan) -> str:
+    if isinstance(plan, BaseModelPlan):
+        columns = _columns_sql(plan.columns)
+        return f"SELECT '{plan.model}' AS __model__{columns} FROM {plan.model}"
+    if isinstance(plan, DerivedQueryPlan):
+        columns = _columns_sql(plan.columns, leading=False)
+        return f"SELECT {columns} FROM ({_stub_sql(plan.source)}) AS derived_stub"
+    if isinstance(plan, UnionPlan):
+        operator = "UNION ALL" if plan.all else "UNION"
+        return f"{_stub_sql(plan.left)} {operator} {_stub_sql(plan.right)}"
+    if isinstance(plan, JoinPlan):
+        join_type = plan.type.upper()
+        conditions = " AND ".join(
+            f"{condition.left} {condition.op} {condition.right}" for condition in plan.on
+        )
+        return (
+            f"{_stub_sql(plan.left)} {join_type} JOIN ({_stub_sql(plan.right)}) "
+            f"ON {conditions}"
+        )
+    raise AssertionError(f"Unsupported compose snapshot plan: {type(plan).__name__}")
+
+
+def _columns_sql(columns: tuple[str, ...], *, leading: bool = True) -> str:
+    if not columns:
+        return "" if leading else "*"
+    joined = ", ".join(str(column) for column in columns)
+    return f", {joined}" if leading else joined
 
 
 def _assert_case_replays(case: dict[str, Any]) -> None:

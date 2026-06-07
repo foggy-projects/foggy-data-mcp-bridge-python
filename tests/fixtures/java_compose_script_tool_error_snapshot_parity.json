@@ -12,8 +12,8 @@
       "traceId" : "java-compose-script-tool-error-snapshot",
       "namespace" : "demo",
       "headers" : {
-        "X-Namespace" : "demo",
-        "X-User-Id" : "snapshot-user"
+        "X-User-Id" : "snapshot-user",
+        "X-Namespace" : "demo"
       }
     },
     "expected" : {
@@ -28,31 +28,31 @@
     "arguments" : {
       "script" : "return from({\n  model: \"FactSalesModel\",\n  columns: [\"salesAmount\"]\n}).execute();\n",
       "__foggyAuthorityBinding" : {
-        "bindings" : {
-          "FactSalesModel" : {
-            "systemSlice" : [ ],
-            "fieldAccess" : [ "salesAmount" ],
-            "deniedColumns" : [ ]
-          }
-        },
-        "version" : "foggy.compose.authority-binding.v1",
         "namespace" : "odoo",
         "issuer" : "test-fixture-issuer",
         "principal" : {
           "userId" : "u2",
           "tenantId" : "t1"
-        }
+        },
+        "bindings" : {
+          "FactSalesModel" : {
+            "deniedColumns" : [ ],
+            "systemSlice" : [ ],
+            "fieldAccess" : [ "salesAmount" ]
+          }
+        },
+        "version" : "foggy.compose.authority-binding.v1"
       }
     },
     "context" : {
       "traceId" : "java-compose-script-tool-error-snapshot",
       "namespace" : "odoo",
       "headers" : {
-        "X-Roles" : "analyst",
-        "X-User-Id" : "u1",
         "X-Foggy-Remote-Compose" : "1",
         "X-Namespace" : "odoo",
-        "X-Tenant-Id" : "t1"
+        "X-Tenant-Id" : "t1",
+        "X-Roles" : "analyst",
+        "X-User-Id" : "u1"
       }
     },
     "expected" : {
