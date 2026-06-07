@@ -28,7 +28,6 @@
     "arguments" : {
       "script" : "return from({\n  model: \"FactSalesModel\",\n  columns: [\"salesAmount\"]\n}).execute();\n",
       "__foggyAuthorityBinding" : {
-        "namespace" : "odoo",
         "issuer" : "test-fixture-issuer",
         "principal" : {
           "userId" : "u2",
@@ -41,18 +40,19 @@
             "fieldAccess" : [ "salesAmount" ]
           }
         },
-        "version" : "foggy.compose.authority-binding.v1"
+        "version" : "foggy.compose.authority-binding.v1",
+        "namespace" : "odoo"
       }
     },
     "context" : {
       "traceId" : "java-compose-script-tool-error-snapshot",
       "namespace" : "odoo",
       "headers" : {
-        "X-Foggy-Remote-Compose" : "1",
         "X-Namespace" : "odoo",
         "X-Tenant-Id" : "t1",
         "X-Roles" : "analyst",
-        "X-User-Id" : "u1"
+        "X-User-Id" : "u1",
+        "X-Foggy-Remote-Compose" : "1"
       }
     },
     "expected" : {
@@ -60,6 +60,29 @@
       "errorCode" : "compose-authority-resolve/principal-mismatch",
       "phase" : "permission-resolve",
       "messageMarkers" : [ "principal", "differs" ],
+      "forbiddenMarkers" : [ "NullPointerException", "Traceback", "Exception:", "at com." ]
+    }
+  }, {
+    "id" : "remote-missing-authority-binding",
+    "arguments" : {
+      "script" : "return from({\n  model: \"FactSalesModel\",\n  columns: [\"salesAmount\"]\n}).execute();\n"
+    },
+    "context" : {
+      "traceId" : "java-compose-script-tool-error-snapshot",
+      "namespace" : "odoo",
+      "headers" : {
+        "X-Namespace" : "odoo",
+        "X-Tenant-Id" : "t1",
+        "X-Roles" : "analyst",
+        "X-User-Id" : "u1",
+        "X-Foggy-Remote-Compose" : "1"
+      }
+    },
+    "expected" : {
+      "status" : "error",
+      "errorCode" : "compose-authority-resolve/invalid-response",
+      "phase" : "permission-resolve",
+      "messageMarkers" : [ "authority", "binding" ],
       "forbiddenMarkers" : [ "NullPointerException", "Traceback", "Exception:", "at com." ]
     }
   } ]

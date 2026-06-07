@@ -121,14 +121,14 @@
       "javaExported": [
         "resolver-null host-misconfig payload with status/error_code/phase",
         "remote compose principal-mismatch permission-resolve payload",
+        "remote compose missing authority binding invalid-response payload",
         "host error payload without model leakage",
         "forbidden stack/exception marker checks"
       ],
       "plannedExtensions": [
         "missing script error-code normalization decision",
         "missing context/header bridge matrix",
-        "resolver factory exception payload",
-        "remote compose missing authority binding error-code/phase decision"
+        "resolver factory exception payload"
       ],
       "verification": [
         "Python ComposeScriptTool replays Java structured error fields",

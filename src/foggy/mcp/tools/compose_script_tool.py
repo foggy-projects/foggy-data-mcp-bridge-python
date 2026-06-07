@@ -157,9 +157,12 @@ class ComposeScriptTool(BaseMcpTool):
             if context and context.get_header("X-Foggy-Remote-Compose") == "1":
                 if binding_envelope is None:
                     return self._error_payload(
-                        error_code="compose-authority-resolve/resolver-not-available",
-                        phase="authority-resolve",
-                        message="Missing __foggyAuthorityBinding in Odoo remote compose mode"
+                        error_code="compose-authority-resolve/invalid-response",
+                        phase="permission-resolve",
+                        message=(
+                            "authority binding envelope is required in "
+                            "Odoo remote compose mode"
+                        ),
                     )
                 from foggy.dataset_model.engine.compose.authority.binding_resolver import AuthorityBindingResolver
                 resolver = AuthorityBindingResolver(binding_envelope, expected_namespace="odoo")

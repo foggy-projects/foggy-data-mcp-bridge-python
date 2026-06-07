@@ -197,8 +197,9 @@ async def test_odoo_remote_compose_missing_envelope_fails(tool):
     result = await tool.execute(arguments, ctx)
     
     assert result.success is False
-    assert result.data["phase"] in ("authority-resolve", "permission-resolve")
-    assert "Missing __foggyAuthorityBinding" in result.data["message"]
+    assert result.data["error_code"] == INVALID_RESPONSE
+    assert result.data["phase"] == "permission-resolve"
+    assert "authority binding" in result.data["message"]
 
 @pytest.mark.asyncio
 async def test_odoo_remote_compose_missing_model_fails(tool):
