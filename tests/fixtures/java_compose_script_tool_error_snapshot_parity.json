@@ -1,0 +1,27 @@
+{
+  "schemaVersion" : 1,
+  "feature" : "scriptRuntimeToolErrors",
+  "source" : "JavaComposeScriptToolErrorSnapshotTest",
+  "tool" : "dataset.compose_script",
+  "cases" : [ {
+    "id" : "resolver-null-host-misconfig",
+    "arguments" : {
+      "script" : "return 1;"
+    },
+    "context" : {
+      "traceId" : "java-compose-script-tool-error-snapshot",
+      "namespace" : "demo",
+      "headers" : {
+        "X-User-Id" : "snapshot-user",
+        "X-Namespace" : "demo"
+      }
+    },
+    "expected" : {
+      "status" : "error",
+      "errorCode" : "host-misconfig",
+      "phase" : "internal",
+      "messageMarkers" : [ "resolver", "returned" ],
+      "forbiddenMarkers" : [ "NullPointerException", "Traceback", "Exception:", "at com." ]
+    }
+  } ]
+}

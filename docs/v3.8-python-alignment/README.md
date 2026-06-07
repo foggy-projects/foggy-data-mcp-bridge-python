@@ -39,6 +39,7 @@ Current P0 execution records:
 - [P0-19-calculated-field-governance-snapshot-replay.md](workitems/P0-19-calculated-field-governance-snapshot-replay.md)
 - [P0-20-sanitized-governance-error-snapshot-replay.md](workitems/P0-20-sanitized-governance-error-snapshot-replay.md)
 - [P0-21-compose-script-rows-result-shape-snapshot-replay.md](workitems/P0-21-compose-script-rows-result-shape-snapshot-replay.md)
+- [P0-22-compose-script-host-misconfig-snapshot-replay.md](workitems/P0-22-compose-script-host-misconfig-snapshot-replay.md)
 
 Current active snapshot lanes:
 
@@ -46,7 +47,7 @@ Current active snapshot lanes:
 - Time window catalog
 - Compose query neutral snapshots
 - Compose script tool/runtime neutral snapshots, including execute-mode rows
-  envelope shape
+  envelope shape and MCP host-misconfig structured error payloads
 - Governance / permission visible-model neutral snapshots, including
   authority-resolved visible model allow/deny, queryModel, Pivot, and domain
   transport denied-column propagation, plus calculatedFields direct,
@@ -59,15 +60,19 @@ Current active snapshot lanes:
 - Pivot domain transport large-domain threshold and SQLite bind-limit
   fail-closed snapshots
 
-Latest P0-21 status:
+Latest P0-22 status:
 
-- P0-21 extends the active compose-script snapshot lane with execute-mode rows
-  envelope evidence for `return { plans: dsl(...) }`.
-- Java exporter passed across default, MySQL, and Postgres surefire executions:
-  `Tests run: 1, Failures: 0, Errors: 0, Skipped: 0`.
+- P0-22 adds an active MCP compose-script error snapshot lane for
+  `resolver-null-host-misconfig`.
+- The Java exporter writes
+  `tests/fixtures/java_compose_script_tool_error_snapshot_parity.json`.
+- Maven `foggy-dataset-mcp` focused execution is currently blocked by an
+  existing testCompile drift in `LocalDatasetAccessorGovernanceTest`
+  (`OutputFormattingItem` / `getOutputFormatting`). The new exporter compiles
+  standalone and was executed through reflection to generate the fixture.
 - Python replay plus manifest passed:
-  `8 passed in 0.45s`.
+  `6 passed, 1 warning in 0.59s`.
 - Scoped ruff passed:
   `All checks passed!`.
 - Full Python pytest passed:
-  `4049 passed, 232 skipped, 43 warnings in 17.75s`.
+  `4051 passed, 232 skipped, 44 warnings in 17.70s`.

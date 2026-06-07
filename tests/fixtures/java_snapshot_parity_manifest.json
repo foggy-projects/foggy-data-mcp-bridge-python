@@ -106,6 +106,35 @@
       ]
     },
     {
+      "id": "compose-script-tool-error-snapshots",
+      "feature": "scriptRuntimeTool",
+      "status": "active",
+      "owner": "java",
+      "scope": "MCP compose script structured host-misconfig error payload parity",
+      "javaExporter": "foggy-dataset-mcp/src/test/java/com/foggyframework/dataset/mcp/tools/JavaComposeScriptToolErrorSnapshotTest.java",
+      "pythonFixtures": [
+        "tests/fixtures/java_compose_script_tool_error_snapshot_parity.json"
+      ],
+      "pythonTests": [
+        "tests/integration/test_java_compose_script_tool_error_snapshot_parity.py"
+      ],
+      "javaExported": [
+        "resolver-null host-misconfig payload with status/error_code/phase",
+        "host error payload without model leakage",
+        "forbidden stack/exception marker checks"
+      ],
+      "plannedExtensions": [
+        "missing script error-code normalization decision",
+        "missing context/header bridge matrix",
+        "resolver factory exception payload",
+        "remote compose missing authority binding payload"
+      ],
+      "verification": [
+        "Python ComposeScriptTool replays Java structured error fields",
+        "Python asserts no stack or Java exception markers leak into payload"
+      ]
+    },
+    {
       "id": "pivot-domain-transport-neutral-snapshots",
       "feature": "pivotDomainTransport",
       "status": "active",
