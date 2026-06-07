@@ -15,6 +15,7 @@ Date: 2026-06-06
   - empty plans envelope
   - preview-mode SQL capture
   - security-parameter fail-closed error
+  - forbidden legacy result-object markers in the tool contract
 - Activated the manifest lane `compose-script-tool-snapshots`.
 
 ## Verification
@@ -67,9 +68,9 @@ Second full run result: `4105 passed, 162 skipped, 43 warnings in 17.36s`.
 
 ## Remaining Follow-Ups
 
-- Export and replay full DataSetResult/ComposedDataSetResult shape.
-  P0-21 covers the narrower execute-mode rows envelope.
 - Export and replay MCP host-misconfig structured error payloads.
 - Export and replay capability registry allow/deny errors.
 - Decide whether Python's additional fsscript global surface should remain an
   accepted divergence or be tightened in a later security-focused item.
+- Reopen legacy DataSetResult/ComposedDataSetResult parity only if product
+  explicitly makes those methods part of `dataset.compose_script`.

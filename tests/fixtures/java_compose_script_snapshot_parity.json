@@ -9,7 +9,7 @@
     "required" : [ "script" ],
     "schemaMarkers" : [ "SemanticDSL compose script", "single-model pivot", "baselineRatio", "return { plans:" ],
     "descriptionMarkers" : [ "dataset.compose_script", "跨模型 Join / Union", "dataset.query_model.payload.pivot", "timeRole=business_date", "不要直接 `.execute()`" ],
-    "forbiddenMarkers" : [ "Query.from" ]
+    "forbiddenMarkers" : [ "Query.from", "DataSetResult", "ComposedDataSetResult", "toList", "withJoin", "joinInMemory" ]
   },
   "runtime" : {
     "allowedScriptGlobals" : [ "from", "subquery", "Query", "dsl" ],

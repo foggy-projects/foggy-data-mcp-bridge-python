@@ -92,12 +92,12 @@
         "literal return and empty plans envelope",
         "preview-mode SQL capture shape",
         "execute-mode rows envelope shape",
-        "security-parameter fail-closed runtime error"
+        "security-parameter fail-closed runtime error",
+        "legacy DataSetResult/ComposedDataSetResult method names remain outside dataset.compose_script"
       ],
       "plannedExtensions": [
-        "full DataSetResult and ComposedDataSetResult method/result shape",
-        "host-misconfig MCP error payloads",
-        "capability registry fail-closed errors"
+        "capability registry fail-closed errors",
+        "legacy result-object compatibility decision only if product reopens that API"
       ],
       "verification": [
         "Python ToolConfigLoader matches Java tool markers",

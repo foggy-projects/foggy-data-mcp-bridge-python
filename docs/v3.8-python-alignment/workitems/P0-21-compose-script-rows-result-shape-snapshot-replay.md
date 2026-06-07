@@ -37,8 +37,9 @@ existing script runtime and stub semantic service. P0-21 adds Java parity
 evidence and keeps the behavior under the active compose-script snapshot lane.
 
 This item does not claim full Java `DataSetResult` or `ComposedDataSetResult`
-method-surface parity. That remains a separate follow-up because it needs a
-broader contract than the current script `dsl(...)` rows envelope.
+method-surface parity. The current script tool contract is QueryPlan-envelope
+based, so legacy result-object methods stay outside the P0 alignment target
+unless product explicitly reopens that API.
 
 ## Acceptance
 
@@ -69,7 +70,7 @@ Passed:
 
 ## Follow-Ups
 
-- Export and replay full `DataSetResult`/`ComposedDataSetResult` method and
-  composed-result shape if Java exposes that contract through the script tool.
+- Reopen `DataSetResult`/`ComposedDataSetResult` method and composed-result
+  shape only if Java exposes that contract through the script tool.
 - Export and replay MCP host-misconfig structured error payloads.
 - Export and replay capability registry allow/deny errors.
