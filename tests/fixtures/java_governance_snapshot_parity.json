@@ -222,6 +222,63 @@
       "messageMarkers" : [ "salesAmount" ]
     }
   }, {
+    "id" : "query-denied-calculated-direct-dependency-refused",
+    "type" : "query-validation",
+    "model" : "FactSalesModel",
+    "columns" : [ "product$caption", "netAmount" ],
+    "orderBy" : [ ],
+    "deniedColumns" : [ {
+      "table" : "fact_sales",
+      "column" : "discount_amount"
+    } ],
+    "expected" : {
+      "passes" : false,
+      "messageMarkers" : [ "discountAmount" ]
+    },
+    "calculatedFields" : [ {
+      "name" : "netAmount",
+      "expression" : "salesAmount - discountAmount"
+    } ]
+  }, {
+    "id" : "query-denied-calculated-transitive-dependency-refused",
+    "type" : "query-validation",
+    "model" : "FactSalesModel",
+    "columns" : [ "product$caption", "marginRatio" ],
+    "orderBy" : [ ],
+    "deniedColumns" : [ {
+      "table" : "fact_sales",
+      "column" : "discount_amount"
+    } ],
+    "expected" : {
+      "passes" : false,
+      "messageMarkers" : [ "discountAmount" ]
+    },
+    "calculatedFields" : [ {
+      "name" : "netAmount",
+      "expression" : "salesAmount - discountAmount"
+    }, {
+      "name" : "marginRatio",
+      "expression" : "netAmount / salesAmount"
+    } ]
+  }, {
+    "id" : "query-denied-calculated-relation-dependency-refused",
+    "type" : "query-validation",
+    "model" : "FactSalesModel",
+    "columns" : [ "product$caption", "categoryShare" ],
+    "orderBy" : [ ],
+    "deniedColumns" : [ {
+      "table" : "dim_product",
+      "column" : "category_name"
+    } ],
+    "expected" : {
+      "passes" : false,
+      "messageMarkers" : [ "product$categoryName" ]
+    },
+    "calculatedFields" : [ {
+      "name" : "categoryShare",
+      "expression" : "SUM(salesAmount) / NULLIF(CALCULATE(SUM(salesAmount), REMOVE(product$categoryName)), 0)"
+    } ]
+  }, {
     "id" : "pivot-denied-row-axis-refused",
     "type" : "pivot-query-validation",
     "model" : "FactSalesModel",

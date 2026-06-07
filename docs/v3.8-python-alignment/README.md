@@ -36,6 +36,7 @@ Current P0 execution records:
 - [P0-16-pivot-domain-governance-snapshot-replay.md](workitems/P0-16-pivot-domain-governance-snapshot-replay.md)
 - [BUG-P0-17-compose-runtime-pause-suspension-publication.md](workitems/BUG-P0-17-compose-runtime-pause-suspension-publication.md)
 - [P0-18-authority-visible-model-governance-snapshot-replay.md](workitems/P0-18-authority-visible-model-governance-snapshot-replay.md)
+- [P0-19-calculated-field-governance-snapshot-replay.md](workitems/P0-19-calculated-field-governance-snapshot-replay.md)
 
 Current active snapshot lanes:
 
@@ -45,7 +46,8 @@ Current active snapshot lanes:
 - Compose script tool/runtime neutral snapshots
 - Governance / permission visible-model neutral snapshots, including
   authority-resolved visible model allow/deny, queryModel, Pivot, and domain
-  transport denied-column propagation
+  transport denied-column propagation, plus calculatedFields direct,
+  transitive, and relation dependency refusals
 - Pivot / domain transport neutral snapshots
 - Pivot real flat/grid SQLite output snapshots, including grandTotal,
   rowSubtotals, parentShare, baselineRatio output, and ordinary flat
@@ -53,16 +55,15 @@ Current active snapshot lanes:
 - Pivot domain transport large-domain threshold and SQLite bind-limit
   fail-closed snapshots
 
-Latest P0-18 status:
+Latest P0-19 status:
 
-- P0-18 extends the active governance snapshot lane with resolver-derived
-  visible-model allow and missing-binding deny cases.
-- Java exporter passed after one transient Maven incremental testCompile
-  failure on existing compose classes:
+- P0-19 extends the active governance snapshot lane with calculatedFields
+  direct, transitive, and relation dependency denial cases.
+- Java exporter passed:
   `Tests run: 1, Failures: 0, Errors: 0, Skipped: 0`.
 - Scoped ruff passed for the governance replay:
   `All checks passed!`.
 - Python replay plus manifest passed:
-  `6 passed in 0.53s`.
+  `6 passed in 0.45s`.
 - Full Python pytest passed:
-  `4049 passed, 232 skipped, 43 warnings in 17.65s`.
+  `4049 passed, 232 skipped, 43 warnings in 17.46s`.

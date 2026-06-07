@@ -274,6 +274,7 @@ def _assert_query_validation(case: dict[str, Any]) -> None:
     request = SemanticQueryRequest(
         columns=list(case.get("columns", [])),
         order_by=list(case.get("orderBy", [])),
+        calculated_fields=list(case.get("calculatedFields", [])),
         denied_columns=_denied_columns_from_snapshot(case.get("deniedColumns")),
     )
     _assert_semantic_query_validation(case, request)

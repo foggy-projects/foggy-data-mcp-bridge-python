@@ -197,11 +197,11 @@
         "authority-resolved visible-model allow and deny fail-closed behavior",
         "deniedColumns physical-to-QM field mapping",
         "queryModel denied field validation for columns and orderBy",
+        "queryModel calculatedFields denied dependency fail-closed behavior",
         "metadata visibleFields plus deniedColumns trimming contract",
         "pivot/domain transport governance propagation for deniedColumns"
       ],
       "plannedExtensions": [
-        "cross-model calculated field reference refusals",
         "sanitized error payloads without physical column leakage",
         "aggregate join governance propagation"
       ],
@@ -211,6 +211,7 @@
         "Python asserts missing-binding error code and phase",
         "Python replays resolver-derived visible-model allow and missing-binding denial cases",
         "Python replays deniedColumns mapping, query validation, and metadata trimming against FactSalesModel",
+        "Python replays calculatedFields direct, transitive, and relation dependency refusals",
         "Python replays Pivot and domain transport deniedColumns fail-closed propagation"
       ]
     },
