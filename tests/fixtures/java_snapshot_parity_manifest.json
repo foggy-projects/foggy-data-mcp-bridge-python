@@ -91,17 +91,18 @@
         "Java allowed script global surface",
         "literal return and empty plans envelope",
         "preview-mode SQL capture shape",
+        "execute-mode rows envelope shape",
         "security-parameter fail-closed runtime error"
       ],
       "plannedExtensions": [
-        "script output rows/DataSetResult shape",
+        "full DataSetResult and ComposedDataSetResult method/result shape",
         "host-misconfig MCP error payloads",
         "capability registry fail-closed errors"
       ],
       "verification": [
         "Python ToolConfigLoader matches Java tool markers",
         "Python runtime covers Java injected globals with documented accepted extras",
-        "Python run_script replays success, SQL capture, and fail-closed cases"
+        "Python run_script replays success, SQL capture, execute rows, and fail-closed cases"
       ]
     },
     {

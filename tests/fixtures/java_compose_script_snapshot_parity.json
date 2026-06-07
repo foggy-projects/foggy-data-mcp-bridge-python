@@ -50,6 +50,21 @@
       "params" : [ ]
     }
   }, {
+    "id" : "execute-base-plan-rows-envelope",
+    "dialect" : "mysql",
+    "previewMode" : false,
+    "script" : "return { plans: dsl({\n  model: \"FactSalesModel\",\n  columns: [\"orderStatus$caption\"]\n}) };\n",
+    "expected" : {
+      "valueType" : "map",
+      "hasSql" : false,
+      "sqlMarkers" : [ ],
+      "params" : [ ],
+      "hasRows" : true,
+      "rows" : [ {
+        "stub" : 1
+      } ]
+    }
+  }, {
     "id" : "security-param-denied",
     "dialect" : "mysql",
     "previewMode" : false,

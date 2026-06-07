@@ -156,3 +156,8 @@ def _assert_case_replays(case: dict[str, Any]) -> None:
             assert marker in plans.sql
         if "params" in expected:
             assert list(plans.params) == list(expected["params"])
+
+    if expected.get("hasRows"):
+        plans = result.value["plans"]
+        assert isinstance(plans, list)
+        assert plans == expected.get("rows")

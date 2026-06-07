@@ -67,7 +67,8 @@ Second full run result: `4105 passed, 162 skipped, 43 warnings in 17.36s`.
 
 ## Remaining Follow-Ups
 
-- Export and replay script execution row/DataSetResult shape.
+- Export and replay full DataSetResult/ComposedDataSetResult shape.
+  P0-21 covers the narrower execute-mode rows envelope.
 - Export and replay MCP host-misconfig structured error payloads.
 - Export and replay capability registry allow/deny errors.
 - Decide whether Python's additional fsscript global surface should remain an

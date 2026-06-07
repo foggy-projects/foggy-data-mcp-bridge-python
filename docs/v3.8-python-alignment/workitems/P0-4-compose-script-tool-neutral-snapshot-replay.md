@@ -33,7 +33,8 @@ In scope:
 Out of scope for this slice:
 
 - Odoo model/domain fixtures.
-- Full `DataSetResult`/`ComposedDataSetResult` row-shape parity.
+- Full `DataSetResult`/`ComposedDataSetResult` result-shape parity. P0-21
+  covers the narrower execute-mode rows envelope as a separate follow-up.
 - Capability registry allow/deny snapshots.
 - MCP host-misconfig payload snapshots beyond resource/schema markers.
 
