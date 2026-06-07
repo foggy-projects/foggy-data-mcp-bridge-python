@@ -222,6 +222,36 @@
       "messageMarkers" : [ "salesAmount" ]
     }
   }, {
+    "id" : "query-denied-sanitized-measure-error-payload",
+    "type" : "query-validation",
+    "model" : "FactSalesModel",
+    "columns" : [ "product$caption", "salesAmount" ],
+    "orderBy" : [ ],
+    "deniedColumns" : [ {
+      "table" : "fact_sales",
+      "column" : "sales_amount"
+    } ],
+    "expected" : {
+      "passes" : false,
+      "messageMarkers" : [ "salesAmount" ],
+      "forbiddenMarkers" : [ "fact_sales", "sales_amount" ]
+    }
+  }, {
+    "id" : "query-denied-sanitized-relation-error-payload",
+    "type" : "query-validation",
+    "model" : "FactSalesModel",
+    "columns" : [ "product$caption", "product$categoryName" ],
+    "orderBy" : [ ],
+    "deniedColumns" : [ {
+      "table" : "dim_product",
+      "column" : "category_name"
+    } ],
+    "expected" : {
+      "passes" : false,
+      "messageMarkers" : [ "product$categoryName" ],
+      "forbiddenMarkers" : [ "dim_product", "category_name" ]
+    }
+  }, {
     "id" : "query-denied-calculated-direct-dependency-refused",
     "type" : "query-validation",
     "model" : "FactSalesModel",

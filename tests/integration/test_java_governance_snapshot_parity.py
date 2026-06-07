@@ -318,6 +318,8 @@ def _assert_semantic_query_validation(
     assert response.error is not None
     for marker in expected.get("messageMarkers", []):
         assert marker in response.error
+    for marker in expected.get("forbiddenMarkers", []):
+        assert marker not in response.error
 
 
 def _assert_metadata_trimming(case: dict[str, Any]) -> None:

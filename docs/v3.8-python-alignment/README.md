@@ -37,6 +37,7 @@ Current P0 execution records:
 - [BUG-P0-17-compose-runtime-pause-suspension-publication.md](workitems/BUG-P0-17-compose-runtime-pause-suspension-publication.md)
 - [P0-18-authority-visible-model-governance-snapshot-replay.md](workitems/P0-18-authority-visible-model-governance-snapshot-replay.md)
 - [P0-19-calculated-field-governance-snapshot-replay.md](workitems/P0-19-calculated-field-governance-snapshot-replay.md)
+- [P0-20-sanitized-governance-error-snapshot-replay.md](workitems/P0-20-sanitized-governance-error-snapshot-replay.md)
 
 Current active snapshot lanes:
 
@@ -47,7 +48,8 @@ Current active snapshot lanes:
 - Governance / permission visible-model neutral snapshots, including
   authority-resolved visible model allow/deny, queryModel, Pivot, and domain
   transport denied-column propagation, plus calculatedFields direct,
-  transitive, and relation dependency refusals
+  transitive, and relation dependency refusals, and sanitized governance error
+  payload checks
 - Pivot / domain transport neutral snapshots
 - Pivot real flat/grid SQLite output snapshots, including grandTotal,
   rowSubtotals, parentShare, baselineRatio output, and ordinary flat
@@ -55,15 +57,16 @@ Current active snapshot lanes:
 - Pivot domain transport large-domain threshold and SQLite bind-limit
   fail-closed snapshots
 
-Latest P0-19 status:
+Latest P0-20 status:
 
-- P0-19 extends the active governance snapshot lane with calculatedFields
-  direct, transitive, and relation dependency denial cases.
-- Java exporter passed:
+- P0-20 extends the active governance snapshot lane with sanitized denied-column
+  error payload checks for measure and relation-field refusals.
+- Java exporter first hit a transient Maven incremental testCompile/classpath
+  failure on existing pivot/preagg classes; immediate rerun passed:
   `Tests run: 1, Failures: 0, Errors: 0, Skipped: 0`.
 - Scoped ruff passed for the governance replay:
   `All checks passed!`.
 - Python replay plus manifest passed:
-  `6 passed in 0.45s`.
+  `6 passed in 0.47s`.
 - Full Python pytest passed:
-  `4049 passed, 232 skipped, 43 warnings in 17.46s`.
+  `4049 passed, 232 skipped, 43 warnings in 22.00s`.

@@ -198,11 +198,11 @@
         "deniedColumns physical-to-QM field mapping",
         "queryModel denied field validation for columns and orderBy",
         "queryModel calculatedFields denied dependency fail-closed behavior",
+        "sanitized governance error payloads without physical table/column leakage",
         "metadata visibleFields plus deniedColumns trimming contract",
         "pivot/domain transport governance propagation for deniedColumns"
       ],
       "plannedExtensions": [
-        "sanitized error payloads without physical column leakage",
         "aggregate join governance propagation"
       ],
       "verification": [
@@ -212,6 +212,7 @@
         "Python replays resolver-derived visible-model allow and missing-binding denial cases",
         "Python replays deniedColumns mapping, query validation, and metadata trimming against FactSalesModel",
         "Python replays calculatedFields direct, transitive, and relation dependency refusals",
+        "Python asserts sanitized governance errors do not expose physical table or column markers",
         "Python replays Pivot and domain transport deniedColumns fail-closed propagation"
       ]
     },
