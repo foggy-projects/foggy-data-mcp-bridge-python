@@ -65,13 +65,21 @@ async def _execute_case(case: dict[str, Any]):
             authority_resolver_factory=lambda _ctx: _PermissiveResolver(),
             semantic_service=service,
         )
-        return await tool.execute(dict(case["arguments"]), _tool_context(case["context"]))
+        context = case.get("context")
+        return await tool.execute(
+            dict(case["arguments"]),
+            None if context is None else _tool_context(context),
+        )
 
     tool = ComposeScriptTool(
         authority_resolver_factory=lambda _ctx: None,
         semantic_service=_StubSemanticService(),
     )
-    return await tool.execute(dict(case["arguments"]), _tool_context(case["context"]))
+    context = case.get("context")
+    return await tool.execute(
+        dict(case["arguments"]),
+        None if context is None else _tool_context(context),
+    )
 
 
 @pytest.mark.asyncio

@@ -138,7 +138,7 @@ async def test_missing_script_argument_returns_error():
     )
     result = await tool.execute({}, _tool_ctx())
     assert result.success is False
-    assert result.data["error_code"] == "host-misconfig"
+    assert result.data["error_code"] == "missing-script"
     assert result.data["phase"] == "internal"
 
 
@@ -150,7 +150,7 @@ async def test_empty_script_argument_returns_error():
     )
     result = await tool.execute({"script": ""}, _tool_ctx())
     assert result.success is False
-    assert result.data["error_code"] == "host-misconfig"
+    assert result.data["error_code"] == "missing-script"
 
 
 @pytest.mark.asyncio
@@ -161,6 +161,7 @@ async def test_missing_context_returns_error():
     )
     result = await tool.execute({"script": "1"}, None)
     assert result.success is False
+    assert result.data["error_code"] == "internal-error"
     assert "ToolExecutionContext" in result.data["message"]
 
 

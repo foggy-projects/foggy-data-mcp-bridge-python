@@ -42,6 +42,7 @@ Current P0 execution records:
 - [P0-22-compose-script-host-misconfig-snapshot-replay.md](workitems/P0-22-compose-script-host-misconfig-snapshot-replay.md)
 - [P0-23-compose-script-remote-principal-mismatch-snapshot-replay.md](workitems/P0-23-compose-script-remote-principal-mismatch-snapshot-replay.md)
 - [P0-24-compose-script-remote-missing-binding-snapshot-replay.md](workitems/P0-24-compose-script-remote-missing-binding-snapshot-replay.md)
+- [P0-25-compose-script-input-context-error-snapshot-replay.md](workitems/P0-25-compose-script-input-context-error-snapshot-replay.md)
 
 Current active snapshot lanes:
 
@@ -62,22 +63,22 @@ Current active snapshot lanes:
 - Pivot domain transport large-domain threshold and SQLite bind-limit
   fail-closed snapshots
 
-Latest P0-24 status:
+Latest P0-25 status:
 
-- P0-24 aligns Python remote compose missing authority-binding behavior with
-  Java and extends the active MCP compose-script error snapshot lane with
-  `remote-missing-authority-binding`.
-- The Java exporter writes the three-case fixture:
+- P0-25 extends the active MCP compose-script error snapshot lane with
+  `missing-script` and `missing-context`.
+- Python now aligns missing script to Java's `missing-script` error code and
+  missing ToolExecutionContext to Java's `internal-error` payload.
+- The Java exporter writes the five-case fixture:
   `tests/fixtures/java_compose_script_tool_error_snapshot_parity.json`.
 - Maven `foggy-dataset-mcp` focused execution is currently blocked by an
   existing testCompile drift in `LocalDatasetAccessorGovernanceTest`
   (`OutputFormattingItem` / `getOutputFormatting`). The new exporter compiles
   standalone and was executed through reflection to generate the fixture.
-- Python replay plus manifest passed:
-  `7 passed, 4 warnings in 0.52s`.
+- Python focused replay, input/context unit checks, and manifest passed:
+  `9 passed, 6 warnings in 0.54s`.
 - Scoped ruff is blocked by existing file-wide lint debt in touched files:
-  `src/foggy/mcp/tools/compose_script_tool.py` still has typing-modernization
-  findings, and `tests/test_mcp/test_compose_script_tool_binding.py` still has
-  import/whitespace findings.
+  `src/foggy/mcp/tools/compose_script_tool.py` typing-modernization findings
+  and `tests/test_mcp/test_compose_script_tool.py` import/typing findings.
 - Full Python pytest passed:
-  `4051 passed, 232 skipped, 46 warnings in 17.31s`.
+  `4051 passed, 232 skipped, 47 warnings in 19.98s`.

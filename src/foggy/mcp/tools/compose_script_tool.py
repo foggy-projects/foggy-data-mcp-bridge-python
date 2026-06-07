@@ -141,13 +141,13 @@ class ComposeScriptTool(BaseMcpTool):
         script = arguments.get("script") if arguments else None
         if not isinstance(script, str) or not script:
             return self._error_payload(
-                error_code="host-misconfig",
+                error_code="missing-script",
                 phase="internal",
                 message="Parameter 'script' is required and must be a non-empty string",
             )
         if context is None:
             return self._error_payload(
-                error_code="host-misconfig",
+                error_code="internal-error",
                 phase="internal",
                 message="ToolExecutionContext is required for dataset.compose_script",
             )

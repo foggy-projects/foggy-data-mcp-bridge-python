@@ -119,6 +119,8 @@
         "tests/integration/test_java_compose_script_tool_error_snapshot_parity.py"
       ],
       "javaExported": [
+        "missing script input error-code normalization payload",
+        "missing ToolExecutionContext bridge payload",
         "resolver-null host-misconfig payload with status/error_code/phase",
         "remote compose principal-mismatch permission-resolve payload",
         "remote compose missing authority binding invalid-response payload",
@@ -126,8 +128,7 @@
         "forbidden stack/exception marker checks"
       ],
       "plannedExtensions": [
-        "missing script error-code normalization decision",
-        "missing context/header bridge matrix",
+        "remaining header bridge matrix",
         "resolver factory exception payload"
       ],
       "verification": [
