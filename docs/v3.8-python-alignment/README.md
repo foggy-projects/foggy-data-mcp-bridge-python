@@ -40,6 +40,7 @@ Current P0 execution records:
 - [P0-20-sanitized-governance-error-snapshot-replay.md](workitems/P0-20-sanitized-governance-error-snapshot-replay.md)
 - [P0-21-compose-script-rows-result-shape-snapshot-replay.md](workitems/P0-21-compose-script-rows-result-shape-snapshot-replay.md)
 - [P0-22-compose-script-host-misconfig-snapshot-replay.md](workitems/P0-22-compose-script-host-misconfig-snapshot-replay.md)
+- [P0-23-compose-script-remote-principal-mismatch-snapshot-replay.md](workitems/P0-23-compose-script-remote-principal-mismatch-snapshot-replay.md)
 
 Current active snapshot lanes:
 
@@ -60,19 +61,19 @@ Current active snapshot lanes:
 - Pivot domain transport large-domain threshold and SQLite bind-limit
   fail-closed snapshots
 
-Latest P0-22 status:
+Latest P0-23 status:
 
-- P0-22 adds an active MCP compose-script error snapshot lane for
-  `resolver-null-host-misconfig`.
-- The Java exporter writes
+- P0-23 extends the active MCP compose-script error snapshot lane with
+  `remote-principal-mismatch`.
+- The Java exporter writes the two-case fixture:
   `tests/fixtures/java_compose_script_tool_error_snapshot_parity.json`.
 - Maven `foggy-dataset-mcp` focused execution is currently blocked by an
   existing testCompile drift in `LocalDatasetAccessorGovernanceTest`
   (`OutputFormattingItem` / `getOutputFormatting`). The new exporter compiles
   standalone and was executed through reflection to generate the fixture.
 - Python replay plus manifest passed:
-  `6 passed, 1 warning in 0.59s`.
+  `6 passed, 2 warnings in 0.56s`.
 - Scoped ruff passed:
   `All checks passed!`.
 - Full Python pytest passed:
-  `4051 passed, 232 skipped, 44 warnings in 17.70s`.
+  `4051 passed, 232 skipped, 45 warnings in 18.01s`.

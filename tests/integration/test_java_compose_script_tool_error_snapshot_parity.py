@@ -8,6 +8,12 @@ from typing import Any
 
 import pytest
 
+from foggy.dataset_model.engine.compose.security import (
+    AuthorityResolution,
+    ModelBinding,
+)
+from foggy.dataset_model.semantic.service import SemanticQueryService
+from foggy.demo.models.ecommerce_models import create_fact_sales_model
 from foggy.mcp.tools.compose_script_tool import ComposeScriptTool
 from foggy.mcp_spi.context import ToolExecutionContext
 
@@ -25,6 +31,13 @@ def _load_snapshot() -> dict[str, Any]:
 class _StubSemanticService:
     def execute_sql(self, sql, params, *, route_model=None):
         raise AssertionError("execute_sql is not used by tool error snapshots")
+
+
+class _PermissiveResolver:
+    def resolve(self, request):
+        return AuthorityResolution(
+            bindings={model_query.model: ModelBinding() for model_query in request.models}
+        )
 
 
 def _tool_context(raw: dict[str, Any]) -> ToolExecutionContext:
@@ -45,6 +58,15 @@ def test_snapshot_schema() -> None:
 
 
 async def _execute_case(case: dict[str, Any]):
+    if case["id"] == "remote-principal-mismatch":
+        service = SemanticQueryService()
+        service.register_model(create_fact_sales_model())
+        tool = ComposeScriptTool(
+            authority_resolver_factory=lambda _ctx: _PermissiveResolver(),
+            semantic_service=service,
+        )
+        return await tool.execute(dict(case["arguments"]), _tool_context(case["context"]))
+
     tool = ComposeScriptTool(
         authority_resolver_factory=lambda _ctx: None,
         semantic_service=_StubSemanticService(),
