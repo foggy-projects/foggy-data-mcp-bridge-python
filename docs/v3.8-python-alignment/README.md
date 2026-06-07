@@ -35,6 +35,7 @@ Current P0 execution records:
 - [P0-15-pivot-domain-large-domain-snapshot-replay.md](workitems/P0-15-pivot-domain-large-domain-snapshot-replay.md)
 - [P0-16-pivot-domain-governance-snapshot-replay.md](workitems/P0-16-pivot-domain-governance-snapshot-replay.md)
 - [BUG-P0-17-compose-runtime-pause-suspension-publication.md](workitems/BUG-P0-17-compose-runtime-pause-suspension-publication.md)
+- [P0-18-authority-visible-model-governance-snapshot-replay.md](workitems/P0-18-authority-visible-model-governance-snapshot-replay.md)
 
 Current active snapshot lanes:
 
@@ -43,7 +44,8 @@ Current active snapshot lanes:
 - Compose query neutral snapshots
 - Compose script tool/runtime neutral snapshots
 - Governance / permission visible-model neutral snapshots, including
-  queryModel, Pivot, and domain transport denied-column propagation
+  authority-resolved visible model allow/deny, queryModel, Pivot, and domain
+  transport denied-column propagation
 - Pivot / domain transport neutral snapshots
 - Pivot real flat/grid SQLite output snapshots, including grandTotal,
   rowSubtotals, parentShare, baselineRatio output, and ordinary flat
@@ -51,16 +53,16 @@ Current active snapshot lanes:
 - Pivot domain transport large-domain threshold and SQLite bind-limit
   fail-closed snapshots
 
-Latest BUG-P0-17 status:
+Latest P0-18 status:
 
-- P0-16 exposed full-baseline instability in compose runtime pause/resume
-  tests. BUG-P0-17 fixes the test synchronization boundary by waiting for
-  manager-published active suspension snapshots before reading `suspend_id`.
-- Focused pause/resume files passed:
-  `24 passed in 0.29s`.
-- Scoped ruff passed:
+- P0-18 extends the active governance snapshot lane with resolver-derived
+  visible-model allow and missing-binding deny cases.
+- Java exporter passed after one transient Maven incremental testCompile
+  failure on existing compose classes:
+  `Tests run: 1, Failures: 0, Errors: 0, Skipped: 0`.
+- Scoped ruff passed for the governance replay:
   `All checks passed!`.
-- Compose runtime suite passed:
-  `293 passed, 16 warnings in 1.01s`.
+- Python replay plus manifest passed:
+  `6 passed in 0.53s`.
 - Full Python pytest passed:
-  `4041 passed, 232 skipped, 43 warnings in 18.02s`.
+  `4049 passed, 232 skipped, 43 warnings in 17.65s`.

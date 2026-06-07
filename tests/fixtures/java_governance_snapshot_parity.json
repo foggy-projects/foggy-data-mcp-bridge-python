@@ -80,6 +80,55 @@
       "phase" : "plan-lower"
     }
   }, {
+    "id" : "authority-visible-model-allow-compiles",
+    "type" : "authority-resolution",
+    "plan" : {
+      "type" : "base",
+      "model" : "FactSalesModel",
+      "columns" : [ "product$caption", "salesAmount" ],
+      "slice" : [ {
+        "field" : "orderStatus$caption",
+        "op" : "=",
+        "value" : "COMPLETED"
+      } ]
+    },
+    "resolverBindings" : {
+      "FactSalesModel" : {
+        "fieldAccess" : [ "product$caption", "salesAmount" ],
+        "deniedColumns" : [ {
+          "table" : "fact_sales",
+          "column" : "secret_margin"
+        } ],
+        "systemSlice" : [ {
+          "field" : "tenant_id",
+          "op" : "=",
+          "value" : "demo"
+        } ]
+      }
+    },
+    "expected" : {
+      "passes" : true,
+      "sqlMarkers" : [ "WITH ", "cte_0 AS", "__governance_stub__" ],
+      "forwardedModel" : "FactSalesModel",
+      "forwardedColumns" : [ "product$caption", "salesAmount" ],
+      "forwardedFieldAccess" : [ "product$caption", "salesAmount" ]
+    }
+  }, {
+    "id" : "authority-visible-model-deny-missing-binding-fails-closed",
+    "type" : "authority-resolution",
+    "plan" : {
+      "type" : "base",
+      "model" : "FactSalesModel",
+      "columns" : [ "salesAmount" ]
+    },
+    "resolverBindings" : { },
+    "expected" : {
+      "passes" : false,
+      "errorCode" : "compose-authority-resolve/model-binding-missing",
+      "phase" : "authority-resolve",
+      "modelInvolved" : "FactSalesModel"
+    }
+  }, {
     "id" : "denied-physical-measure-maps-to-qm-field",
     "type" : "denied-column-mapping",
     "model" : "FactSalesModel",

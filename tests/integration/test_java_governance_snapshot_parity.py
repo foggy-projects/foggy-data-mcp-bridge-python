@@ -21,6 +21,7 @@ from foggy.dataset_model.engine.compose.plan import QueryPlan, from_
 from foggy.dataset_model.engine.compose.security import (
     AuthorityRequest,
     AuthorityResolution,
+    AuthorityResolutionError,
     ModelBinding,
 )
 from foggy.dataset_model.semantic.pivot.domain_transport import DomainTransportPlan
@@ -53,6 +54,14 @@ class _PermissiveResolver:
         )
 
 
+class _StaticResolver:
+    def __init__(self, bindings: dict[str, ModelBinding]) -> None:
+        self.bindings = bindings
+
+    def resolve(self, request: AuthorityRequest) -> AuthorityResolution:
+        return AuthorityResolution(bindings=self.bindings)
+
+
 class _CapturingSemanticService:
     def __init__(self) -> None:
         self.model: str | None = None
@@ -78,11 +87,11 @@ def _sales_service() -> SemanticQueryService:
     return service
 
 
-def _compose_context() -> ComposeQueryContext:
+def _compose_context(authority_resolver: Any | None = None) -> ComposeQueryContext:
     return ComposeQueryContext(
         principal=Principal(user_id="snapshot-user", tenant_id="demo", roles=["analyst"]),
         namespace="demo",
-        authority_resolver=_PermissiveResolver(),
+        authority_resolver=authority_resolver or _PermissiveResolver(),
         trace_id="java-governance-snapshot",
     )
 
@@ -144,6 +153,8 @@ def _assert_case_replays(case: dict[str, Any]) -> None:
         _assert_compile_forwarding(case)
     elif case_type == "compile-error":
         _assert_compile_error(case)
+    elif case_type == "authority-resolution":
+        _assert_authority_resolution(case)
     elif case_type == "denied-column-mapping":
         _assert_denied_column_mapping(case)
     elif case_type == "query-validation":
@@ -208,6 +219,43 @@ def _assert_compile_error(case: dict[str, Any]) -> None:
 
     assert exc_info.value.code == expected["errorCode"]
     assert exc_info.value.phase == expected["phase"]
+
+
+def _assert_authority_resolution(case: dict[str, Any]) -> None:
+    expected = case["expected"]
+    service = _CapturingSemanticService()
+    resolver_bindings = {
+        model: _binding_from_snapshot(binding)
+        for model, binding in case.get("resolverBindings", {}).items()
+    }
+
+    if expected["passes"]:
+        composed = compile_plan_to_sql(
+            _plan_from_snapshot(case["plan"]),
+            _compose_context(_StaticResolver(resolver_bindings)),
+            semantic_service=service,
+            dialect="mysql8",
+        )
+        for marker in expected.get("sqlMarkers", []):
+            assert marker in composed.sql, f"[{case['id']}] SQL marker missing: {marker}"
+        assert service.model == expected["forwardedModel"]
+        assert service.request is not None
+        assert service.request.columns == expected["forwardedColumns"]
+        assert service.request.field_access is not None
+        assert service.request.field_access.visible == expected["forwardedFieldAccess"]
+        return
+
+    with pytest.raises(AuthorityResolutionError) as exc_info:
+        compile_plan_to_sql(
+            _plan_from_snapshot(case["plan"]),
+            _compose_context(_StaticResolver(resolver_bindings)),
+            semantic_service=service,
+            dialect="mysql8",
+        )
+
+    assert exc_info.value.code == expected["errorCode"]
+    assert exc_info.value.phase == expected["phase"]
+    assert exc_info.value.model_involved == expected["modelInvolved"]
 
 
 def _assert_denied_column_mapping(case: dict[str, Any]) -> None:

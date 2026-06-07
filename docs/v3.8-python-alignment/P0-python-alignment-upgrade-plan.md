@@ -447,6 +447,33 @@ BUG-P0-17 follow-up:
 - Full Python pytest passed:
   `4041 passed, 232 skipped, 43 warnings in 18.02s`.
 
+P0-18 follow-up:
+
+- Extended the active governance snapshot producer/replay with
+  authority-resolved visible-model allow/deny cases:
+  `JavaGovernanceSnapshotTest.java`,
+  `tests/fixtures/java_governance_snapshot_parity.json`, and
+  `tests/integration/test_java_governance_snapshot_parity.py`.
+- Added neutral Java cases proving the one-shot compile path uses
+  `AuthorityResolutionPipeline.resolve` when explicit bindings are absent:
+  - `authority-visible-model-allow-compiles`
+  - `authority-visible-model-deny-missing-binding-fails-closed`
+- The denied case fails closed with
+  `compose-authority-resolve/model-binding-missing` at `authority-resolve`
+  instead of falling through to plan-lower missing binding.
+- Governance manifest lane now advertises authority-resolved visible-model
+  allow/deny as active coverage.
+- Focused Java exporter first hit a transient Maven incremental testCompile
+  classpath failure on existing compose classes such as `CteUnit`,
+  `JoinSpec`, and `CteComposer`; immediate rerun passed:
+  `Tests run: 1, Failures: 0, Errors: 0, Skipped: 0`.
+- Scoped ruff passed:
+  `All checks passed!`.
+- Python replay plus manifest passed:
+  `6 passed in 0.53s`.
+- Full Python pytest passed:
+  `4049 passed, 232 skipped, 43 warnings in 17.65s`.
+
 Odoo registry consumer baseline:
 
 - Python has `scripts/pull-odoo-models.py` and `scripts/check-model-drift.py`.
@@ -478,7 +505,7 @@ Priorities:
 | Compose Query / derived query / relation reuse | `compose-query.md` marks QueryPlan base/derived/union/join, CTE/subquery, script runtime, second-stage compute, and cross-DB `joinInMemory` complete. Java v3.0 adds qualified join field/source alias parity and has lexical-scope ambiguity follow-up open. | Python has `engine/compose` with plan, schema, relation, compilation, runtime, security, sandbox, authority, and MCP `ComposeScriptTool`. v1.16 fixed derived same-stage alias handling but records unrelated baseline failures. | Core exists, but current Java v3.0 alias/source-scope snapshots and relation reuse edge cases need a fresh cross-language fixture run. Lexical scope/ambiguity remains unresolved on both sides and should stay fail-closed until contract is frozen. | Medium | P0 | Export Java v3.0 compose alias fixtures and replay in Python against plan schema, SQL, error code, and script output. Include derived slice alias, join qualified refs, source alias inheritance, and ambiguous/shadowed alias refusals. |
 | SQL compilation / CTE / union / join | Java supports Base/Derived/Union/Join QueryPlan, dialect CTE/subquery strategy, real SQL parity, and SQL Server subquery fallback. Java 9.2 additionally accepted QueryModel aggregate join on Java only. | Python M6/M7 implemented `compile_plan_to_sql`, CTE/subquery fallback, union/join tests, relation outer runtime, and stable relation snapshots. | General compile path is close, but current Java dialect fallback matrix and aggregate-join feature are not aligned. Stable relation join/union-as-source remains a known follow-up from v1.15. | High | P0 for snapshot parity, P2 for aggregate join | P0: cross-dialect golden SQL snapshot for base/derived/union/join and SQL Server fallback. P2: separate aggregate-join Python design with RHS preaggregation, permission propagation, and real DB parity. |
 | Script/runtime tool | Java has `dataset.compose_script`, `DataSetResult`, `ComposedDataSetResult`, `QueryPlan.execute/to_sql`, script parity tests, and tool-level MCP entry. P0-4 now exports tool markers, runtime globals, basic result shape, preview SQL capture, and security fail-closed cases. | Python has `ComposeScriptTool`, ContextVar runtime bundle, `execute_sql`, plan execution, capability registry/library loader, JS fixture parity tests, and MCP binding tests. P0-4 replay validates shared tool markers and runtime cases. README still says `dataset.compose_query` is pending. | First neutral snapshot lane is active. Remaining gaps are DataSetResult row-shape parity, MCP host-misconfig payload snapshots, capability allow/deny snapshots, and a decision on Python's extra fsscript globals. | Medium | P0/P1 | Keep P0-4 replay active; extend it with Java row/DataSetResult, host-misconfig, and capability fail-closed fixtures before changing production runtime behavior. |
-| Permission / visible model / denied columns | Java 9.x preserves governance across queryModel, pivot, domain transport, and aggregate join; visible model and denied column behavior is fail-closed. P0-5/P0-6 now export neutral `ModelBinding`, compiler forwarding, missing-binding fail-closed, denied-column mapping, query validation, and metadata trimming snapshots. P0-16 adds Pivot and domain transport denied-column propagation snapshots. | Python has authorization tests, compose authority/security tests, visible/denied logic in semantic service, and v1.15 acceptance for governance cross-path behavior. P0-5/P0-6 replay validates the corresponding Python boundary plus real Python `SemanticQueryService` mapping/query/metadata behavior. P0-16 replays Pivot and domain transport fail-closed validation with deniedColumns. | Neutral governance lane is active through queryModel denied-column validation, metadata trimming, and Pivot/domain transport propagation. Remaining gaps are authority-resolved visible model allow/deny cases, cross-model calculated-field refusals, sanitized error payloads, and aggregate join governance. Current Odoo/domain fixture layer is stale and cannot prove latest visible model coverage. | High | P0/P1 for regression evidence, P2 for aggregate join governance | Keep P0-5/P0-6/P0-16 replay active. Next export Java snapshots for authority-visible model allow/deny, cross-model calculated fields, and sanitized errors. |
+| Permission / visible model / denied columns | Java 9.x preserves governance across queryModel, pivot, domain transport, and aggregate join; visible model and denied column behavior is fail-closed. P0-5/P0-6 now export neutral `ModelBinding`, compiler forwarding, missing-binding fail-closed, denied-column mapping, query validation, and metadata trimming snapshots. P0-16 adds Pivot and domain transport denied-column propagation snapshots. P0-18 adds authority-resolved visible-model allow/deny snapshots. | Python has authorization tests, compose authority/security tests, visible/denied logic in semantic service, and v1.15 acceptance for governance cross-path behavior. P0-5/P0-6 replay validates the corresponding Python boundary plus real Python `SemanticQueryService` mapping/query/metadata behavior. P0-16 replays Pivot and domain transport fail-closed validation with deniedColumns. P0-18 replays one-shot authority resolution through `compile_plan_to_sql(..., bindings=None)`. | Neutral governance lane is active through authority-resolved visible-model allow/deny, queryModel denied-column validation, metadata trimming, and Pivot/domain transport propagation. Remaining gaps are cross-model calculated-field refusals, sanitized error payloads, and aggregate join governance. Current Odoo/domain fixture layer is stale and cannot prove latest business visible-model coverage. | High | P0/P1 for regression evidence, P2 for aggregate join governance | Keep P0-5/P0-6/P0-16/P0-18 replay active. Next export Java snapshots for cross-model calculated fields and sanitized errors. |
 | Inline formula / calculated fields / alias behavior | Java includes formula compiler parity, predefined formula fixes, inline formula/calculated fields, alias behavior, v3.0 semantic money scale, and 9.2 formula follow-ups. | Python has formula compiler/capability tests, formula field extraction, semantic service formula compiler, timeWindow/calculatedFields history, and v1.16 same-stage alias fix. Current pytest has formula parity snapshot/catalog failures. Existing dirty Python files touch dict/loader/service and may be related to metadata/semantic scale work. | This is the clearest active drift: current parity snapshot tests fail, Java has newer formula/money-scale work, and Python has uncommitted local changes in related modules that must not be overwritten. | High | P0/P1 | P0: repair or regenerate Java formula snapshot catalog evidence without changing engine behavior. P1: implement bounded formula gaps only after current dirty changes are understood; include alias-in-slice/order/group tests and semantic scale golden cases. |
 | Time window / relative date | Java supports timeWindow in query paths; pivot forbids direct timeWindow and routes time intelligence through calculated fields. Compose docs mention rolling windows and pending MySQL8 lane evidence. | Python has `time_window.py`, Java parity catalog fixture, SQLite execution, real DB matrix tests, and v1.15 acceptance for timeWindow. | Mostly aligned. Need current Java snapshot refresh for relative dates and dialect behavior, plus confirm pivot rejection remains stable. | Medium | P1 | Replay Java time window catalog and real DB matrix where DB fixtures are available. Keep pivot+timeWindow refusal tests in P0 smoke set. |
 | Pivot / subtotal / non-additive / baseline ratio | Java 9.0/9.1 has Pivot DSL, flat/grid/tree boundaries, subtotals/grand totals, non-additive aux requery, parentShare, baselineRatio, Stage5A domain transport, Stage5B rows two-level cascade, and explicit fail-closed cases. P0-7 exports neutral Pivot DTO and ordinary flat translation contracts; P0-8/P0-10/P0-11/P0-12/P0-13/P0-14 cover real SQLite flat/grid/grandTotal/rowSubtotals/parentShare/baselineRatio plus ordinary flat non-additive subtotal/grandTotal output snapshots; P0-15 covers the SQLite `>500` domain transport threshold and Python SQLite bind-limit refusal as a documented gap; P0-16 covers Pivot/domain denied-column governance propagation. Tree+cascade, outer pivot cache, SQL Server cascade, and conservative MySQL/MySQL5.7 cascade remain deferred/refused. | Python v1.8-v1.15 docs and tests show Pivot V9 flat/grid, contract shell, domain transport, cascade semantics/totals, MySQL57 and SQL Server refusal matrices, parentShare unit coverage, and v1.15 accepted parity baseline. P0-7 replay validates Pivot DTO parsing and ordinary flat translation through `validate_and_translate_pivot`; P0-8/P0-10/P0-11/P0-12/P0-13/P0-14 replay real flat/grid/grandTotal/rowSubtotals/parentShare/baselineRatio/non-additive-total SQLite output; P0-15 replays large-domain renderer behavior; P0-16 replays Pivot/domain governance propagation; P0-9 fixes Pivot output-shape cache-key isolation. | DTO/ordinary translation, real flat/grid/grandTotal/rowSubtotals/parentShare/baselineRatio/non-additive-total output evidence, output cache isolation, large-domain SQLite renderer evidence, and Pivot/domain governance propagation evidence are now active. P0-13 closes the Python runtime gap for ordinary columns-axis `baselineRatio`; P0-14 closes the ordinary generated-total gap for non-additive native metrics by auxiliary requery; P0-15 documents Python's stricter SQLite bind limit. Still missing grid/cascade/tree non-additive evidence. Any tree/cascade extension should remain out of phase one. | High | P2 for deferred features | Keep P0-7/P0-8/P0-9/P0-10/P0-11/P0-12/P0-13/P0-14/P0-15/P0-16 active. P2: tree+cascade, outer cache, SQL Server cascade, MySQL5.7 live evidence. |
@@ -526,8 +553,10 @@ Recommended first three work items:
      queryModel column/orderBy refusal, and metadata trimming.
    - P0-16 has extended this lane with Pivot/domain transport denied-column
      propagation.
-   - Remaining extensions are visible model authority allow/deny, cross-model
-     calculated-field refusals, and sanitized error payloads.
+   - P0-18 has extended this lane with authority-resolved visible-model
+     allow/deny.
+   - Remaining extensions are cross-model calculated-field refusals and
+     sanitized error payloads.
    - Acceptance: Java producer and Python replay agree on structured error codes
      and governance request/context payloads.
 
@@ -682,7 +711,8 @@ Optional for P1/P2:
 
 ## Non-Goals For This Round
 
-- No commit or push.
+- Commit/push only user-approved, current-iteration files; do not stage or
+  clean unrelated Java/Python/registry dirty work.
 - No rollback/cleanup of existing Java, Python, or registry dirty work.
 - No generated Odoo model resync.
 - No large production engine rewrite before Java snapshot parity gates exist.
