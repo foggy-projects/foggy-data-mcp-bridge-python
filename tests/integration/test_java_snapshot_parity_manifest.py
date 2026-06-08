@@ -103,15 +103,14 @@ def test_active_java_owned_resources_are_available_when_declared() -> None:
         )
 
 
-def test_planned_manifest_entries_have_java_export_requirements() -> None:
+def test_non_active_manifest_entries_have_next_step_requirements() -> None:
     manifest = _load_manifest()
 
-    planned_entries = [
-        entry for entry in manifest["entries"] if entry["status"] == "planned"
+    non_active_entries = [
+        entry for entry in manifest["entries"] if entry["status"] != "active"
     ]
-    assert planned_entries
 
-    for entry in planned_entries:
+    for entry in non_active_entries:
         assert entry.get("javaExportNeeded"), (
             f"{entry['id']} must describe required Java snapshot exports"
         )

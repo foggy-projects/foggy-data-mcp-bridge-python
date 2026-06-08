@@ -121,6 +121,8 @@
       "javaExported": [
         "missing script input error-code normalization payload",
         "missing ToolExecutionContext bridge payload",
+        "missing X-User-Id header bridge payload",
+        "missing X-Namespace header bridge payload",
         "resolver-null host-misconfig payload with status/error_code/phase",
         "remote compose principal-mismatch permission-resolve payload",
         "remote compose missing authority binding invalid-response payload",
@@ -128,7 +130,6 @@
         "forbidden stack/exception marker checks"
       ],
       "plannedExtensions": [
-        "remaining header bridge matrix",
         "resolver factory exception payload"
       ],
       "verification": [

@@ -103,6 +103,8 @@ def test_header_mode_missing_user_id_raises():
     with pytest.raises(ValueError) as exc:
         to_compose_context(tc, authority_resolver=_DuckResolver())
     assert "principal identity" in str(exc.value)
+    assert "X-User-Id" in str(exc.value)
+    assert "required" in str(exc.value)
 
 
 def test_header_mode_falls_back_to_tool_ctx_user_id():
@@ -164,11 +166,22 @@ def test_namespace_from_header_when_ctx_missing():
     assert ctx.namespace == "header-ns"
 
 
+def test_namespace_from_x_ns_header_when_ctx_and_x_namespace_missing():
+    tc = _tool_ctx(
+        headers={"X-User-Id": "u1", "X-NS": "alias-ns"},
+    )
+    ctx = to_compose_context(tc, authority_resolver=_DuckResolver())
+    assert ctx.namespace == "alias-ns"
+
+
 def test_namespace_missing_everywhere_raises():
     tc = _tool_ctx(headers={"X-User-Id": "u1"})
     with pytest.raises(ValueError) as exc:
         to_compose_context(tc, authority_resolver=_DuckResolver())
     assert "namespace" in str(exc.value)
+    assert "X-Namespace" in str(exc.value)
+    assert "X-NS" in str(exc.value)
+    assert "required" in str(exc.value)
 
 
 # ---------------------------------------------------------------------------

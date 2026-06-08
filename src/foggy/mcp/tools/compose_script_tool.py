@@ -197,7 +197,7 @@ class ComposeScriptTool(BaseMcpTool):
             )
         except (ValueError, TypeError) as exc:
             return self._error_payload(
-                error_code="host-misconfig",
+                error_code="internal-error",
                 phase="internal",
                 message=str(exc),
             )

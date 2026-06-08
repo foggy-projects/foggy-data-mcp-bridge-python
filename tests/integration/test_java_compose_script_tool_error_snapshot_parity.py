@@ -71,8 +71,13 @@ async def _execute_case(case: dict[str, Any]):
             None if context is None else _tool_context(context),
         )
 
+    resolver_factory = (
+        (lambda _ctx: None)
+        if case["id"] == "resolver-null-host-misconfig"
+        else (lambda _ctx: _PermissiveResolver())
+    )
     tool = ComposeScriptTool(
-        authority_resolver_factory=lambda _ctx: None,
+        authority_resolver_factory=resolver_factory,
         semantic_service=_StubSemanticService(),
     )
     context = case.get("context")

@@ -13,7 +13,7 @@ Resolution priority (mirrors M7 execution prompt §7.1):
    without round-tripping through HTTP headers.
 2. **Header mode** — fall back to parsing ``X-User-Id`` / ``Authorization``
    / ``X-Tenant-Id`` / ``X-Roles`` / ``X-Dept-Id`` / ``X-Policy-Snapshot-Id``
-   / ``X-Trace-Id`` / ``X-Namespace``.
+   / ``X-Trace-Id`` / ``X-Namespace`` / ``X-NS``.
 
 Fail-closed: if neither branch produces a non-empty ``user_id`` or a non-
 empty ``namespace``, we raise :class:`ValueError`. Sandbox layer M9 will
@@ -29,7 +29,6 @@ from foggy.mcp_spi.context import ToolExecutionContext
 
 from ..context.compose_query_context import ComposeQueryContext
 from ..context.principal import Principal
-
 
 __all__ = ["to_compose_context"]
 
@@ -54,7 +53,8 @@ def _build_principal_from_headers(tool_ctx: ToolExecutionContext) -> Principal:
         raise ValueError(
             "ToolExecutionContext missing principal identity: "
             "neither state['compose.principal'] nor X-User-Id / user_id are "
-            "set. Compose script requires a non-empty user identity."
+            "set. X-User-Id header is required for dataset.compose_script "
+            "header mode."
         )
     tenant_id = tool_ctx.get_header("X-Tenant-Id")
     roles = _parse_roles(tool_ctx.get_header("X-Roles"))
@@ -77,6 +77,7 @@ def _resolve_namespace(tool_ctx: ToolExecutionContext) -> str:
     1. ``state["compose.namespace"]`` — embedded override
     2. ``tool_ctx.namespace`` — set by MCP dispatcher
     3. ``X-Namespace`` header
+    4. ``X-NS`` header alias
 
     Raises ValueError if none present / all empty.
     """
@@ -88,10 +89,14 @@ def _resolve_namespace(tool_ctx: ToolExecutionContext) -> str:
     header_ns = tool_ctx.get_header("X-Namespace")
     if header_ns:
         return header_ns
+    header_ns = tool_ctx.get_header("X-NS")
+    if header_ns:
+        return header_ns
     raise ValueError(
         "ToolExecutionContext missing namespace: neither "
         "state['compose.namespace'] nor tool_ctx.namespace nor X-Namespace "
-        "header supplied a non-empty value."
+        "or X-NS header supplied a non-empty value. X-Namespace or X-NS "
+        "header is required for dataset.compose_script header mode."
     )
 
 

@@ -34,7 +34,6 @@ from foggy.dataset_model.engine.compose.security import (
 from foggy.mcp.tools.compose_script_tool import ComposeScriptTool
 from foggy.mcp_spi.context import ToolExecutionContext
 
-
 # ---------------------------------------------------------------------------
 # Test doubles
 # ---------------------------------------------------------------------------
@@ -202,7 +201,7 @@ async def test_factory_returning_none_is_host_misconfig():
 
 
 @pytest.mark.asyncio
-async def test_missing_user_id_bridges_to_host_misconfig():
+async def test_missing_user_id_bridges_to_internal_error():
     tool = ComposeScriptTool(
         authority_resolver_factory=_resolver_factory,
         semantic_service=_StubSemanticService(),
@@ -212,8 +211,27 @@ async def test_missing_user_id_bridges_to_host_misconfig():
     )
     result = await tool.execute({"script": "1"}, tc)
     assert result.success is False
-    assert result.data["error_code"] == "host-misconfig"
+    assert result.data["error_code"] == "internal-error"
     assert "principal identity" in result.data["message"]
+    assert "X-User-Id" in result.data["message"]
+    assert "required" in result.data["message"]
+
+
+@pytest.mark.asyncio
+async def test_missing_namespace_bridges_to_internal_error():
+    tool = ComposeScriptTool(
+        authority_resolver_factory=_resolver_factory,
+        semantic_service=_StubSemanticService(),
+    )
+    tc = ToolExecutionContext(
+        request_id="r1", namespace=None, headers={"X-User-Id": "u1"},
+    )
+    result = await tool.execute({"script": "1"}, tc)
+    assert result.success is False
+    assert result.data["error_code"] == "internal-error"
+    assert "namespace" in result.data["message"]
+    assert "X-Namespace" in result.data["message"]
+    assert "required" in result.data["message"]
 
 
 # ---------------------------------------------------------------------------

@@ -35,6 +35,44 @@
       "forbiddenMarkers" : [ "NullPointerException", "Traceback", "Exception:", "at com." ]
     }
   }, {
+    "id" : "missing-user-id-header",
+    "arguments" : {
+      "script" : "return 1;"
+    },
+    "context" : {
+      "traceId" : "java-compose-script-tool-error-snapshot",
+      "namespace" : "demo",
+      "headers" : {
+        "X-Namespace" : "demo"
+      }
+    },
+    "expected" : {
+      "status" : "error",
+      "errorCode" : "internal-error",
+      "phase" : "internal",
+      "messageMarkers" : [ "X-User-Id", "required" ],
+      "forbiddenMarkers" : [ "NullPointerException", "Traceback", "Exception:", "at com." ]
+    }
+  }, {
+    "id" : "missing-namespace-header",
+    "arguments" : {
+      "script" : "return 1;"
+    },
+    "context" : {
+      "traceId" : "java-compose-script-tool-error-snapshot",
+      "namespace" : null,
+      "headers" : {
+        "X-User-Id" : "snapshot-user"
+      }
+    },
+    "expected" : {
+      "status" : "error",
+      "errorCode" : "internal-error",
+      "phase" : "internal",
+      "messageMarkers" : [ "X-Namespace", "required" ],
+      "forbiddenMarkers" : [ "NullPointerException", "Traceback", "Exception:", "at com." ]
+    }
+  }, {
     "id" : "resolver-null-host-misconfig",
     "arguments" : {
       "script" : "return 1;"
