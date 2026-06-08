@@ -25,6 +25,7 @@ REQUIRED_FEATURES = {
     "pivotDomainTransport",
     "governance",
     "domainFixtures",
+    "semanticScaleFactor",
 }
 
 

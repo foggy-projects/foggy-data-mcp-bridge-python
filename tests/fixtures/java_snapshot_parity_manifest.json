@@ -251,6 +251,35 @@
       ]
     },
     {
+      "id": "semantic-scale-factor-snapshots",
+      "feature": "semanticScaleFactor",
+      "status": "active",
+      "owner": "java",
+      "scope": "semanticScaleFactor SQL rewriting, metadata, helper literals, and fail-closed validation",
+      "javaExporter": "foggy-dataset-model/src/test/java/com/foggyframework/dataset/db/model/parity/JavaSemanticScaleSnapshotTest.java",
+      "pythonFixtures": [
+        "tests/fixtures/java_semantic_scale_snapshot_parity.json"
+      ],
+      "pythonTests": [
+        "tests/integration/test_java_semantic_scale_snapshot_parity.py"
+      ],
+      "javaExported": [
+        "semantic scale helper literal formatting",
+        "dimension property SQL rewrite",
+        "aggregate alias HAVING SQL rewrite",
+        "calculatedFields reuse of scaled measure references",
+        "formula-backed property SQL rewrite",
+        "V3 metadata semanticScaleFactor/semanticUnit exposure",
+        "invalid carrier-column fail-closed validation"
+      ],
+      "verification": [
+        "Python replays Java helper literal contract",
+        "Python validates SQL markers and Python params from the Java fixture",
+        "Python validates metadata semantic scale unit fields",
+        "Python validates invalid SQL-expression carrier columns fail closed"
+      ]
+    },
+    {
       "id": "domain-question-neutral-runner",
       "feature": "domainFixtures",
       "status": "active",

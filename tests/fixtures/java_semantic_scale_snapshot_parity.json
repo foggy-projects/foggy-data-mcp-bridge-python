@@ -1,0 +1,98 @@
+{
+  "schemaVersion" : 1,
+  "feature" : "semanticScaleFactor",
+  "source" : "JavaSemanticScaleSnapshotTest",
+  "cases" : [ {
+    "id" : "helper-literal-contract",
+    "type" : "helper",
+    "expected" : {
+      "scaled100" : "((t.amount) / 100.0)",
+      "scaled250" : "((t.amount) / 2.5)"
+    }
+  }, {
+    "id" : "dimension-property-sql",
+    "type" : "sql",
+    "model" : "FactSalesSemanticScaleQueryModel",
+    "request" : {
+      "columns" : [ "orderId", "product$unitPriceYuan" ]
+    },
+    "expected" : {
+      "javaSqlMarkers" : [ "unit_price", "/ 100.0" ],
+      "pythonSqlMarkers" : [ "((dp.unit_price) / 100.0)" ],
+      "javaParams" : [ ],
+      "pythonParams" : [ ]
+    }
+  }, {
+    "id" : "measure-having-sql",
+    "type" : "sql",
+    "model" : "FactSalesSemanticScaleQueryModel",
+    "request" : {
+      "columns" : [ "orderId", "sum(salesAmountYuan) as totalSalesAmountYuan" ],
+      "having" : [ {
+        "field" : "totalSalesAmountYuan",
+        "op" : ">",
+        "value" : 1000
+      } ],
+      "groupBy" : [ "orderId" ]
+    },
+    "expected" : {
+      "javaSqlMarkers" : [ "SUM", "sales_amount", "/ 100.0", "having" ],
+      "pythonSqlMarkers" : [ "SUM(((t.sales_amount) / 100.0))", "totalSalesAmountYuan", "HAVING" ],
+      "javaParams" : [ 1000 ],
+      "pythonParams" : [ 1000 ]
+    }
+  }, {
+    "id" : "calculated-field-sql",
+    "type" : "sql",
+    "model" : "FactSalesSemanticScaleQueryModel",
+    "request" : {
+      "columns" : [ "orderId", "salesAmountYuan", "salesAmountPlusTen" ],
+      "calculatedFields" : [ {
+        "name" : "salesAmountPlusTen",
+        "expression" : "salesAmountYuan + 10"
+      } ]
+    },
+    "expected" : {
+      "javaSqlMarkers" : [ "sales_amount", "/ 100.0", "+ 10" ],
+      "pythonSqlMarkers" : [ "((t.sales_amount) / 100.0)", "+ ?" ],
+      "javaParams" : [ ],
+      "pythonParams" : [ 10 ]
+    }
+  }, {
+    "id" : "formula-property-sql",
+    "type" : "sql",
+    "model" : "FactSalesSemanticScaleFormulaQueryModel",
+    "request" : {
+      "columns" : [ "orderId", "salesAmountFormulaLeafYuan" ],
+      "slice" : [ {
+        "field" : "salesAmountFormulaLeafYuan",
+        "op" : ">",
+        "value" : 1000
+      } ]
+    },
+    "expected" : {
+      "javaSqlMarkers" : [ "sales_amount", "+ 2", "/ 100.0", "where" ],
+      "pythonSqlMarkers" : [ "((t.sales_amount + 2) / 100.0)", "WHERE" ],
+      "javaParams" : [ 1000 ],
+      "pythonParams" : [ 1000 ]
+    }
+  }, {
+    "id" : "metadata-semantic-unit",
+    "type" : "metadata",
+    "model" : "FactSalesSemanticScaleQueryModel",
+    "fields" : [ "salesAmountYuan", "product$unitPriceYuan" ],
+    "expected" : {
+      "semanticScaleFactor" : "100",
+      "semanticUnit" : "CNY",
+      "semanticUnitLabel" : "元"
+    }
+  }, {
+    "id" : "invalid-carrier-column-fail-closed",
+    "type" : "model-load-error",
+    "field" : "salesAmountYuan",
+    "invalidColumn" : "sales_amount + 0",
+    "expected" : {
+      "errorMarkers" : [ "column" ]
+    }
+  } ]
+}

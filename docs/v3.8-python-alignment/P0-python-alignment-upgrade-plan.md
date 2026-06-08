@@ -696,8 +696,11 @@ P0-30 follow-up:
   properties, dimension properties, measures, `formulaDef` /
   `dialectFormulaDef` results, query SQL, calculated-field references, and V3
   metadata.
-- Remaining semantic scale gaps are namespace-level opt-out parity and optional
-  neutral snapshot catalog promotion.
+- P0-32 closed the neutral snapshot catalog promotion with Java-exported helper,
+  SQL, metadata, and fail-closed cases replayed by Python.
+- Remaining semantic scale gaps are namespace-level opt-out parity, live DB
+  result parity, and optional stricter Java-style aggregate alias HAVING
+  validation.
 
 P0-31 follow-up:
 
@@ -707,6 +710,17 @@ P0-31 follow-up:
   denied-field fail-closed behavior.
 - Kept LLM transcript evaluation, Odoo packs, registry pull, and generated model
   refresh out of this P0 lane.
+
+P0-32 follow-up:
+
+- Promoted semantic scale into the active Java snapshot parity manifest as
+  `semanticScaleFactor`.
+- Added Java exporter and Python replay for helper literal formatting,
+  dimension-property SQL, aggregate alias HAVING SQL, calculatedFields,
+  formula-backed properties, V3 metadata, and invalid carrier-column
+  validation.
+- Recorded the Java/Python calculated-field parameterization difference through
+  separate `javaParams` and `pythonParams` fixture expectations.
 
 Odoo registry consumer baseline:
 
