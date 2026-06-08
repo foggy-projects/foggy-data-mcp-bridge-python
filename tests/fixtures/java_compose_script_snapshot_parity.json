@@ -158,5 +158,31 @@
       "params" : [ ],
       "errorMarker" : "Security parameters"
     }
+  }, {
+    "id" : "capability-pure-runtime-policy-allow",
+    "dialect" : "mysql",
+    "previewMode" : false,
+    "script" : "return fiscalYear(4);",
+    "expected" : {
+      "valueType" : "number",
+      "value" : 2025,
+      "hasSql" : false,
+      "sqlMarkers" : [ ],
+      "params" : [ ]
+    },
+    "capabilityScenario" : "fiscal-year-allow"
+  }, {
+    "id" : "capability-pure-runtime-policy-deny",
+    "dialect" : "mysql",
+    "previewMode" : false,
+    "script" : "return fiscalYear(4);",
+    "expected" : {
+      "valueType" : "error",
+      "hasSql" : false,
+      "sqlMarkers" : [ ],
+      "params" : [ ],
+      "errorMarker" : "fiscalYear"
+    },
+    "capabilityScenario" : "fiscal-year-deny"
   } ]
 }

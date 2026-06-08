@@ -9,6 +9,11 @@ from typing import Any
 import pytest
 
 from foggy.dataset_model.engine.compose import ComposedSql
+from foggy.dataset_model.engine.compose.capability import (
+    CapabilityPolicy,
+    CapabilityRegistry,
+    FunctionDescriptor,
+)
 from foggy.dataset_model.engine.compose.context import ComposeQueryContext, Principal
 from foggy.dataset_model.engine.compose.plan.plan import (
     BaseModelPlan,
@@ -157,6 +162,7 @@ def _columns_sql(columns: tuple[str, ...], *, leading: bool = True) -> str:
 
 def _assert_case_replays(case: dict[str, Any]) -> None:
     expected = case.get("expected", {})
+    capability_registry, capability_policy = _capability_inputs(case)
     error_marker = expected.get("errorMarker")
     if error_marker:
         with pytest.raises(Exception) as exc_info:  # noqa: BLE001
@@ -166,6 +172,8 @@ def _assert_case_replays(case: dict[str, Any]) -> None:
                 semantic_service=_StubSemanticService(),
                 dialect=case.get("dialect", "mysql"),
                 preview_mode=bool(case.get("previewMode")),
+                capability_registry=capability_registry,
+                capability_policy=capability_policy,
             )
         assert error_marker in str(exc_info.value)
         return
@@ -176,6 +184,8 @@ def _assert_case_replays(case: dict[str, Any]) -> None:
         semantic_service=_StubSemanticService(),
         dialect=case.get("dialect", "mysql"),
         preview_mode=bool(case.get("previewMode")),
+        capability_registry=capability_registry,
+        capability_policy=capability_policy,
     )
     value_type = expected.get("valueType")
     if value_type == "number":
@@ -198,3 +208,32 @@ def _assert_case_replays(case: dict[str, Any]) -> None:
         plans = result.value["plans"]
         assert isinstance(plans, list)
         assert plans == expected.get("rows")
+
+
+def _capability_inputs(
+    case: dict[str, Any],
+) -> tuple[CapabilityRegistry | None, CapabilityPolicy | None]:
+    scenario = case.get("capabilityScenario")
+    if scenario not in {"fiscal-year-allow", "fiscal-year-deny"}:
+        return None, None
+
+    registry = CapabilityRegistry()
+    registry.register_function(
+        FunctionDescriptor(
+            name="fiscalYear",
+            kind="pure_runtime",
+            args_schema=[{"name": "month", "type": "int"}],
+            return_type="int",
+            deterministic=True,
+            side_effect="none",
+            allowed_in=["compose_runtime"],
+            audit_tag="test.fiscalYear",
+            dialects=None,
+        ),
+        handler=lambda month: 2025 if int(month) >= 4 else 2024,
+    )
+    if scenario == "fiscal-year-allow":
+        policy = CapabilityPolicy(allowed_functions=frozenset({"fiscalYear"}))
+    else:
+        policy = CapabilityPolicy.empty()
+    return registry, policy

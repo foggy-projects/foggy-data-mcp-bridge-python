@@ -25,6 +25,7 @@ Key design decisions:
 
 from __future__ import annotations
 
+import re
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -34,17 +35,17 @@ from foggy.fsscript.expressions.control_flow import ReturnException
 from foggy.fsscript.parser import COMPOSE_QUERY_DIALECT, FsscriptParser
 
 from .. import ComposedSql
+from ..capability.errors import CapabilityNotAllowedError
+from ..capability.library_loader import ControlledLibraryModuleLoader
 from ..capability.policy import CapabilityPolicy
 from ..capability.registry import CapabilityRegistry
 from ..capability.runtime_integration import build_capability_context
-from ..capability.library_loader import ControlledLibraryModuleLoader
 from ..context.compose_query_context import ComposeQueryContext
 from ..plan import from_ as _plan_from
 from ..plan import subquery as _plan_subquery
 from ..plan.column_normalizer import normalize_columns as _normalize_columns
 from ..plan.plan import QueryPlan
 from ..plan.query_factory import INSTANCE as _query_factory
-
 from ..sandbox import (
     scan_script_source,
     validate_columns,
@@ -52,10 +53,9 @@ from ..sandbox import (
     validate_slice,
 )
 
-from .plans_interceptor import intercept_plans
-
 # v1.9 P2.2: run context propagation and suspension manager.
-from .pause_primitive import set_run_context, _script_run_context
+from .pause_primitive import _script_run_context, set_run_context
+from .plans_interceptor import intercept_plans
 from .suspension import ScriptRunContext
 from .suspension_manager import SuspensionManager
 
@@ -273,6 +273,11 @@ def _evaluate_program(
         source,
         allow_controlled_imports=allow_controlled_imports,
     )
+    _preflight_denied_runtime_capabilities(
+        source,
+        capability_registry,
+        capability_policy,
+    )
 
     parser = FsscriptParser(source, dialect=COMPOSE_QUERY_DIALECT)
     program = parser.parse_program()
@@ -319,7 +324,7 @@ def _evaluate_program(
                 raise ValueError("runtime.pause requires 'reason'")
             if not timeout_ms:
                 raise ValueError("runtime.pause requires 'timeout_ms'")
-            
+
             return compose_pause(
                 reason=reason,
                 summary=opts.get("summary"),
@@ -327,7 +332,7 @@ def _evaluate_program(
                 resume_schema=opts.get("resume_schema"),
                 audit_tag=opts.get("audit_tag"),
             )
-            
+
         evaluator.context["runtime"] = {
             "pause": _runtime_pause
         }
@@ -337,6 +342,29 @@ def _evaluate_program(
     except ReturnException as ret_exc:
         # Top-level `return expr;` lifts out of the program scope.
         return getattr(ret_exc, "value", None)
+
+
+def _preflight_denied_runtime_capabilities(
+    source: str,
+    registry: Optional[CapabilityRegistry],
+    policy: Optional[CapabilityPolicy],
+) -> None:
+    """Fail closed before fsscript turns a denied capability into null-call."""
+    if registry is None or policy is None:
+        return
+    for name in registry.function_names:
+        entry = registry.get_function(name)
+        descriptor = entry.descriptor
+        if descriptor.kind != "pure_runtime":
+            continue
+        if "compose_runtime" not in descriptor.allowed_in:
+            continue
+        if policy.is_function_allowed(name):
+            continue
+        if re.search(rf"\b{re.escape(name)}\s*\(", source):
+            raise CapabilityNotAllowedError(
+                f"Capability function '{name}' is not allowed in compose_runtime."
+            )
 
 
 def _run_script_no_intercept(

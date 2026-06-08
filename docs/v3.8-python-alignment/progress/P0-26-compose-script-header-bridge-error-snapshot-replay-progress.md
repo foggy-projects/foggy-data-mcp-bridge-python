@@ -21,17 +21,25 @@ Date: 2026-06-08
 
 Passed:
 
-- Java focused Maven exporter:
-  `JAVA_HOME=/Users/fengjianguang/.jdk/temurin-17/Contents/Home mvn -pl foggy-dataset-mcp -am -P'!multi-db' -Dspring.profiles.active=sqlite -Dtest=JavaComposeScriptToolErrorSnapshotTest -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTests=false test`
-  - result: `Tests run: 1, Failures: 0, Errors: 0, Skipped: 0`
-- Python focused replay, context bridge checks, MCP tool checks, and manifest:
-  `.venv/bin/python -m pytest tests/integration/test_java_compose_script_tool_error_snapshot_parity.py tests/test_mcp/test_compose_script_tool.py tests/compose/runtime/test_context_bridge.py tests/integration/test_java_snapshot_parity_manifest.py -q`
-  - result: `45 passed, 39 warnings in 0.19s`
+- Standalone compile for the updated Java MCP exporter with the module
+  classpath:
+  `javac ... JavaComposeScriptToolErrorSnapshotTest.java`
+- Reflection execution of
+  `shouldProduceComposeScriptToolErrorSnapshot`, which generated the seven-case
+  Python fixture.
+- Java focused Maven execution:
+  `mvn -q -pl foggy-dataset-mcp -Dtest=JavaComposeScriptToolErrorSnapshotTest test`
+- Python focused replay, runtime replay, header unit checks, and manifest:
+  `12 passed, 8 warnings in 0.55s`
+- Full Python pytest baseline:
+  `4053 passed, 232 skipped, 51 warnings in 17.72s`
 
-Pending:
+Blocked:
 
-- Full Python pytest baseline.
-- Scoped ruff on touched files.
+- Scoped ruff on touched files:
+  `.venv/bin/ruff check src/foggy/dataset_model/engine/compose/runtime/script_runtime.py src/foggy/dataset_model/engine/compose/runtime/context_bridge.py src/foggy/mcp/tools/compose_script_tool.py tests/integration/test_java_compose_script_tool_error_snapshot_parity.py tests/integration/test_java_compose_script_snapshot_parity.py tests/test_mcp/test_compose_script_tool.py`
+  - blocked by existing file-wide typing-modernization and unused-import debt
+  - final run reported 66 errors after import-order fixes
 
 ## Notes
 

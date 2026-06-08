@@ -93,16 +93,17 @@
         "preview-mode SQL capture shape",
         "execute-mode rows envelope shape",
         "security-parameter fail-closed runtime error",
+        "pure_runtime capability policy allow/deny replay",
         "legacy DataSetResult/ComposedDataSetResult method names remain outside dataset.compose_script"
       ],
       "plannedExtensions": [
-        "capability registry fail-closed errors",
         "legacy result-object compatibility decision only if product reopens that API"
       ],
       "verification": [
         "Python ToolConfigLoader matches Java tool markers",
         "Python runtime covers Java injected globals with documented accepted extras",
-        "Python run_script replays success, SQL capture, execute rows, and fail-closed cases"
+        "Python run_script replays success, SQL capture, execute rows, and fail-closed cases",
+        "Python run_script fails closed with named capability errors when registry allows a symbol but policy denies it"
       ]
     },
     {
@@ -255,6 +256,7 @@
       "status": "planned",
       "owner": "java",
       "scope": "neutral request and expected tool-argument replay without Odoo models",
+      "designDoc": "docs/v3.8-python-alignment/design/P0-28-domain-question-neutral-runner-adapter-design.md",
       "javaExportNeeded": [
         "request payload",
         "expected tool arguments",

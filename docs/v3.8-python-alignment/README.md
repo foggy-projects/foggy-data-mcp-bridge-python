@@ -43,6 +43,9 @@ Current P0 execution records:
 - [P0-23-compose-script-remote-principal-mismatch-snapshot-replay.md](workitems/P0-23-compose-script-remote-principal-mismatch-snapshot-replay.md)
 - [P0-24-compose-script-remote-missing-binding-snapshot-replay.md](workitems/P0-24-compose-script-remote-missing-binding-snapshot-replay.md)
 - [P0-25-compose-script-input-context-error-snapshot-replay.md](workitems/P0-25-compose-script-input-context-error-snapshot-replay.md)
+- [P0-26-compose-script-header-bridge-error-snapshot-replay.md](workitems/P0-26-compose-script-header-bridge-error-snapshot-replay.md)
+- [P0-27-compose-script-capability-policy-snapshot-replay.md](workitems/P0-27-compose-script-capability-policy-snapshot-replay.md)
+- [P0-28-domain-question-neutral-runner-adapter.md](workitems/P0-28-domain-question-neutral-runner-adapter.md)
 
 Current active snapshot lanes:
 
@@ -63,22 +66,22 @@ Current active snapshot lanes:
 - Pivot domain transport large-domain threshold and SQLite bind-limit
   fail-closed snapshots
 
-Latest P0-25 status:
+Latest P0-28 status:
 
-- P0-25 extends the active MCP compose-script error snapshot lane with
-  `missing-script` and `missing-context`.
-- Python now aligns missing script to Java's `missing-script` error code and
-  missing ToolExecutionContext to Java's `internal-error` payload.
-- The Java exporter writes the five-case fixture:
+- P0-26 extends the active MCP compose-script error snapshot lane with
+  `missing-user-id-header` and `missing-namespace-header`.
+- Python now aligns header bridge `ValueError` / `TypeError` failures to
+  Java's `internal-error` payload while keeping resolver factory failures as
+  `host-misconfig`.
+- P0-27 extends the runtime snapshot lane with `pure_runtime` capability
+  policy allow/deny cases and adds Python preflight for registered-but-denied
+  runtime capability calls.
+- P0-28 records the neutral domain/question runner adapter design without
+  touching Odoo business models.
+- The Java exporters write:
   `tests/fixtures/java_compose_script_tool_error_snapshot_parity.json`.
-- Maven `foggy-dataset-mcp` focused execution is currently blocked by an
-  existing testCompile drift in `LocalDatasetAccessorGovernanceTest`
-  (`OutputFormattingItem` / `getOutputFormatting`). The new exporter compiles
-  standalone and was executed through reflection to generate the fixture.
-- Python focused replay, input/context unit checks, and manifest passed:
-  `9 passed, 6 warnings in 0.54s`.
-- Scoped ruff is blocked by existing file-wide lint debt in touched files:
-  `src/foggy/mcp/tools/compose_script_tool.py` typing-modernization findings
-  and `tests/test_mcp/test_compose_script_tool.py` import/typing findings.
-- Full Python pytest passed:
-  `4051 passed, 232 skipped, 47 warnings in 19.98s`.
+  and `tests/fixtures/java_compose_script_snapshot_parity.json`.
+- Python P0-26/P0-27 focused replay and manifest passed:
+  `12 passed, 8 warnings in 0.59s`.
+- Full Python pytest and Java focused Maven status are recorded in the
+  P0-26/P0-27 progress docs.
