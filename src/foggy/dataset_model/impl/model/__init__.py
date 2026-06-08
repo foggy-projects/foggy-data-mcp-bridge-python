@@ -1,5 +1,6 @@
 """Model implementation classes for semantic layer."""
 
+from decimal import Decimal
 from typing import Any, Dict, List, Optional, Set
 from pydantic import BaseModel, Field
 from datetime import datetime
@@ -13,6 +14,10 @@ from foggy.dataset_model.definitions.base import (
 )
 from foggy.dataset_model.definitions.measure import DbMeasureDef, MeasureType
 from foggy.dataset_model.definitions.access import DbAccessDef
+from foggy.dataset_model.impl.semantic_scale import (
+    apply_semantic_scale,
+    validate_semantic_scale_column,
+)
 
 
 class DimensionPropertyDef(BaseModel):
@@ -34,8 +39,11 @@ class DimensionPropertyDef(BaseModel):
         default=None, exclude=True,
         description="Raw dialectFormulaDef dict with builder callables for deferred SQL resolution",
     )
+    semantic_scale_factor: Optional[Decimal] = Field(default=None, alias="semanticScaleFactor")
+    semantic_unit: Optional[str] = Field(default=None, alias="semanticUnit")
+    semantic_unit_label: Optional[str] = Field(default=None, alias="semanticUnitLabel")
 
-    model_config = {"extra": "allow"}
+    model_config = {"extra": "allow", "populate_by_name": True}
 
     def get_name(self) -> str:
         """Get property name (camelCase of column if not specified)."""
@@ -227,6 +235,17 @@ class DbModelMeasureImpl(BaseModel):
     format_pattern: Optional[str] = Field(default=None, description="Number format pattern")
     unit: Optional[str] = Field(default=None, description="Unit (%, $, etc.)")
     decimals: int = Field(default=2, description="Decimal places")
+    semantic_scale_factor: Optional[Decimal] = Field(default=None, alias="semanticScaleFactor")
+    semantic_unit: Optional[str] = Field(default=None, alias="semanticUnit")
+    semantic_unit_label: Optional[str] = Field(default=None, alias="semanticUnitLabel")
+    formula_def_raw: Optional[Any] = Field(
+        default=None, exclude=True,
+        description="Raw formulaDef dict with builder callable for deferred SQL resolution",
+    )
+    dialect_formula_def_raw: Optional[Any] = Field(
+        default=None, exclude=True,
+        description="Raw dialectFormulaDef dict with builder callables for deferred SQL resolution",
+    )
 
     # Display
     visible: bool = Field(default=True, description="Visible in UI")
@@ -234,6 +253,7 @@ class DbModelMeasureImpl(BaseModel):
 
     model_config = {
         "extra": "allow",
+        "populate_by_name": True,
     }
 
     def get_display_name(self) -> str:
@@ -252,12 +272,13 @@ class DbModelMeasureImpl(BaseModel):
         col = column_alias or self.column or "*"
 
         if self.expression:
-            return self.expression
+            return apply_semantic_scale(self.expression, self.semantic_scale_factor)
 
         if self.measure_type == MeasureType.CALCULATED:
-            return self.expression or col
+            return apply_semantic_scale(self.expression or col, self.semantic_scale_factor)
 
         # Basic aggregation
+        col = apply_semantic_scale(col, self.semantic_scale_factor)
         agg = self.aggregation.value.upper()
         if agg == "COUNT_DISTINCT":
             return f"COUNT(DISTINCT {col})"
@@ -278,6 +299,14 @@ def _resolve_formula_sql(
     dialect_name: Optional[str] = None,
 ) -> Optional[str]:
     """Resolve formula SQL using the same priority as the Java loader."""
+    def _value_sql(entry: Any) -> Optional[str]:
+        if not isinstance(entry, dict):
+            return None
+        value = entry.get("value")
+        if isinstance(value, str) and value.strip():
+            return value.replace("alias.", f"{table_alias}.")
+        return None
+
     if dialect_formula_def and isinstance(dialect_formula_def, dict):
         if dialect_name:
             candidates = _dialect_formula_candidates(dialect_name)
@@ -289,18 +318,30 @@ def _resolve_formula_sql(
                 entry = by_lower_key.get(candidate)
                 if isinstance(entry, dict) and callable(entry.get("builder")):
                     return entry["builder"](table_alias)
+                sql = _value_sql(entry)
+                if sql:
+                    return sql
         else:
             for entry in dialect_formula_def.values():
                 if isinstance(entry, dict) and callable(entry.get("builder")):
                     return entry["builder"](table_alias)
+                sql = _value_sql(entry)
+                if sql:
+                    return sql
 
     if formula_def and isinstance(formula_def, dict) and callable(formula_def.get("builder")):
         return formula_def["builder"](table_alias)
+    sql = _value_sql(formula_def)
+    if sql:
+        return sql
 
     if dialect_formula_def and isinstance(dialect_formula_def, dict):
         for entry in dialect_formula_def.values():
             if isinstance(entry, dict) and callable(entry.get("builder")):
                 return entry["builder"](table_alias)
+            sql = _value_sql(entry)
+            if sql:
+                return sql
 
     return None
 
@@ -357,8 +398,77 @@ def _resolve_dimension_property_sql(
         dialect_name,
     )
     if sql:
-        return sql
-    return f"{table_alias}.{prop.column}"
+        validate_semantic_scale_column(
+            prop.semantic_scale_factor,
+            prop.column,
+            has_formula=True,
+            field_name=prop.get_name(),
+        )
+        return apply_semantic_scale(sql, prop.semantic_scale_factor)
+    validate_semantic_scale_column(
+        prop.semantic_scale_factor,
+        prop.column,
+        field_name=prop.get_name(),
+    )
+    return apply_semantic_scale(f"{table_alias}.{prop.column}", prop.semantic_scale_factor)
+
+
+def _resolve_fact_property_sql(
+    prop: DbColumnDef,
+    table_alias: str,
+    dialect_name: Optional[str] = None,
+) -> str:
+    sql = _resolve_formula_sql(
+        getattr(prop, "formula_def_raw", None),
+        getattr(prop, "dialect_formula_def_raw", None),
+        table_alias,
+        dialect_name,
+    )
+    if sql:
+        validate_semantic_scale_column(
+            getattr(prop, "semantic_scale_factor", None),
+            prop.name,
+            has_formula=True,
+            field_name=prop.alias or prop.name,
+        )
+        return apply_semantic_scale(sql, getattr(prop, "semantic_scale_factor", None))
+    validate_semantic_scale_column(
+        getattr(prop, "semantic_scale_factor", None),
+        prop.name,
+        field_name=prop.alias or prop.name,
+    )
+    return apply_semantic_scale(
+        f"{table_alias}.{prop.name}",
+        getattr(prop, "semantic_scale_factor", None),
+    )
+
+
+def _resolve_measure_sql(
+    measure: DbModelMeasureImpl,
+    table_alias: str,
+    dialect_name: Optional[str] = None,
+) -> str:
+    sql = _resolve_formula_sql(
+        getattr(measure, "formula_def_raw", None),
+        getattr(measure, "dialect_formula_def_raw", None),
+        table_alias,
+        dialect_name,
+    )
+    if sql:
+        validate_semantic_scale_column(
+            measure.semantic_scale_factor,
+            measure.column,
+            has_formula=True,
+            field_name=measure.name,
+        )
+        return apply_semantic_scale(sql, measure.semantic_scale_factor)
+    col = measure.column or measure.name
+    validate_semantic_scale_column(
+        measure.semantic_scale_factor,
+        col,
+        field_name=measure.name,
+    )
+    return apply_semantic_scale(f"{table_alias}.{col}", measure.semantic_scale_factor)
 
 
 def _is_time_dimension_root(
@@ -668,7 +778,7 @@ class DbTableModelImpl(BaseModel):
         if measure:
             agg = measure.aggregation.value.upper() if measure.aggregation else None
             return {
-                "sql_expr": f"{table_alias}.{measure.column or measure.name}",
+                "sql_expr": _resolve_measure_sql(measure, table_alias, dialect_name),
                 "alias_label": measure.alias or measure.name,
                 "table_alias": table_alias,
                 "is_measure": True,
@@ -711,7 +821,7 @@ class DbTableModelImpl(BaseModel):
         col_def = self.columns.get(field_name)
         if col_def:
             return {
-                "sql_expr": f"{table_alias}.{col_def.name}",
+                "sql_expr": _resolve_fact_property_sql(col_def, table_alias, dialect_name),
                 "alias_label": col_def.alias or col_def.comment or col_def.name,
                 "table_alias": table_alias,
                 "is_measure": False,
@@ -825,7 +935,7 @@ class DbTableModelImpl(BaseModel):
                 self.get_field_model_name(field_name)
             )
             return {
-                "sql_expr": f"{table_alias_m}.{measure.column or measure.name}",
+                "sql_expr": _resolve_measure_sql(measure, table_alias_m, dialect_name),
                 "alias_label": measure.alias or measure.name,
                 "table_alias": table_alias_m,
                 "is_measure": True,
@@ -858,7 +968,7 @@ class DbTableModelImpl(BaseModel):
                 self.get_field_model_name(field_name)
             )
             return {
-                "sql_expr": f"{table_alias_c}.{col_def.name}",
+                "sql_expr": _resolve_fact_property_sql(col_def, table_alias_c, dialect_name),
                 "alias_label": col_def.alias or col_def.comment or col_def.name,
                 "table_alias": table_alias_c,
                 "is_measure": False,
@@ -892,10 +1002,54 @@ class DbTableModelImpl(BaseModel):
 
         # Validate measures
         for measure_name, measure in self.measures.items():
-            if measure.measure_type == MeasureType.BASIC and not measure.column:
+            has_formula = bool(
+                getattr(measure, "formula_def_raw", None)
+                or getattr(measure, "dialect_formula_def_raw", None)
+            )
+            if measure.measure_type == MeasureType.BASIC and not measure.column and not has_formula:
                 errors.append(f"measure '{measure_name}' has no column reference")
             if measure.measure_type == MeasureType.CALCULATED and not measure.expression:
                 errors.append(f"calculated measure '{measure_name}' has no expression")
+            try:
+                validate_semantic_scale_column(
+                    measure.semantic_scale_factor,
+                    measure.column,
+                    has_formula=has_formula,
+                    field_name=measure_name,
+                )
+            except ValueError as exc:
+                errors.append(str(exc))
+
+        for col_name, col_def in self.columns.items():
+            has_formula = bool(
+                getattr(col_def, "formula_def_raw", None)
+                or getattr(col_def, "dialect_formula_def_raw", None)
+            )
+            try:
+                validate_semantic_scale_column(
+                    getattr(col_def, "semantic_scale_factor", None),
+                    col_def.name,
+                    has_formula=has_formula,
+                    field_name=col_name,
+                )
+            except ValueError as exc:
+                errors.append(str(exc))
+
+        for join_def in self.dimension_joins:
+            for prop in join_def.properties:
+                has_formula = bool(
+                    getattr(prop, "formula_def_raw", None)
+                    or getattr(prop, "dialect_formula_def_raw", None)
+                )
+                try:
+                    validate_semantic_scale_column(
+                        prop.semantic_scale_factor,
+                        prop.column,
+                        has_formula=has_formula,
+                        field_name=f"{join_def.name}${prop.get_name()}",
+                    )
+                except ValueError as exc:
+                    errors.append(str(exc))
 
         self.valid = len(errors) == 0
         return errors

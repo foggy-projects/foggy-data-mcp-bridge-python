@@ -689,8 +689,15 @@ P0-29 follow-up:
   context-scoped discovery cache isolation.
 - Keep domain-specific aliases in model packs. The engine owns only the generic
   opt-in discovery contract and metadata behavior.
-- Semantic scale / money units remains a separate follow-up and must not be
-  inferred from the dictionary discovery files.
+
+P0-30 follow-up:
+
+- Python now has core Java-aligned `semanticScaleFactor` support for fact
+  properties, dimension properties, measures, `formulaDef` /
+  `dialectFormulaDef` results, query SQL, calculated-field references, and V3
+  metadata.
+- Remaining semantic scale gaps are namespace-level opt-out parity and optional
+  neutral snapshot catalog promotion.
 
 Odoo registry consumer baseline:
 
@@ -731,7 +738,7 @@ Priorities:
 | Model registry consumer | Java and registry have current Odoo package promotion at `foggy.odoo.community@1.1.10` and `foggy.odoo.pro@1.1.10`, pull scripts, addon sync, lock update, and drift checks. | Python has pull and drift scripts from earlier v1.0 work, but current lock is `foggy.odoo.community@1.1.9`; local directory fails drift check; no evidence in this round that Python has consumed `1.1.10`. | Not absent, but stale and currently drifted. Since first phase avoids Odoo business model expansion, this should be treated as validation infrastructure debt, not first engine code work. | High | P1/P2 | P1: dry-run pull from local registry into a temp directory and verify checksum/loader compatibility. P2: update committed Odoo bundle only after engine snapshot gates pass and user approves touching generated Odoo files. |
 | Domain fixtures and question runner | Java 9.1 has domain fixture packs, `scripts/run-ai-domain-direct.sh`, Odoo direct baseline suites, report/warning collection, tool argument rule warnings, and model registry promotion evidence. | Python has unit/integration tests and Odoo demo models, but no equivalent AI domain direct runner found under `scripts/`; compose runtime has JS fixtures, and tests include Java timeWindow/formula parity fixtures. P0-28 adds the neutral adapter design and fixture schema. | Major validation gap. Python cannot yet replay Java domain question packs end-to-end until Java exports neutral request/tool-argument fixtures and Python adds the adapter runner. This remains more important than importing Odoo business models first. | High | P0/P1 | P0: implement the P0-28 neutral fixture adapter that can replay Java snapshot/request/expected-tool-argument cases through Python MCP/semantic service. P1: add domain runner for non-Odoo engine cases. P2: add Odoo packs after registry/model drift is resolved. |
 | Runtime dictionary discovery metadata | Java has `DbDictionaryDiscoveryDef`, runtime `DictionaryDiscoveryService`, metadata/markdown exposure, sensitive/hidden/error fail-closed handling, and model-level tests. | P0-29 adds the Python contract, loader parsing, V3 JSON/markdown exposure, context-scoped cache isolation, and focused regression tests. | Core metadata behavior is aligned. Remaining gap is whether to add this to the neutral Java/Python snapshot catalog. | Medium | P0/P1 | Keep P0-29 focused tests active; add neutral fixtures only if dictionary discovery becomes part of the shared snapshot catalog. |
-| Semantic scale / money units | Java v3.0 introduces `semanticScaleFactor` for monetary/unit semantics and rejects arbitrary SQL fragment shortcuts. | No accepted Python evidence in this round. The previously noted dirty dictionary/loader/service changes were runtime dictionary discovery metadata, not semantic scale. | Semantic scale remains unstarted/unproven in Python and must be handled as a separate work item. | High | P1 | Compare Java v3.0 semantic scale fixtures against Python loader, metadata, formula, and query output before implementation. |
+| Semantic scale / money units | Java v3.0 introduces `semanticScaleFactor` for monetary/unit semantics and rejects arbitrary SQL fragment shortcuts. | P0-30 adds Python helper validation, field carriers, loader parsing, formulaDef/dialectFormulaDef value resolution, scaled query SQL, calculated-field reuse, and V3 metadata exposure. | Core engine behavior is implemented with focused Python evidence. Remaining gaps are namespace-level opt-out config parity, live DB/result parity, and optional neutral snapshot catalog promotion. | High | P0/P1 | Keep P0-30 focused tests active; next add broader formula/metadata regression and neutral snapshots if semantic scale joins the shared catalog. |
 | QueryModel aggregate join | Java 9.2 accepted Java-only aggregate join: RHS preaggregation before LEFT JOIN, same datasource, fixed slice, permissions/system slice preserved, AND-only runtime pushdown, real SQLite/MySQL evidence. | No Python implementation evidence found in this audit. | Full feature gap. It is engine-level but not low risk, so it should not be phase-one implementation work. | High | P2 | New Python design doc and tests: AST/API contract, RHS aggregate plan, SQL generation, permission propagation, pushdown/refusal matrix, SQLite/MySQL/Postgres parity. |
 
 ## Phase One Recommendation
@@ -866,8 +873,8 @@ Tasks:
 1. Implement QueryModel aggregate join in Python if required:
    - RHS preaggregation, fixed slice, group-key validation, permission/system
      slice preservation, runtime pushdown/refusal matrix.
-2. Align semantic scale/money units after current dirty loader/service changes
-   are understood and reconciled.
+2. Extend semantic scale/money units evidence with neutral snapshots and
+   namespace opt-out parity only if product/runtime needs it.
 3. Add Odoo domain fixture packs and direct runner only after neutral fixture
    runner is stable.
 4. Consider deferred pivot features:
@@ -925,9 +932,10 @@ Optional for P1/P2:
 2. **Registry/Odoo consumer is stale and drifted.**
    Python has consumer scripts, but the committed lock is `1.1.9`, Java/registry
    current is `1.1.10`, and local Odoo model files do not match the lock.
-3. **Aggregate join and semantic scale are not proven in Python.**
-   Aggregate join is Java-only in 9.2. Semantic scale appears in Java v3.0, while
-   Python has related dirty files but no accepted evidence in docs.
+3. **Aggregate join is not proven in Python; semantic scale still needs broader evidence.**
+   Aggregate join is Java-only in 9.2. Semantic scale core behavior is now
+   implemented in P0-30, but neutral snapshot and live DB evidence are not yet
+   complete.
 4. **External resource coverage remains environment-dependent.**
    P0-1 fixed one missing profile gate, but many Java-resource and external DB
    lanes still skip locally. Java snapshot replay should make the always-on

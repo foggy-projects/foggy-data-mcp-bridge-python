@@ -1,6 +1,7 @@
 """Base definition classes for semantic layer."""
 
 from abc import ABC, abstractmethod
+from decimal import Decimal
 from enum import Enum
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
@@ -131,9 +132,15 @@ class DbColumnDef(BaseModel):
     size: Optional[int] = Field(default=None, description="Column size/length")
     precision: Optional[int] = Field(default=None, description="Numeric precision")
     scale: Optional[int] = Field(default=None, description="Numeric scale")
+    semantic_scale_factor: Optional[Decimal] = Field(default=None, alias="semanticScaleFactor")
+    semantic_unit: Optional[str] = Field(default=None, alias="semanticUnit")
+    semantic_unit_label: Optional[str] = Field(default=None, alias="semanticUnitLabel")
+    formula_def_raw: Optional[Any] = Field(default=None, exclude=True)
+    dialect_formula_def_raw: Optional[Any] = Field(default=None, exclude=True)
 
     model_config = {
         "extra": "allow",
+        "populate_by_name": True,
     }
 
 

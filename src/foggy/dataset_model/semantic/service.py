@@ -19,7 +19,9 @@ from foggy.dataset_model.impl.model import (
     DbModelDimensionImpl,
     DbModelMeasureImpl,
     DimensionJoinDef,
+    _resolve_measure_sql,
 )
+from foggy.dataset_model.impl.semantic_scale import semantic_scale_metadata_value
 from foggy.dataset_model.engine.query import SqlQueryBuilder
 from foggy.dataset_model.engine.formula import get_default_registry, SqlFormulaRegistry
 from foggy.dataset_model.engine.hierarchy import (
@@ -3072,24 +3074,39 @@ class SemanticQueryService(SemanticServiceResolver):
         col = measure.column or measure.name
         alias = measure.alias or measure.name
         agg = None
+        sql_expr = _resolve_measure_sql(measure, "t", self._field_formula_dialect_name())
 
         if measure.aggregation:
             agg_name = measure.aggregation.value.upper()
             if agg_name == "COUNT_DISTINCT":
-                select_expr = f"COUNT(DISTINCT t.{col}) AS {self._qi(alias)}"
+                select_expr = f"COUNT(DISTINCT {sql_expr}) AS {self._qi(alias)}"
             else:
-                select_expr = f"{agg_name}(t.{col}) AS {self._qi(alias)}"
+                select_expr = f"{agg_name}({sql_expr}) AS {self._qi(alias)}"
             agg = agg_name
         else:
-            select_expr = f"t.{col} AS {self._qi(alias)}"
+            select_expr = f"{sql_expr} AS {self._qi(alias)}"
 
         return {
             "name": alias,
             "fieldName": measure.name,
-            "expression": f"t.{col}",
+            "expression": sql_expr,
             "aggregation": agg,
             "select_expr": select_expr,
         }
+
+    @staticmethod
+    def _attach_semantic_scale_metadata(field_info: Dict[str, Any], source: Any) -> None:
+        scale = semantic_scale_metadata_value(
+            getattr(source, "semantic_scale_factor", None)
+        )
+        if scale is not None:
+            field_info["semanticScaleFactor"] = scale
+        unit = getattr(source, "semantic_unit", None)
+        if unit:
+            field_info["semanticUnit"] = unit
+        unit_label = getattr(source, "semantic_unit_label", None)
+        if unit_label:
+            field_info["semanticUnitLabel"] = unit_label
 
     def _parse_inline_expression(
         self,
@@ -5442,6 +5459,7 @@ class SemanticQueryService(SemanticServiceResolver):
                             "aggregatable": False,
                             "models": {},
                         }
+                    self._attach_semantic_scale_metadata(fields[prop_fn], prop)
                     dictionary_metadata = self._build_dictionary_discovery_metadata(
                         prop, model_name, prop_fn, per_model_effective, context,
                     )
@@ -5510,6 +5528,7 @@ class SemanticQueryService(SemanticServiceResolver):
                         "sourceColumn": col_def.name,  # SQL column name (snake_case)
                         "models": {},
                     }
+                self._attach_semantic_scale_metadata(fields[col_name], col_def)
                 dictionary_metadata = self._build_dictionary_discovery_metadata(
                     col_def, model_name, col_name, per_model_effective, context,
                 )
@@ -5539,6 +5558,7 @@ class SemanticQueryService(SemanticServiceResolver):
                         "sourceColumn": measure.column,
                         "models": {},
                     }
+                self._attach_semantic_scale_metadata(fields[measure_name], measure)
                 fields[measure_name]["models"][model_name] = {
                     "description": f"{measure.alias or measure_name} (Aggregation: {agg_name})",
                 }

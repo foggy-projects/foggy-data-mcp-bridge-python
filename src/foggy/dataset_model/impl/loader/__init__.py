@@ -484,10 +484,16 @@ class JdbcTableModelLoader(TableModelLoader):
                                     "type",
                                     "formulaDef",
                                     "dialectFormulaDef",
+                                    "semanticScaleFactor",
+                                    "semanticUnit",
+                                    "semanticUnitLabel",
                                     "dictionaryDiscovery",
                                     "dictionary_discovery",
                                 },
                             ),
+                            semantic_scale_factor=prop.get("semanticScaleFactor"),
+                            semantic_unit=prop.get("semanticUnit"),
+                            semantic_unit_label=prop.get("semanticUnitLabel"),
                             **_with_dictionary_discovery_extra(
                                 {},
                                 prop.get("dictionaryDiscovery", prop.get("dictionary_discovery")),
@@ -536,6 +542,11 @@ class JdbcTableModelLoader(TableModelLoader):
                 unit=measure_def.get("unit"),
                 decimals=measure_def.get("decimals", 2),
                 visible=measure_def.get("visible", True),
+                semantic_scale_factor=measure_def.get("semanticScaleFactor"),
+                semantic_unit=measure_def.get("semanticUnit"),
+                semantic_unit_label=measure_def.get("semanticUnitLabel"),
+                formula_def_raw=measure_def.get("formulaDef"),
+                dialect_formula_def_raw=measure_def.get("dialectFormulaDef"),
             )
             model.add_measure(measure)
 
@@ -562,6 +573,11 @@ class JdbcTableModelLoader(TableModelLoader):
                     "type",
                     "nullable",
                     "primaryKey",
+                    "semanticScaleFactor",
+                    "semanticUnit",
+                    "semanticUnitLabel",
+                    "formulaDef",
+                    "dialectFormulaDef",
                     "dictionaryDiscovery",
                     "dictionary_discovery",
                 },
@@ -579,6 +595,11 @@ class JdbcTableModelLoader(TableModelLoader):
                 nullable=prop_def.get("nullable", True),
                 primary_key=prop_def.get("primaryKey", False),
                 comment=prop_def.get("description"),
+                semantic_scale_factor=prop_def.get("semanticScaleFactor"),
+                semantic_unit=prop_def.get("semanticUnit"),
+                semantic_unit_label=prop_def.get("semanticUnitLabel"),
+                formula_def_raw=prop_def.get("formulaDef"),
+                dialect_formula_def_raw=prop_def.get("dialectFormulaDef"),
                 **prop_extra,
             )
             model.columns[prop_name] = column
