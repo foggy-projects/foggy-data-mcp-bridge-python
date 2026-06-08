@@ -46,6 +46,7 @@ Current P0 execution records:
 - [P0-26-compose-script-header-bridge-error-snapshot-replay.md](workitems/P0-26-compose-script-header-bridge-error-snapshot-replay.md)
 - [P0-27-compose-script-capability-policy-snapshot-replay.md](workitems/P0-27-compose-script-capability-policy-snapshot-replay.md)
 - [P0-28-domain-question-neutral-runner-adapter.md](workitems/P0-28-domain-question-neutral-runner-adapter.md)
+- [P0-29-runtime-dictionary-discovery-metadata.md](workitems/P0-29-runtime-dictionary-discovery-metadata.md)
 
 Current active snapshot lanes:
 
@@ -66,7 +67,7 @@ Current active snapshot lanes:
 - Pivot domain transport large-domain threshold and SQLite bind-limit
   fail-closed snapshots
 
-Latest P0-28 status:
+Latest P0-29 status:
 
 - P0-26 extends the active MCP compose-script error snapshot lane with
   `missing-user-id-header` and `missing-namespace-header`.
@@ -78,10 +79,16 @@ Latest P0-28 status:
   runtime capability calls.
 - P0-28 records the neutral domain/question runner adapter design without
   touching Odoo business models.
+- P0-29 adds Java-aligned runtime `dictionaryDiscovery` metadata in Python,
+  including fail-closed sensitive/hidden/error handling and context-scoped
+  discovery cache isolation.
 - The Java exporters write:
   `tests/fixtures/java_compose_script_tool_error_snapshot_parity.json`.
   and `tests/fixtures/java_compose_script_snapshot_parity.json`.
 - Python P0-26/P0-27 focused replay and manifest passed:
   `12 passed, 8 warnings in 0.59s`.
+- Python P0-29 focused coverage passed:
+  `7 passed in 0.48s`.
 - Full Python pytest and Java focused Maven status are recorded in the
-  P0-26/P0-27 progress docs.
+  P0-26/P0-27 progress docs; P0-29 focused evidence is recorded in its
+  progress doc.

@@ -22,6 +22,7 @@ from foggy.dataset_model.definitions.base import (
     DbColumnDef,
 )
 from foggy.dataset_model.definitions.measure import DbMeasureDef, MeasureType
+from foggy.dataset_model.definitions.dict_def import DbDictionaryDiscoveryDef
 from foggy.dataset_model.definitions.query_model import DbQueryModelDef
 from foggy.dataset_model.impl.model import (
     DbTableModelImpl,
@@ -40,6 +41,31 @@ logger = logging.getLogger(__name__)
 def _extra_metadata(definition: Dict[str, Any], consumed_keys: set) -> Dict[str, Any]:
     """Return definition keys that should survive as Pydantic extras."""
     return {k: v for k, v in definition.items() if k not in consumed_keys}
+
+
+def _parse_dictionary_discovery(raw: Any, owner_path: str) -> Optional[DbDictionaryDiscoveryDef]:
+    """Parse and validate Java-aligned dictionaryDiscovery metadata."""
+    if raw is None:
+        return None
+    if isinstance(raw, DbDictionaryDiscoveryDef):
+        discovery = raw
+    elif isinstance(raw, dict):
+        discovery = DbDictionaryDiscoveryDef.model_validate(raw)
+    else:
+        raise ValueError(f"{owner_path} dictionaryDiscovery must be an object")
+    discovery.validate_contract(owner_path)
+    return discovery
+
+
+def _with_dictionary_discovery_extra(
+    extra: Dict[str, Any],
+    raw: Any,
+    owner_path: str,
+) -> Dict[str, Any]:
+    discovery = _parse_dictionary_discovery(raw, owner_path)
+    if discovery is not None:
+        extra["dictionaryDiscovery"] = discovery
+    return extra
 
 
 class _TmRefProxy(dict):
@@ -391,7 +417,14 @@ class JdbcTableModelLoader(TableModelLoader):
                     "description",
                     "keyDescription",
                     "_captionDefRaw",
+                    "dictionaryDiscovery",
+                    "dictionary_discovery",
                 },
+            )
+            dim_extra = _with_dictionary_discovery_extra(
+                dim_extra,
+                dim_def.get("dictionaryDiscovery", dim_def.get("dictionary_discovery")),
+                f"{model.name}.{dim_name}",
             )
             dimension = DbModelDimensionImpl(
                 name=dim_name,
@@ -451,7 +484,14 @@ class JdbcTableModelLoader(TableModelLoader):
                                     "type",
                                     "formulaDef",
                                     "dialectFormulaDef",
+                                    "dictionaryDiscovery",
+                                    "dictionary_discovery",
                                 },
+                            ),
+                            **_with_dictionary_discovery_extra(
+                                {},
+                                prop.get("dictionaryDiscovery", prop.get("dictionary_discovery")),
+                                f"{model.name}.{dim_name}${prop.get('name') or prop.get('column') or '<unnamed>'}",
                             ),
                         )
                         for prop in dim_props
@@ -522,7 +562,14 @@ class JdbcTableModelLoader(TableModelLoader):
                     "type",
                     "nullable",
                     "primaryKey",
+                    "dictionaryDiscovery",
+                    "dictionary_discovery",
                 },
+            )
+            prop_extra = _with_dictionary_discovery_extra(
+                prop_extra,
+                prop_def.get("dictionaryDiscovery", prop_def.get("dictionary_discovery")),
+                f"{model.name}.{prop_name}",
             )
 
             column = DbColumnDef(

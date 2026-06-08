@@ -5,7 +5,8 @@ integrating SqlQueryBuilder with table/query models.
 """
 
 from typing import Any, Callable, Dict, List, Optional, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
+import json
 import os
 import time
 import re
@@ -28,6 +29,11 @@ from foggy.dataset_model.engine.hierarchy import (
 )
 from foggy.dataset_model.engine.join import JoinGraph, JoinEdge, JoinType
 from foggy.dataset_model.definitions.base import ColumnType
+from foggy.dataset_model.definitions.dict_def import (
+    DbDictionaryDiscoveryDef,
+    DictionaryDiscoveryResult,
+    DictionaryDiscoveryValueEntry,
+)
 from foggy.dataset_model.definitions.query_request import CalculatedFieldDef
 from foggy.dataset_model.semantic.formula_field_extractor import extract_formula_fields, resolve_base_column_references
 from foggy.mcp_spi import (
@@ -142,6 +148,7 @@ class SemanticQueryService(SemanticServiceResolver):
         r"^\s*(?:ratio_to_total|ratioToTotal)\s*\(\s*([A-Za-z_][\w$]*)\s*\)\s*$",
         re.IGNORECASE,
     )
+    DICTIONARY_DISCOVERY_COUNT_ALIAS = "__foggyDictionaryCount"
 
     def __init__(
         self,
@@ -197,6 +204,7 @@ class SemanticQueryService(SemanticServiceResolver):
         self._enable_cache = enable_cache
         self._cache_ttl = cache_ttl_seconds
         self._cache: Dict[str, Tuple[SemanticQueryResponse, float]] = {}
+        self._dictionary_discovery_cache: Dict[str, Tuple[DictionaryDiscoveryResult, float]] = {}
         self._executor = executor
         self._memory_grid_result_resolver = memory_grid_result_resolver
         self._executor_manager = None  # Optional[ExecutorManager] for multi-datasource routing
@@ -4983,11 +4991,308 @@ class SemanticQueryService(SemanticServiceResolver):
 
         return metadata
 
+    # ---------- Runtime dictionary discovery metadata ----------
+
+    def _get_dictionary_discovery_def(
+        self,
+        owner: Any,
+        owner_path: str,
+    ) -> Optional[DbDictionaryDiscoveryDef]:
+        """Read and validate field-level dictionaryDiscovery metadata."""
+        if owner is None:
+            return None
+
+        raw = None
+        found = False
+        for key in ("dictionaryDiscovery", "dictionary_discovery"):
+            if hasattr(owner, key):
+                raw = getattr(owner, key)
+                found = True
+                break
+            extra = getattr(owner, "model_extra", None) or {}
+            if key in extra:
+                raw = extra.get(key)
+                found = True
+                break
+
+        if not found or raw is None:
+            return None
+        if isinstance(raw, DbDictionaryDiscoveryDef):
+            discovery = raw
+        elif isinstance(raw, dict):
+            discovery = DbDictionaryDiscoveryDef.model_validate(raw)
+        else:
+            raise ValueError(f"{owner_path} dictionaryDiscovery must be an object")
+        discovery.validate_contract(owner_path)
+        return discovery
+
+    @staticmethod
+    def _dictionary_field_visible(
+        model_name: str,
+        field_name: str,
+        per_model_effective: Optional[Dict[str, set]],
+    ) -> bool:
+        if per_model_effective is None:
+            return True
+        model_effective = per_model_effective.get(model_name)
+        if model_effective is None:
+            return True
+        return field_name in model_effective
+
+    def _build_dictionary_discovery_metadata(
+        self,
+        owner: Any,
+        model_name: str,
+        field_name: str,
+        per_model_effective: Optional[Dict[str, set]] = None,
+        context: Optional[SemanticRequestContext] = None,
+    ) -> Optional[Dict[str, Any]]:
+        discovery = self._get_dictionary_discovery_def(owner, f"{model_name}.{field_name}")
+        if discovery is None or not discovery.enabled:
+            return None
+
+        metadata: Dict[str, Any] = {
+            "enabled": True,
+            "strategy": discovery.effective_strategy,
+            "maxValues": discovery.effective_max_values,
+            "refreshTtlSeconds": discovery.effective_refresh_ttl_seconds,
+            "exposeToLlm": True if discovery.expose_to_llm is None else bool(discovery.expose_to_llm),
+            "sensitive": bool(discovery.sensitive),
+            "valuesSource": "runtime_observed",
+        }
+
+        if not discovery.llm_visible or not self._dictionary_field_visible(
+            model_name, field_name, per_model_effective,
+        ):
+            metadata["valuesStatus"] = "not_exposed"
+            return metadata
+
+        result = self._discover_dictionary_values(model_name, field_name, discovery, context)
+        metadata["valuesStatus"] = result.status
+        metadata["sampledAt"] = self._format_dictionary_sampled_at(result.sampled_at)
+
+        if result.status == DictionaryDiscoveryResult.STATUS_SAMPLED:
+            metadata["truncated"] = bool(result.truncated)
+            metadata["values"] = self._dictionary_discovery_values_metadata(result.values)
+            aliases = self._dictionary_discovery_alias_metadata(discovery)
+            if aliases:
+                metadata["aliases"] = aliases
+        else:
+            metadata["error"] = "runtime dictionary discovery failed"
+        return metadata
+
+    def _discover_dictionary_values(
+        self,
+        model_name: str,
+        field_name: str,
+        discovery: DbDictionaryDiscoveryDef,
+        context: Optional[SemanticRequestContext] = None,
+    ) -> DictionaryDiscoveryResult:
+        cache_key = (
+            f"{model_name}|{field_name}|{discovery.effective_strategy}|"
+            f"{discovery.effective_max_values}|"
+            f"{self._dictionary_discovery_context_cache_key(context)}"
+        )
+        now = time.time()
+        ttl = discovery.effective_refresh_ttl_seconds
+        if ttl > 0:
+            cached = self._dictionary_discovery_cache.get(cache_key)
+            if cached is not None and cached[1] > now:
+                return cached[0]
+
+        try:
+            result = self._execute_dictionary_discovery(model_name, field_name, discovery, context)
+        except Exception as exc:  # pragma: no cover - defensive sanitization
+            logger.warning(
+                "Runtime dictionary discovery failed for %s.%s: %s",
+                model_name,
+                field_name,
+                exc,
+            )
+            result = DictionaryDiscoveryResult.failed(str(exc))
+
+        if ttl > 0 and result.status == DictionaryDiscoveryResult.STATUS_SAMPLED:
+            self._dictionary_discovery_cache[cache_key] = (result, now + ttl)
+        return result
+
+    def _execute_dictionary_discovery(
+        self,
+        model_name: str,
+        field_name: str,
+        discovery: DbDictionaryDiscoveryDef,
+        context: Optional[SemanticRequestContext] = None,
+    ) -> DictionaryDiscoveryResult:
+        table_model = self.get_model(model_name)
+        if table_model is None:
+            return DictionaryDiscoveryResult.failed(f"Model not found: {model_name}")
+        if (
+            type(self).query_model is SemanticQueryService.query_model
+            and self._resolve_executor(table_model) is None
+        ):
+            return DictionaryDiscoveryResult.failed("No database executor configured")
+
+        max_values = discovery.effective_max_values
+        if discovery.effective_strategy == DbDictionaryDiscoveryDef.STRATEGY_DISTINCT:
+            request = SemanticQueryRequest(
+                columns=[field_name],
+                distinct=True,
+                limit=max_values + 1,
+                return_total=False,
+            )
+        else:
+            request = SemanticQueryRequest(
+                columns=[
+                    field_name,
+                    f"COUNT({field_name}) AS {self.DICTIONARY_DISCOVERY_COUNT_ALIAS}",
+                ],
+                group_by=[field_name],
+                order_by=[{"field": self.DICTIONARY_DISCOVERY_COUNT_ALIAS, "dir": "desc"}],
+                limit=max_values + 1,
+                return_total=False,
+            )
+
+        response = self.query_model(model_name, request, mode="execute", context=context)
+        if response.error:
+            return DictionaryDiscoveryResult.failed(response.error)
+
+        values: List[DictionaryDiscoveryValueEntry] = []
+        rows = list(response.items or [])
+        for row in rows[:max_values]:
+            found, value = self._read_row_value(row, field_name)
+            if not found:
+                continue
+            count = None
+            if discovery.effective_strategy == DbDictionaryDiscoveryDef.STRATEGY_GROUP_BY:
+                count = self._read_row_int(row, self.DICTIONARY_DISCOVERY_COUNT_ALIAS)
+            values.append(DictionaryDiscoveryValueEntry(value=value, count=count))
+
+        return DictionaryDiscoveryResult.sampled(values, truncated=len(rows) > max_values)
+
+    @staticmethod
+    def _dictionary_discovery_context_cache_key(
+        context: Optional[SemanticRequestContext],
+    ) -> str:
+        if context is None:
+            return ""
+        payload = {
+            "namespace": context.namespace,
+            "userId": context.user_id,
+            "roles": sorted(context.roles or []),
+            "attributes": context.attributes or {},
+        }
+        return json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
+
+    @staticmethod
+    def _read_row_value(row: Any, field_name: str) -> Tuple[bool, Any]:
+        if not isinstance(row, dict):
+            return False, None
+        if field_name in row:
+            return True, row.get(field_name)
+        lower = field_name.lower()
+        for key, value in row.items():
+            if str(key).lower() == lower:
+                return True, value
+        return False, None
+
+    @staticmethod
+    def _read_row_int(row: Any, field_name: str) -> Optional[int]:
+        found, value = SemanticQueryService._read_row_value(row, field_name)
+        if not found or value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _format_dictionary_sampled_at(sampled_at: datetime) -> str:
+        if sampled_at.tzinfo is None:
+            sampled_at = sampled_at.replace(tzinfo=timezone.utc)
+        return sampled_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    @staticmethod
+    def _dictionary_discovery_values_metadata(
+        values: List[DictionaryDiscoveryValueEntry],
+    ) -> List[Dict[str, Any]]:
+        result: List[Dict[str, Any]] = []
+        for entry in values or []:
+            item = {"value": entry.value}
+            if entry.count is not None:
+                item["count"] = entry.count
+            result.append(item)
+        return result
+
+    @staticmethod
+    def _dictionary_discovery_alias_metadata(
+        discovery: DbDictionaryDiscoveryDef,
+    ) -> Optional[Dict[str, Any]]:
+        if not discovery.aliases:
+            return None
+        aliases: Dict[str, Any] = {}
+        for alias, alias_def in discovery.aliases.items():
+            item: Dict[str, Any] = {"values": list(alias_def.values or [])}
+            if alias_def.description:
+                item["description"] = alias_def.description
+            aliases[alias] = item
+        return aliases
+
+    @staticmethod
+    def _should_replace_dictionary_discovery_metadata(
+        existing: Optional[Dict[str, Any]],
+        candidate: Dict[str, Any],
+    ) -> bool:
+        if not existing:
+            return True
+        status_rank = {
+            "not_exposed": 1,
+            DictionaryDiscoveryResult.STATUS_FAILED: 2,
+            DictionaryDiscoveryResult.STATUS_SAMPLED: 3,
+        }
+        return status_rank.get(candidate.get("valuesStatus"), 0) > status_rank.get(
+            existing.get("valuesStatus"), 0,
+        )
+
+    def _dictionary_discovery_markdown_summary(
+        self,
+        owner: Any,
+        model_name: str,
+        field_name: str,
+        per_model_effective: Optional[Dict[str, set]] = None,
+        context: Optional[SemanticRequestContext] = None,
+    ) -> str:
+        metadata = self._build_dictionary_discovery_metadata(
+            owner, model_name, field_name, per_model_effective, context,
+        )
+        if not metadata or metadata.get("valuesStatus") != DictionaryDiscoveryResult.STATUS_SAMPLED:
+            return ""
+
+        values = metadata.get("values") or []
+        if not values:
+            return ""
+
+        value_parts: List[str] = []
+        for item in values:
+            value = item.get("value")
+            rendered = "NULL" if value is None else str(value)
+            if item.get("count") is not None:
+                rendered = f"{rendered}({item['count']})"
+            value_parts.append(rendered)
+
+        parts = [
+            f"运行时字典发现: observed values by {metadata.get('strategy')}",
+            "values: " + ", ".join(value_parts),
+        ]
+        aliases = metadata.get("aliases") or {}
+        if aliases:
+            parts.append("aliases: " + ", ".join(aliases.keys()))
+        return "; ".join(parts)
+
     def get_metadata_v3(
         self,
         model_names: Optional[List[str]] = None,
         visible_fields: Optional[List[str]] = None,
         denied_columns: Optional[List[DeniedColumn]] = None,
+        context: Optional[SemanticRequestContext] = None,
     ) -> Dict[str, Any]:
         """Build V3 metadata package — aligned with Java SemanticServiceV3Impl.
 
@@ -5017,6 +5322,9 @@ class SemanticQueryService(SemanticServiceResolver):
             }
         """
         target_models = model_names or list(self._models.keys())
+        per_model_effective = self._resolve_effective_visible(
+            target_models, visible_fields, denied_columns,
+        )
 
         fields: Dict[str, Any] = {}
         models_info: Dict[str, Any] = {}
@@ -5134,6 +5442,14 @@ class SemanticQueryService(SemanticServiceResolver):
                             "aggregatable": False,
                             "models": {},
                         }
+                    dictionary_metadata = self._build_dictionary_discovery_metadata(
+                        prop, model_name, prop_fn, per_model_effective, context,
+                    )
+                    if dictionary_metadata and self._should_replace_dictionary_discovery_metadata(
+                        fields[prop_fn].get("dictionaryDiscovery"),
+                        dictionary_metadata,
+                    ):
+                        fields[prop_fn]["dictionaryDiscovery"] = dictionary_metadata
                     fields[prop_fn]["models"][model_name] = {
                         "description": prop.description or prop.caption or prop_name,
                     }
@@ -5164,6 +5480,14 @@ class SemanticQueryService(SemanticServiceResolver):
                         "sourceColumn": dim.column,
                         "models": {},
                     }
+                dictionary_metadata = self._build_dictionary_discovery_metadata(
+                    dim, model_name, dim_name, per_model_effective, context,
+                )
+                if dictionary_metadata and self._should_replace_dictionary_discovery_metadata(
+                    fields[dim_name].get("dictionaryDiscovery"),
+                    dictionary_metadata,
+                ):
+                    fields[dim_name]["dictionaryDiscovery"] = dictionary_metadata
                 fields[dim_name]["models"][model_name] = {
                     "description": dim.description or dim.alias or dim_name,
                 }
@@ -5186,6 +5510,14 @@ class SemanticQueryService(SemanticServiceResolver):
                         "sourceColumn": col_def.name,  # SQL column name (snake_case)
                         "models": {},
                     }
+                dictionary_metadata = self._build_dictionary_discovery_metadata(
+                    col_def, model_name, col_name, per_model_effective, context,
+                )
+                if dictionary_metadata and self._should_replace_dictionary_discovery_metadata(
+                    fields[col_name].get("dictionaryDiscovery"),
+                    dictionary_metadata,
+                ):
+                    fields[col_name]["dictionaryDiscovery"] = dictionary_metadata
                 fields[col_name]["models"][model_name] = {
                     "description": col_def.comment or col_def.alias or col_name,
                 }
@@ -5255,9 +5587,6 @@ class SemanticQueryService(SemanticServiceResolver):
         # _resolve_effective_visible now returns Dict[model_name, set] so that
         # a DeniedColumn targeting one model's physical column does NOT strip
         # the shared QM field from other models.
-        per_model_effective = self._resolve_effective_visible(
-            target_models, visible_fields, denied_columns,
-        )
         if per_model_effective is not None:
             filtered_fields: Dict[str, Any] = {}
             for field_name, field_info in fields.items():
@@ -5330,6 +5659,7 @@ class SemanticQueryService(SemanticServiceResolver):
         model_names: Optional[List[str]] = None,
         visible_fields: Optional[List[str]] = None,
         denied_columns: Optional[List[DeniedColumn]] = None,
+        context: Optional[SemanticRequestContext] = None,
     ) -> str:
         """Build V3 metadata as markdown — aligned with Java default format.
 
@@ -5363,13 +5693,13 @@ class SemanticQueryService(SemanticServiceResolver):
                 else None
             )
             return self._build_single_model_markdown(
-                target_name, target_models[0][1], visible_set=single_visible,
+                target_name, target_models[0][1], visible_set=single_visible, context=context,
             )
         else:
             # Multi-model path: pass the per-model dict; the builder applies
             # each model's set independently inside its per-model loop.
             return self._build_multi_model_markdown(
-                target_models, per_model_visible=per_model_visible,
+                target_models, per_model_visible=per_model_visible, context=context,
             )
 
     def get_model_catalog(
@@ -5379,6 +5709,7 @@ class SemanticQueryService(SemanticServiceResolver):
         denied_columns: Optional[List[DeniedColumn]] = None,
         llm_hints: Optional[Dict[str, Dict[str, Any]]] = None,
         field_limit: int = 10,
+        context: Optional[SemanticRequestContext] = None,
     ) -> Dict[str, Any]:
         """Build a bridge-ready model catalog from structured metadata.
 
@@ -5391,6 +5722,7 @@ class SemanticQueryService(SemanticServiceResolver):
             model_names=target_names,
             visible_fields=visible_fields,
             denied_columns=denied_columns,
+            context=context,
         )
         fields = metadata.get("fields") or {}
         model_info = metadata.get("models") or {}
@@ -5646,6 +5978,7 @@ class SemanticQueryService(SemanticServiceResolver):
         model_name: str,
         model: 'DbTableModelImpl',
         visible_set: Optional[set] = None,
+        context: Optional[SemanticRequestContext] = None,
     ) -> str:
         """Build detailed markdown for a single model (aligned with Java buildSingleModelMarkdown).
 
@@ -5660,6 +5993,10 @@ class SemanticQueryService(SemanticServiceResolver):
 
         def _visible(field_name: str) -> bool:
             return visible_set is None or field_name in visible_set
+
+        single_per_model_visible = (
+            {model_name: visible_set} if visible_set is not None else None
+        )
 
         # Collect dimension field names for exclusion from properties section
         dimension_field_names: set = set()
@@ -5704,6 +6041,11 @@ class SemanticQueryService(SemanticServiceResolver):
                         _trh = self._get_time_role_hint(prop)
                         if _trh:
                             _prop_desc = f"{_prop_desc} [{_trh}]".strip() if _prop_desc else f"[{_trh}]"
+                        _dict_hint = self._dictionary_discovery_markdown_summary(
+                            prop, model_name, prop_field, single_per_model_visible, context,
+                        )
+                        if _dict_hint:
+                            _prop_desc = f"{_prop_desc} {_dict_hint}".strip()
                         dim_rows.append(f"| {prop_field} | {prop.caption or pn} | {prop.data_type} | - | {_prop_desc} |")
             if dim_rows:
                 lines.append("## Dimension Fields")
@@ -5731,6 +6073,11 @@ class SemanticQueryService(SemanticServiceResolver):
                     _col_trh = self._get_time_role_hint(col)
                     if _col_trh:
                         col_desc = f"{col_desc} [{_col_trh}]".strip() if col_desc else f"[{_col_trh}]"
+                    _dict_hint = self._dictionary_discovery_markdown_summary(
+                        col, model_name, col_name, single_per_model_visible, context,
+                    )
+                    if _dict_hint:
+                        col_desc = f"{col_desc} {_dict_hint}".strip()
                     lines.append(f"| {col_name} | {col_caption} | {col_type} | {col_desc} |")
                 lines.append("")
 
@@ -5794,6 +6141,7 @@ class SemanticQueryService(SemanticServiceResolver):
         models: List[tuple],
         per_model_visible: Optional[Dict[str, set]] = None,
         visible_set: Optional[set] = None,  # legacy compat — prefer per_model_visible
+        context: Optional[SemanticRequestContext] = None,
     ) -> str:
         """Build compact index markdown for multiple models (aligned with Java buildMultiModelMarkdown).
 
@@ -5869,6 +6217,11 @@ class SemanticQueryService(SemanticServiceResolver):
                             _mp_label = f"{prop.caption or pn}"
                             if _mp_trh:
                                 _mp_label = f"{_mp_label} | {_mp_trh}"
+                            _dict_hint = self._dictionary_discovery_markdown_summary(
+                                prop, model_name, prop_field, per_model_visible, context,
+                            )
+                            if _dict_hint:
+                                _mp_label = f"{_mp_label} | {_dict_hint}"
                             sub_lines.append(f"    - [field:{prop_field}] | {_mp_label}")
                     if sub_lines:
                         dim_lines.append(f"- {dc}{hier_hint}")
@@ -5885,8 +6238,14 @@ class SemanticQueryService(SemanticServiceResolver):
                         continue
                     col_caption = col.alias or col_name
                     col_type = self._get_column_type_description(col.column_type)
+                    _dict_hint = self._dictionary_discovery_markdown_summary(
+                        col, model_name, col_name, per_model_visible, context,
+                    )
                     prop_lines.append(f"- {col_caption}")
-                    prop_lines.append(f"    - [field:{col_name}] | {col_type}")
+                    prop_detail = col_type
+                    if _dict_hint:
+                        prop_detail = f"{prop_detail} | {_dict_hint}"
+                    prop_lines.append(f"    - [field:{col_name}] | {prop_detail}")
                 if prop_lines:
                     lines.append("")
                     lines.append("**Attributes**")
