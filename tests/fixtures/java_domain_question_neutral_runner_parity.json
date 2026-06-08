@@ -1,0 +1,125 @@
+{
+  "schemaVersion" : 1,
+  "feature" : "domainQuestionNeutralRunner",
+  "source" : "JavaDomainQuestionNeutralRunnerSnapshotTest",
+  "contract" : "normalized-tool-arguments-v1",
+  "cases" : [ {
+    "id" : "sales-by-status-current-quarter",
+    "question" : "sales by status this quarter",
+    "context" : {
+      "namespace" : "demo",
+      "principal" : {
+        "tenantId" : "demo",
+        "userId" : "snapshot-user",
+        "roles" : [ "analyst" ]
+      }
+    },
+    "expected" : {
+      "toolName" : "dataset.query_model",
+      "toolArguments" : {
+        "model" : "FactSalesModel",
+        "mode" : "execute",
+        "payload" : {
+          "columns" : [ "salesAmount" ],
+          "groupBy" : [ "orderStatus" ],
+          "orderBy" : [ {
+            "order" : "desc",
+            "field" : "salesAmount"
+          } ],
+          "slice" : [ ],
+          "calculatedFields" : [ ],
+          "start" : 0,
+          "limit" : 10,
+          "returnTotal" : false,
+          "timeWindow" : {
+            "preset" : "currentQuarter",
+            "field" : "orderDate"
+          }
+        }
+      },
+      "sqlMarkers" : [ "GROUP BY", "orderStatus", "salesAmount" ],
+      "resultMarkers" : [ "orderStatus", "salesAmount" ],
+      "warnings" : [ "timeWindow:currentQuarter" ],
+      "errorCode" : null,
+      "forbiddenMarkers" : [ "odoo", "res_partner", "res_users", "LLM" ]
+    }
+  }, {
+    "id" : "gross-margin-by-month-calculated",
+    "question" : "gross margin by month for closed orders",
+    "context" : {
+      "namespace" : "demo",
+      "principal" : {
+        "tenantId" : "demo",
+        "userId" : "snapshot-user",
+        "roles" : [ "analyst" ]
+      }
+    },
+    "expected" : {
+      "toolName" : "dataset.query_model",
+      "toolArguments" : {
+        "model" : "FactSalesModel",
+        "mode" : "execute",
+        "payload" : {
+          "columns" : [ "grossMargin" ],
+          "groupBy" : [ "orderMonth" ],
+          "orderBy" : [ ],
+          "slice" : [ {
+            "op" : "eq",
+            "field" : "orderStatus",
+            "value" : "closed"
+          } ],
+          "calculatedFields" : [ {
+            "expression" : "salesAmount - costAmount",
+            "name" : "grossMargin"
+          } ],
+          "start" : 0,
+          "limit" : 20,
+          "returnTotal" : false
+        }
+      },
+      "sqlMarkers" : [ "grossMargin", "orderMonth", "salesAmount - costAmount" ],
+      "resultMarkers" : [ "orderMonth", "grossMargin" ],
+      "warnings" : [ "calculatedFields:grossMargin" ],
+      "errorCode" : null,
+      "forbiddenMarkers" : [ "odoo", "res_partner", "res_users", "LLM" ]
+    }
+  }, {
+    "id" : "denied-customer-email-fail-closed",
+    "question" : "show customer emails for recent sales",
+    "context" : {
+      "namespace" : "demo",
+      "principal" : {
+        "tenantId" : "demo",
+        "userId" : "snapshot-user",
+        "roles" : [ "analyst" ]
+      }
+    },
+    "expected" : {
+      "toolName" : "dataset.query_model",
+      "toolArguments" : {
+        "model" : "FactSalesModel",
+        "mode" : "validate",
+        "payload" : {
+          "columns" : [ "customerEmail" ],
+          "groupBy" : [ ],
+          "orderBy" : [ ],
+          "slice" : [ ],
+          "calculatedFields" : [ ],
+          "start" : 0,
+          "limit" : 50,
+          "returnTotal" : false,
+          "deniedColumns" : [ {
+            "field" : "customerEmail",
+            "table" : "fact_sales",
+            "column" : "customer_email"
+          } ]
+        }
+      },
+      "sqlMarkers" : [ ],
+      "resultMarkers" : [ ],
+      "warnings" : [ "deniedColumns:customerEmail" ],
+      "errorCode" : "governance/denied-field",
+      "forbiddenMarkers" : [ "odoo", "res_partner", "res_users", "LLM" ]
+    }
+  } ]
+}

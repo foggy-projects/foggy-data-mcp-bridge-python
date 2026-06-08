@@ -1,0 +1,203 @@
+"""Replay Java P0-31 domain/question neutral runner fixtures.
+
+The lane intentionally skips LLM and Odoo business packs. Java exports
+normalized MCP tool arguments; Python replays those arguments through a
+deterministic semantic boundary so the engine request contract is executable.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from foggy.mcp_spi import SemanticQueryRequest, SemanticQueryResponse
+from foggy.mcp_spi.accessor import build_query_request
+
+SNAPSHOT_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "fixtures"
+    / "java_domain_question_neutral_runner_parity.json"
+)
+
+
+def _load_snapshot() -> dict[str, Any]:
+    if not SNAPSHOT_PATH.exists():
+        pytest.skip(
+            "Java domain/question neutral runner export not available yet: "
+            f"{SNAPSHOT_PATH}. P0-31 activates once the Java exporter writes "
+            "engine-neutral normalized tool-argument fixtures.",
+        )
+    return json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
+
+
+def test_snapshot_schema() -> None:
+    snapshot = _load_snapshot()
+    assert snapshot["schemaVersion"] == 1
+    assert snapshot["feature"] == "domainQuestionNeutralRunner"
+    assert snapshot["source"] == "JavaDomainQuestionNeutralRunnerSnapshotTest"
+    assert snapshot["contract"] == "normalized-tool-arguments-v1"
+    assert snapshot.get("cases")
+
+
+def test_java_domain_question_neutral_runner_replays_in_python() -> None:
+    snapshot = _load_snapshot()
+    boundary = _NeutralSemanticBoundary()
+    for case in snapshot.get("cases", []):
+        _assert_case_replays(case, boundary)
+
+
+def _assert_case_replays(
+    case: dict[str, Any],
+    boundary: _NeutralSemanticBoundary,
+) -> None:
+    expected = case["expected"]
+    assert expected["toolName"] == "dataset.query_model"
+
+    tool_arguments = expected["toolArguments"]
+    assert tool_arguments["model"] == "FactSalesModel"
+    assert tool_arguments["mode"] in {"execute", "validate"}
+
+    payload = tool_arguments["payload"]
+    request = build_query_request(payload)
+    _assert_payload_round_trips(payload, request)
+
+    error_code = expected.get("errorCode")
+    if error_code:
+        response = boundary.query_model(
+            tool_arguments["model"],
+            request,
+            mode=tool_arguments["mode"],
+            case=case,
+        )
+        assert response.error is not None
+        assert response.error_detail is not None
+        assert response.error_detail["code"] == error_code
+        for marker in expected.get("warnings", []):
+            assert marker in (response.warnings or [])
+        _assert_forbidden_markers_absent(response.model_dump(), expected)
+        return
+
+    response = boundary.query_model(
+        tool_arguments["model"],
+        request,
+        mode=tool_arguments["mode"],
+        case=case,
+    )
+    assert response.error is None
+    assert response.sql is not None
+    for marker in expected.get("sqlMarkers", []):
+        assert marker in response.sql
+    response_text = json.dumps(
+        response.model_dump(by_alias=True, exclude_none=True),
+        sort_keys=True,
+    )
+    for marker in expected.get("resultMarkers", []):
+        assert marker in response_text
+    for marker in expected.get("warnings", []):
+        assert marker in (response.warnings or [])
+    _assert_forbidden_markers_absent(response.model_dump(), expected)
+
+
+def _assert_payload_round_trips(
+    payload: dict[str, Any],
+    request: SemanticQueryRequest,
+) -> None:
+    assert request.columns == payload.get("columns", [])
+    assert request.group_by == payload.get("groupBy", [])
+    assert request.order_by == payload.get("orderBy", [])
+    assert request.slice == payload.get("slice", [])
+    assert request.calculated_fields == payload.get("calculatedFields", [])
+    assert request.start == payload.get("start", 0)
+    assert request.limit == payload.get("limit")
+    assert request.return_total is payload.get("returnTotal", False)
+    assert request.time_window == payload.get("timeWindow")
+    if "deniedColumns" in payload:
+        assert request.denied_columns is not None
+        assert [
+            item.model_dump(by_alias=True, exclude_none=True)
+            for item in request.denied_columns
+        ] == [
+            {
+                key: value
+                for key, value in item.items()
+                if key in {"schema", "table", "column"}
+            }
+            for item in payload["deniedColumns"]
+        ]
+
+
+def _assert_forbidden_markers_absent(
+    payload: Any,
+    expected: dict[str, Any],
+) -> None:
+    serialized = json.dumps(payload, sort_keys=True)
+    for marker in expected.get("forbiddenMarkers", []):
+        assert marker not in serialized
+
+
+class _NeutralSemanticBoundary:
+    def query_model(
+        self,
+        model: str,
+        request: SemanticQueryRequest,
+        *,
+        mode: str,
+        case: dict[str, Any],
+    ) -> SemanticQueryResponse:
+        assert model == "FactSalesModel"
+        assert mode in {"execute", "validate"}
+
+        expected = case["expected"]
+        if expected.get("errorCode"):
+            return SemanticQueryResponse.from_error(
+                "Query rejected by neutral runner governance",
+                warnings=list(expected.get("warnings", [])),
+                error_detail={
+                    "code": expected["errorCode"],
+                    "phase": "permission-resolve",
+                },
+            )
+
+        columns = list(request.group_by) + list(request.columns)
+        rows = [{name: _sample_value(name) for name in columns}]
+        sql = _sql_for(request)
+        return SemanticQueryResponse.from_legacy(
+            data=rows,
+            columns_info=[{"name": name, "dataType": "STRING"} for name in columns],
+            total=len(rows),
+            sql=sql,
+            warnings=list(expected.get("warnings", [])),
+            start=request.start,
+            limit=request.limit,
+        )
+
+
+def _sample_value(name: str) -> Any:
+    if name == "salesAmount":
+        return 1200
+    if name == "grossMargin":
+        return 420
+    return name
+
+
+def _sql_for(request: SemanticQueryRequest) -> str:
+    select_parts: list[str] = []
+    for field in request.group_by:
+        select_parts.append(str(field))
+    for field in request.columns:
+        if field == "grossMargin":
+            select_parts.append("salesAmount - costAmount AS grossMargin")
+        else:
+            select_parts.append(str(field))
+    if not select_parts:
+        select_parts.append("*")
+
+    sql = "SELECT " + ", ".join(select_parts) + " FROM fact_sales"
+    if request.slice:
+        sql += " WHERE " + " AND ".join(str(item.get("field", "slice")) for item in request.slice)
+    if request.group_by:
+        sql += " GROUP BY " + ", ".join(str(field) for field in request.group_by)
+    return sql

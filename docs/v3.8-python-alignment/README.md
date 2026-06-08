@@ -48,6 +48,7 @@ Current P0 execution records:
 - [P0-28-domain-question-neutral-runner-adapter.md](workitems/P0-28-domain-question-neutral-runner-adapter.md)
 - [P0-29-runtime-dictionary-discovery-metadata.md](workitems/P0-29-runtime-dictionary-discovery-metadata.md)
 - [P0-30-semantic-scale-factor-money-units.md](workitems/P0-30-semantic-scale-factor-money-units.md)
+- [P0-31-domain-question-neutral-runner-snapshot-replay.md](workitems/P0-31-domain-question-neutral-runner-snapshot-replay.md)
 
 Current active snapshot lanes:
 
@@ -67,8 +68,9 @@ Current active snapshot lanes:
   non-additive subtotal/grandTotal output
 - Pivot domain transport large-domain threshold and SQLite bind-limit
   fail-closed snapshots
+- Domain/question neutral runner normalized tool-argument snapshots
 
-Latest P0-30 status:
+Latest P0-31 status:
 
 - P0-26 extends the active MCP compose-script error snapshot lane with
   `missing-user-id-header` and `missing-namespace-header`.
@@ -86,15 +88,23 @@ Latest P0-30 status:
 - P0-30 adds Java-aligned `semanticScaleFactor` support in Python for fact
   properties, dimension properties, measures, formula-backed fields, query SQL,
   and V3 metadata.
+- P0-31 activates the neutral domain/question runner lane with a Java exporter
+  and Python replay for normalized `dataset.query_model` tool arguments. The
+  first fixture covers grouped query, calculated/time-window query, and
+  denied-field fail-closed behavior without LLM, Odoo, registry pull, or
+  generated model refresh.
 - The Java exporters write:
   `tests/fixtures/java_compose_script_tool_error_snapshot_parity.json`.
   and `tests/fixtures/java_compose_script_snapshot_parity.json`.
+  and `tests/fixtures/java_domain_question_neutral_runner_parity.json`.
 - Python P0-26/P0-27 focused replay and manifest passed:
   `12 passed, 8 warnings in 0.59s`.
 - Python P0-29 focused coverage passed:
   `7 passed in 0.48s`.
 - Python P0-30 focused coverage passed:
   `8 passed in 0.48s`.
+- Python P0-31 focused replay passed:
+  `2 passed in 0.15s`.
 - Full Python pytest and Java focused Maven status are recorded in the
-  P0-26/P0-27 progress docs; P0-29/P0-30 focused evidence is recorded in their
-  progress docs.
+  P0-26/P0-27 progress docs; P0-29/P0-30/P0-31 focused evidence is recorded in
+  their progress docs.

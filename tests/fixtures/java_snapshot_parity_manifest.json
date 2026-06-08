@@ -253,18 +253,34 @@
     {
       "id": "domain-question-neutral-runner",
       "feature": "domainFixtures",
-      "status": "planned",
+      "status": "active",
       "owner": "java",
       "scope": "neutral request and expected tool-argument replay without Odoo models",
       "designDoc": "docs/v3.8-python-alignment/design/P0-28-domain-question-neutral-runner-adapter-design.md",
-      "javaExportNeeded": [
-        "request payload",
-        "expected tool arguments",
-        "expected SQL/result/error summary",
-        "warning/report metadata"
+      "javaExporter": "foggy-dataset-mcp/src/test/java/com/foggyframework/dataset/mcp/tools/JavaDomainQuestionNeutralRunnerSnapshotTest.java",
+      "pythonFixtures": [
+        "tests/fixtures/java_domain_question_neutral_runner_parity.json"
       ],
-      "plannedPythonTests": [
+      "pythonTests": [
         "tests/integration/test_java_domain_fixture_runner.py"
+      ],
+      "javaExported": [
+        "normalized dataset.query_model tool name and arguments",
+        "grouped query request payload",
+        "calculated-field plus time-window request payload",
+        "denied-field fail-closed payload",
+        "warning/report metadata markers",
+        "forbidden Odoo/LLM leakage markers"
+      ],
+      "plannedExtensions": [
+        "deterministic ToolCallCollector-backed Java export",
+        "unsupported construct and report summary cases",
+        "Odoo packs after registry/model drift is resolved"
+      ],
+      "verification": [
+        "Python converts Java camelCase payloads to SemanticQueryRequest",
+        "Python replays normalized dataset.query_model arguments through a deterministic semantic boundary",
+        "Python checks stable SQL/result/error/warning markers without LLM or Odoo models"
       ]
     }
   ]
