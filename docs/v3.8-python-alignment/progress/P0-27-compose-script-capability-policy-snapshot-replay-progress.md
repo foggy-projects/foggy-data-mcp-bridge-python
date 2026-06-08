@@ -20,15 +20,15 @@ Date: 2026-06-08
 
 Passed:
 
-- Standalone compile for the updated Java runtime exporter with the module
-  classpath:
-  `javac ... JavaComposeScriptSnapshotTest.java`
-- Reflection execution of `shouldProduceComposeScriptSnapshot`, which
-  generated the updated Python fixture.
-- Python focused replay, header unit checks, and manifest:
-  `12 passed, 8 warnings in 0.55s`
 - Java focused Maven execution:
-  `mvn -q -pl foggy-dataset-model -Dtest=JavaComposeScriptSnapshotTest test`
+  `JAVA_HOME=/Users/fengjianguang/.jdk/temurin-17/Contents/Home mvn -pl foggy-dataset-model -am -P'!multi-db' -Dspring.profiles.active=sqlite -Dtest=JavaComposeScriptSnapshotTest -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTests=false test`
+  - result: `Tests run: 1, Failures: 0, Errors: 0, Skipped: 0`
+- Python runtime replay and manifest:
+  `.venv/bin/python -m pytest tests/integration/test_java_compose_script_snapshot_parity.py tests/integration/test_java_snapshot_parity_manifest.py -q`
+  - result: `8 passed in 0.53s`
+- Python P0-26/P0-27 focused replay and manifest:
+  `.venv/bin/python -m pytest tests/integration/test_java_compose_script_tool_error_snapshot_parity.py tests/integration/test_java_compose_script_snapshot_parity.py tests/test_mcp/test_compose_script_tool.py::test_missing_user_id_bridges_to_internal_error tests/test_mcp/test_compose_script_tool.py::test_missing_namespace_bridges_to_internal_error tests/integration/test_java_snapshot_parity_manifest.py -q`
+  - result: `12 passed, 8 warnings in 0.52s`
 - Full Python pytest baseline:
   `4053 passed, 232 skipped, 51 warnings in 17.72s`
 
