@@ -21,6 +21,21 @@ Date: 2026-06-09
   `PlanQualifiedFieldResolver` and Python schema/lowering source scopes.
 - Added Python join regression coverage for duplicate source-alias qualified
   refs.
+- Added Java snapshot cases for:
+  - `qualified-source-alias-slice-order-mysql8`
+  - `qualified-source-alias-slice-order-sqlserver`
+  - `source-alias-shadowed-by-projected-alias-refused`
+  - `union-branch-source-alias-ref-refused`
+  - `union-result-alias-qualified-ref-postgres`
+- Aligned Java `PlanQualifiedFieldResolver` with the P0-42 boundary:
+  projected aliases cannot shadow visible source aliases; union-as-source only
+  exposes the union result alias while treating branch aliases as fail-closed
+  unknown prefixes.
+- Aligned Python schema derivation and compile lowering with the same
+  projected source-alias shadowing and union-as-source boundary.
+- Added Python focused regressions for projected source-alias shadowing, union
+  branch-alias refusal, and union result-alias acceptance.
+- Added P0-42 progress documentation for the source-alias boundary closeout.
 
 ## Verification
 
@@ -48,8 +63,24 @@ Passed:
   - result: `4076 passed, 232 skipped, 53 warnings in 23.55s`
 - `git diff --check`
   - result: passed in both Java and Python repos.
+- `mvn test -pl foggy-dataset-model -Dtest=JavaComposeSnapshotTest,JoinCompileTest`
+  - result: `BUILD SUCCESS`; default, MySQL, and PostgreSQL executions passed;
+    22 tests passed per profile.
+- `.venv/bin/python -m pytest tests/integration/test_java_compose_snapshot_parity.py tests/integration/test_java_snapshot_parity_manifest.py -q`
+  - result: `6 passed in 0.49s`
+- `.venv/bin/python -m pytest tests/compose/compilation/test_join.py -k 'duplicate_source_alias_refs or projected_alias_shadowing_source_alias' tests/compose/compilation/test_union.py -k 'branch_source_alias_reference or union_result_alias_reference' -q`
+  - result: `2 passed, 49 deselected in 0.11s`
+- `.venv/bin/python -m pytest -q`
+  - result: `4079 passed, 232 skipped, 53 warnings in 20.54s`
+
+Observed but not used as a blocker:
+
+- `.venv/bin/ruff check ...` over broad source files reports existing
+  pyupgrade/import-sort debt in `compose_planner.py`, `derive.py`, and
+  `test_join.py`; this was not introduced by the P0-37/P0-42 behavior change
+  and is not part of this scoped signoff.
 
 ## Follow-Up
 
-P0-42 closes the projected source-alias shadowing and union-as-source alias
-boundary follow-up. Stable relation reuse with qualified refs remains separate.
+Stable relation reuse with qualified refs remains separate. P0-37/P0-42 source
+alias boundary work is closed by the P0-42 progress evidence.

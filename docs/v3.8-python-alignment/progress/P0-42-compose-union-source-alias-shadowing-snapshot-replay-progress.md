@@ -17,6 +17,8 @@ Date: 2026-06-09
 - Added SQL Server embedded composed-source fallback so Python no longer
   renders `FROM (WITH` for the Java snapshot case.
 - Updated the compose snapshot manifest/docs to advertise the P0-42 coverage.
+- Recorded the combined P0-37/P0-42 source-alias boundary closeout in this
+  progress record.
 
 ## Verification
 
@@ -32,10 +34,11 @@ Passed:
   - result: `All checks passed!`
 - `git diff --check`
   - result: passed in both Java and Python repos.
-- `mvn test -P!multi-db -pl foggy-dataset-model -Dtest=JavaComposeSnapshotTest,JoinCompileTest`
-  - result: `BUILD SUCCESS`; `22` tests passed.
+- `mvn test -pl foggy-dataset-model -Dtest=JavaComposeSnapshotTest,JoinCompileTest`
+  - result: `BUILD SUCCESS`; default, MySQL, and PostgreSQL executions passed;
+    22 tests passed per profile.
 - `.venv/bin/python -m pytest -q`
-  - result: `4079 passed, 232 skipped, 53 warnings in 18.72s`
+  - result: `4079 passed, 232 skipped, 53 warnings in 20.54s`
 
 Note:
 

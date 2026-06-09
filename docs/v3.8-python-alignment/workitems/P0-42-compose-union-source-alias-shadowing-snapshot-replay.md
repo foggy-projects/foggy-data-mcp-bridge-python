@@ -10,7 +10,8 @@ touch Odoo business models:
 - projected column aliases must not shadow visible source aliases,
 - union-as-source must expose only the union result alias for qualified refs,
 - union branch source aliases must fail closed after the union boundary,
-- SQL Server embedded join fallback must not emit `FROM (WITH`.
+- SQL Server embedded composed-source fallback must avoid `FROM (WITH` when a
+  composed join or union source is nested under a derived query.
 
 ## Scope
 
@@ -28,8 +29,8 @@ Python alignment:
 - keep union branch aliases hidden while allowing the union result alias,
 - reject projected aliases that shadow visible source aliases before SQL
   rendering,
-- use SQL Server subquery composition when a composed join source is embedded
-  by a derived query.
+- use SQL Server subquery composition when a composed join or union source is
+  embedded by a derived query.
 
 ## Non-Scope
 
@@ -43,3 +44,5 @@ Python alignment:
 - Python focused join/union tests pass.
 - Python Java compose snapshot replay plus manifest passes.
 - Full Python pytest remains green or any environmental failure is recorded.
+- P0-42 progress records the combined P0-37/P0-42 source-alias boundary
+  closeout evidence.
