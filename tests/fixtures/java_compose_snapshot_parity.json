@@ -96,6 +96,88 @@
       "params" : [ ]
     }
   }, {
+    "id" : "qualified-source-alias-slice-order-postgres",
+    "dialect" : "postgres",
+    "plan" : {
+      "type" : "derived",
+      "source" : {
+        "type" : "join",
+        "left" : {
+          "type" : "base",
+          "model" : "FactSalesModel",
+          "columns" : [ "orderStatus$caption", "salesAmount" ],
+          "aliases" : [ "sales" ]
+        },
+        "right" : {
+          "type" : "base",
+          "model" : "FactOrderModel",
+          "columns" : [ "orderStatus$caption", "totalAmount" ],
+          "aliases" : [ "orders" ]
+        },
+        "joinType" : "inner",
+        "on" : [ {
+          "left" : "left.orderStatus$caption",
+          "op" : "=",
+          "right" : "right.orderStatus$caption"
+        } ]
+      },
+      "columns" : [ "sales.salesAmount", "orders.totalAmount" ],
+      "slice" : [ {
+        "field" : "sales.salesAmount",
+        "op" : ">",
+        "value" : 0
+      } ],
+      "orderBy" : [ "-orders.totalAmount" ]
+    },
+    "expected" : {
+      "sqlMarkers" : [ "INNER JOIN", "WHERE", "ORDER BY", "salesAmount", "totalAmount" ],
+      "forbiddenSqlMarkers" : [ "sales.salesAmount", "orders.totalAmount" ],
+      "params" : [ 0 ]
+    }
+  }, {
+    "id" : "inherited-source-alias-through-derived-postgres",
+    "dialect" : "postgres",
+    "plan" : {
+      "type" : "derived",
+      "source" : {
+        "type" : "join",
+        "left" : {
+          "type" : "derived",
+          "source" : {
+            "type" : "base",
+            "model" : "FactSalesModel",
+            "columns" : [ "orderStatus$caption", "salesAmount" ],
+            "aliases" : [ "sales" ]
+          },
+          "columns" : [ "orderStatus$caption", "salesAmount" ],
+          "slice" : [ {
+            "field" : "salesAmount",
+            "op" : ">",
+            "value" : 0
+          } ]
+        },
+        "right" : {
+          "type" : "base",
+          "model" : "FactOrderModel",
+          "columns" : [ "orderStatus$caption", "totalAmount" ],
+          "aliases" : [ "orders" ]
+        },
+        "joinType" : "left",
+        "on" : [ {
+          "left" : "left.orderStatus$caption",
+          "op" : "=",
+          "right" : "right.orderStatus$caption"
+        } ]
+      },
+      "columns" : [ "sales.salesAmount", "orders.totalAmount" ],
+      "orderBy" : [ "-orders.totalAmount" ]
+    },
+    "expected" : {
+      "sqlMarkers" : [ "LEFT JOIN", "ORDER BY", "salesAmount", "totalAmount" ],
+      "forbiddenSqlMarkers" : [ "sales.salesAmount", "orders.totalAmount" ],
+      "params" : [ 0 ]
+    }
+  }, {
     "id" : "source-alias-dropped-column-refused",
     "dialect" : "mysql8",
     "plan" : {

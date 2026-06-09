@@ -120,8 +120,9 @@ P0-3 follow-up:
 - Compose manifest lane is now active and points to the fixture plus replay
   test.
 - Snapshot currently covers base, derived filter/order/limit, union all,
-  qualified source-alias join, dropped-column source alias refusal, and SQL
-  Server fallback forbidden `FROM (WITH` shape.
+  qualified source-alias join, source-alias projection/slice/orderBy after
+  join, inherited source-alias refs through derived query, dropped-column
+  source alias refusal, and SQL Server fallback forbidden `FROM (WITH` shape.
 - Focused Java producer passed:
   `mvn test -pl foggy-dataset-model -Dtest=JavaComposeSnapshotTest`.
 - Focused Python replay passed:

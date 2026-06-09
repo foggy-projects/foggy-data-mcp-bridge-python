@@ -99,16 +99,16 @@ def _plan_from_snapshot(node: dict[str, Any]) -> QueryPlan:
     if node_type == "base":
         return _bind_aliases(
             from_(
-            model=node["model"],
-            columns=list(node["columns"]),
-            slice=_get_list(node, "slice"),
-            having=_get_list(node, "having"),
-            group_by=_get_list(node, "groupBy", "group_by"),
-            order_by=_get_list(node, "orderBy", "order_by"),
-            calculated_fields=_get_list(node, "calculatedFields", "calculated_fields"),
-            limit=_get_int(node, "limit"),
-            start=_get_int(node, "start"),
-            distinct=_get_bool(node, "distinct"),
+                model=node["model"],
+                columns=list(node["columns"]),
+                slice=_get_list(node, "slice"),
+                having=_get_list(node, "having"),
+                group_by=_get_list(node, "groupBy", "group_by"),
+                order_by=_get_list(node, "orderBy", "order_by"),
+                calculated_fields=_get_list(node, "calculatedFields", "calculated_fields"),
+                limit=_get_int(node, "limit"),
+                start=_get_int(node, "start"),
+                distinct=_get_bool(node, "distinct"),
             ),
             node,
         )
@@ -116,15 +116,14 @@ def _plan_from_snapshot(node: dict[str, Any]) -> QueryPlan:
     if node_type == "derived":
         source = _plan_from_snapshot(node["source"])
         return _bind_aliases(
-            from_(
-            source=source,
-            columns=list(node["columns"]),
-            slice=_get_list(node, "slice"),
-            group_by=_get_list(node, "groupBy", "group_by"),
-            order_by=_get_list(node, "orderBy", "order_by"),
-            limit=_get_int(node, "limit"),
-            start=_get_int(node, "start"),
-            distinct=_get_bool(node, "distinct"),
+            source.query(
+                columns=list(node["columns"]),
+                slice=_get_list(node, "slice"),
+                group_by=_get_list(node, "groupBy", "group_by"),
+                order_by=_get_list(node, "orderBy", "order_by"),
+                limit=_get_int(node, "limit"),
+                start=_get_int(node, "start"),
+                distinct=_get_bool(node, "distinct"),
             ),
             node,
         )

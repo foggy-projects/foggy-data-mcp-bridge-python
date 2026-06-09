@@ -68,7 +68,8 @@ Current active snapshot lanes:
 - Formula compiler catalog and QM formula audit
 - Time window catalog
 - Compose query neutral snapshots, including current source-alias and
-  qualified-ref fixture coverage plus P0-37 expansion planning
+  qualified-ref fixture coverage plus P0-37 projection/slice/orderBy and
+  derived-inheritance expansion
 - Compose script tool/runtime neutral snapshots, including execute-mode rows
   envelope shape and MCP host-misconfig structured error payloads
 - Governance / permission visible-model neutral snapshots, including
@@ -136,8 +137,10 @@ Latest P0-39 status:
   pytest is green, the demo QM audit exits zero, multiline Odoo formula
   concatenation is parsed correctly, and window formulas are reported as
   skipped instead of FormulaCompiler failures.
-- P0-37 records the current compose source-alias / qualified-ref fixture
-  coverage and freezes the next neutral snapshot expansion list.
+- P0-37 expands compose source-alias / qualified-ref fixture coverage with
+  PostgreSQL projection, slice, orderBy, and derived-inheritance cases, and
+  updates Python replay to use the production `.query(...)` alias propagation
+  path for derived snapshot nodes.
 - P0-38 records that neutral domain/question runner `warnings` replay is active
   and that `reports` metadata remains the next fixture-envelope expansion.
 - P0-39 closes the recurring Java MCP verification false blocker: module-local
@@ -171,8 +174,13 @@ Latest P0-39 status:
   `175 passed in 7.61s`; `4073 passed, 232 skipped, 52 warnings in 17.68s`.
 - Python P0-36 focused coverage passed:
   `2 passed in 0.43s`; `192 passed in 0.83s`; QM formula audit exit 0.
+- Python P0-37 focused replay passed:
+  `6 passed in 0.48s`; join-focused regression `2 passed in 0.07s`; replay
+  harness ruff check passed.
 - Python full coverage after P0-36/P0-37/P0-38/P1-1/P2-1 records passed:
   `4075 passed, 232 skipped, 52 warnings in 17.46s`.
+- Java P0-37 focused exporter passed:
+  `mvn test -pl foggy-dataset-model -Dtest=JavaComposeSnapshotTest`.
 - Java P0-39 MCP reactor focused coverage passed:
   `mvn -q -pl foggy-dataset-mcp -am -Dtest=JavaComposeScriptToolErrorSnapshotTest -Dsurefire.failIfNoSpecifiedTests=false test`
   and
