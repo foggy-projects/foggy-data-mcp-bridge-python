@@ -51,6 +51,5 @@ Passed:
 
 ## Follow-Up
 
-The next P0-37 batch should clarify source-alias shadowing by projected column
-alias, then cover union-as-source and stable relation reuse with qualified
-refs.
+P0-42 closes the projected source-alias shadowing and union-as-source alias
+boundary follow-up. Stable relation reuse with qualified refs remains separate.

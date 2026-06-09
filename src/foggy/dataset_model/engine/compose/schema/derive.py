@@ -139,6 +139,11 @@ def _derive_derived(plan: DerivedQueryPlan, *, path: str) -> OutputSchema:
         )
         for c in plan.columns
     ]
+    _validate_no_source_alias_shadowing(
+        parts_list,
+        _aliases_visible_from_derived_source(plan.source),
+        plan_path=current_path,
+    )
 
     # Every *expression* must reference only names in source_names.
     # We can't fully parse SQL-ish expressions at M4 (that's M6's job),
@@ -373,6 +378,12 @@ def _collect_aliases(plan: QueryPlan) -> Set[str]:
     return aliases
 
 
+def _aliases_visible_from_derived_source(plan: QueryPlan) -> Set[str]:
+    if isinstance(plan, UnionPlan):
+        return set(_plan_aliases(plan))
+    return _collect_aliases(plan)
+
+
 def _qualified_refs_for_derived_source(
     source: QueryPlan,
     source_schema: OutputSchema,
@@ -407,6 +418,28 @@ def _qualified_refs_for_derived_source(
 
     add_refs(_plan_aliases(source), source_schema.names())
     return refs, ambiguous_prefixes
+
+
+def _validate_no_source_alias_shadowing(
+    parts_list: List[ColumnAliasParts],
+    aliases: Set[str],
+    *,
+    plan_path: str,
+) -> None:
+    if not aliases:
+        return
+    for parts in parts_list:
+        if parts.has_alias and parts.output_name in aliases:
+            raise ComposeSchemaError(
+                code=error_codes.JOIN_AMBIGUOUS_COLUMN,
+                message=(
+                    f"projected column alias {parts.output_name!r} shadows "
+                    "a visible source alias; use a distinct output alias"
+                ),
+                phase=error_codes.PHASE_SCHEMA_DERIVE,
+                plan_path=plan_path,
+                offending_field=parts.output_name,
+            )
 
 
 def _normalize_qualified_parts(

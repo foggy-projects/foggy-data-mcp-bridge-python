@@ -135,6 +135,84 @@
       "params" : [ 0 ]
     }
   }, {
+    "id" : "qualified-source-alias-slice-order-mysql8",
+    "dialect" : "mysql8",
+    "plan" : {
+      "type" : "derived",
+      "source" : {
+        "type" : "join",
+        "left" : {
+          "type" : "base",
+          "model" : "FactSalesModel",
+          "columns" : [ "orderStatus$caption", "salesAmount" ],
+          "aliases" : [ "sales" ]
+        },
+        "right" : {
+          "type" : "base",
+          "model" : "FactOrderModel",
+          "columns" : [ "orderStatus$caption", "totalAmount" ],
+          "aliases" : [ "orders" ]
+        },
+        "joinType" : "inner",
+        "on" : [ {
+          "left" : "left.orderStatus$caption",
+          "op" : "=",
+          "right" : "right.orderStatus$caption"
+        } ]
+      },
+      "columns" : [ "sales.salesAmount", "orders.totalAmount" ],
+      "slice" : [ {
+        "field" : "sales.salesAmount",
+        "op" : ">",
+        "value" : 0
+      } ],
+      "orderBy" : [ "-orders.totalAmount" ]
+    },
+    "expected" : {
+      "sqlMarkers" : [ "INNER JOIN", "WHERE", "ORDER BY", "salesAmount", "totalAmount" ],
+      "forbiddenSqlMarkers" : [ "sales.salesAmount", "orders.totalAmount" ],
+      "params" : [ 0 ]
+    }
+  }, {
+    "id" : "qualified-source-alias-slice-order-sqlserver",
+    "dialect" : "sqlserver",
+    "plan" : {
+      "type" : "derived",
+      "source" : {
+        "type" : "join",
+        "left" : {
+          "type" : "base",
+          "model" : "FactSalesModel",
+          "columns" : [ "orderStatus$caption", "salesAmount" ],
+          "aliases" : [ "sales" ]
+        },
+        "right" : {
+          "type" : "base",
+          "model" : "FactOrderModel",
+          "columns" : [ "orderStatus$caption", "totalAmount" ],
+          "aliases" : [ "orders" ]
+        },
+        "joinType" : "inner",
+        "on" : [ {
+          "left" : "left.orderStatus$caption",
+          "op" : "=",
+          "right" : "right.orderStatus$caption"
+        } ]
+      },
+      "columns" : [ "sales.salesAmount", "orders.totalAmount" ],
+      "slice" : [ {
+        "field" : "sales.salesAmount",
+        "op" : ">",
+        "value" : 0
+      } ],
+      "orderBy" : [ "-orders.totalAmount" ]
+    },
+    "expected" : {
+      "sqlMarkers" : [ "INNER JOIN", "WHERE", "ORDER BY", "salesAmount", "totalAmount" ],
+      "forbiddenSqlMarkers" : [ "sales.salesAmount", "orders.totalAmount" ],
+      "params" : [ 0 ]
+    }
+  }, {
     "id" : "inherited-source-alias-through-derived-postgres",
     "dialect" : "postgres",
     "plan" : {
@@ -209,6 +287,22 @@
       "errorCode" : "ambiguous"
     }
   }, {
+    "id" : "source-alias-shadowed-by-projected-alias-refused",
+    "dialect" : "postgres",
+    "plan" : {
+      "type" : "derived",
+      "source" : {
+        "type" : "base",
+        "model" : "FactSalesModel",
+        "columns" : [ "orderStatus$caption", "salesAmount" ],
+        "aliases" : [ "sales" ]
+      },
+      "columns" : [ "salesAmount AS sales" ]
+    },
+    "expected" : {
+      "errorCode" : "shadow"
+    }
+  }, {
     "id" : "source-alias-dropped-column-refused",
     "dialect" : "mysql8",
     "plan" : {
@@ -242,6 +336,67 @@
     },
     "expected" : {
       "errorCode" : "unknown field"
+    }
+  }, {
+    "id" : "union-branch-source-alias-ref-refused",
+    "dialect" : "postgres",
+    "plan" : {
+      "type" : "derived",
+      "source" : {
+        "type" : "union",
+        "left" : {
+          "type" : "base",
+          "model" : "FactSalesModel",
+          "columns" : [ "orderStatus$caption AS bucket", "salesAmount AS amount" ],
+          "aliases" : [ "sales" ]
+        },
+        "right" : {
+          "type" : "base",
+          "model" : "FactOrderModel",
+          "columns" : [ "orderStatus$caption AS bucket", "totalAmount AS amount" ],
+          "aliases" : [ "orders" ]
+        },
+        "all" : true
+      },
+      "columns" : [ "sales.amount" ]
+    },
+    "expected" : {
+      "errorCode" : "unknown field"
+    }
+  }, {
+    "id" : "union-result-alias-qualified-ref-postgres",
+    "dialect" : "postgres",
+    "plan" : {
+      "type" : "derived",
+      "source" : {
+        "type" : "union",
+        "left" : {
+          "type" : "base",
+          "model" : "FactSalesModel",
+          "columns" : [ "orderStatus$caption AS bucket", "salesAmount AS amount" ],
+          "aliases" : [ "sales" ]
+        },
+        "right" : {
+          "type" : "base",
+          "model" : "FactOrderModel",
+          "columns" : [ "orderStatus$caption AS bucket", "totalAmount AS amount" ],
+          "aliases" : [ "orders" ]
+        },
+        "all" : true,
+        "aliases" : [ "combined" ]
+      },
+      "columns" : [ "combined.amount" ],
+      "slice" : [ {
+        "field" : "combined.amount",
+        "op" : ">",
+        "value" : 0
+      } ],
+      "orderBy" : [ "-combined.amount" ]
+    },
+    "expected" : {
+      "sqlMarkers" : [ "UNION ALL", "WHERE", "ORDER BY", "amount" ],
+      "forbiddenSqlMarkers" : [ "combined.amount", "sales.amount", "orders.amount" ],
+      "params" : [ 0 ]
     }
   }, {
     "id" : "sqlserver-derived-chain-top-level-with",

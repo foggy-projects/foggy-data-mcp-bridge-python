@@ -165,6 +165,59 @@ class TestUnionWithDerived:
 
         assert "priorMonthAmount" in str(exc_info.value)
 
+    def test_derived_over_union_rejects_branch_source_alias_reference(
+        self, svc, ctx
+    ):
+        """UNION erases branch source identity; only the union output
+        relation can be qualified."""
+        current = from_(
+            model="FactSalesModel",
+            columns=["orderStatus$caption AS bucket", "salesAmount AS amount"],
+        ).__fsscript_bind_alias__("sales")
+        prior = from_(
+            model="FactOrderModel",
+            columns=["orderStatus$caption AS bucket", "totalAmount AS amount"],
+        ).__fsscript_bind_alias__("orders")
+        derived = current.union(prior, all=True).query(columns=["sales.amount"])
+
+        with pytest.raises(ComposeSchemaError, match="unknown field"):
+            compile_plan_to_sql(
+                derived, ctx, semantic_service=svc, dialect="postgresql"
+            )
+
+    def test_derived_over_union_accepts_union_result_alias_reference(
+        self, svc, ctx
+    ):
+        current = from_(
+            model="FactSalesModel",
+            columns=["orderStatus$caption AS bucket", "salesAmount AS amount"],
+        ).__fsscript_bind_alias__("sales")
+        prior = from_(
+            model="FactOrderModel",
+            columns=["orderStatus$caption AS bucket", "totalAmount AS amount"],
+        ).__fsscript_bind_alias__("orders")
+        unioned = current.union(prior, all=True).__fsscript_bind_alias__("combined")
+        derived = unioned.query(
+            columns=["combined.amount"],
+            slice=[{"field": "combined.amount", "op": ">", "value": 0}],
+            order_by=["-combined.amount"],
+        )
+
+        composed = compile_plan_to_sql(
+            derived, ctx, semantic_service=svc, dialect="postgresql"
+        )
+
+        assert "UNION ALL" in composed.sql
+        assert "combined.amount" not in composed.sql
+        assert "sales.amount" not in composed.sql
+        assert "orders.amount" not in composed.sql
+        assert re.search(r'cte_\d+\."?amount"?', composed.sql)
+        assert (
+            'ORDER BY "amount" DESC' in composed.sql
+            or "ORDER BY amount DESC" in composed.sql
+        )
+        assert composed.params == [0]
+
 
 class TestUnionMultipleWay:
     def test_three_way_union_left_associative(

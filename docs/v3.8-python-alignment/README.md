@@ -59,6 +59,7 @@ Current P0 execution records:
 - [P0-39-java-mcp-reactor-verification-baseline.md](workitems/P0-39-java-mcp-reactor-verification-baseline.md)
 - [P0-40-compose-script-resolver-resolve-exception-snapshot-replay.md](workitems/P0-40-compose-script-resolver-resolve-exception-snapshot-replay.md)
 - [P0-41-domain-question-report-metadata-snapshot-replay.md](workitems/P0-41-domain-question-report-metadata-snapshot-replay.md)
+- [P0-42-compose-union-source-alias-shadowing-snapshot-replay.md](workitems/P0-42-compose-union-source-alias-shadowing-snapshot-replay.md)
 
 Current P1/P2 planning records:
 
@@ -71,8 +72,9 @@ Current active snapshot lanes:
 - Time window catalog
 - Compose query neutral snapshots, including current source-alias and
   qualified-ref fixture coverage plus P0-37 projection/slice/orderBy and
-  derived-inheritance expansion, and duplicate source-alias fail-closed
-  coverage
+  derived-inheritance expansion, duplicate source-alias fail-closed coverage,
+  projected source-alias shadowing refusal, union branch-alias refusal, union
+  result-alias qualified refs, and SQL Server embedded composed-source fallback
 - Compose script tool/runtime neutral snapshots, including execute-mode rows
   envelope shape and MCP host-misconfig structured error payloads
 - Governance / permission visible-model neutral snapshots, including
@@ -98,7 +100,7 @@ Current active snapshot lanes:
 - Java MCP focused verification uses the reactor `-am` baseline to avoid stale
   local dependency artifacts
 
-Latest P0-41 status:
+Latest P0-42 status:
 
 - P0-26 extends the active MCP compose-script error snapshot lane with
   `missing-user-id-header` and `missing-namespace-header`.
@@ -161,6 +163,11 @@ Latest P0-41 status:
   `neutral-runner-case-summary` reports, and Python replay validates tool,
   model, mode, status, warning count, error count, warning markers, and error
   code against deterministic responses.
+- P0-42 closes the P0-37 compose alias follow-up for projected source-alias
+  shadowing and union-as-source alias boundaries. Java/Python now reject
+  output aliases that shadow visible source aliases, reject branch source
+  aliases after a union boundary, accept the union result alias for qualified
+  refs, and keep SQL Server embedded composed-source SQL free of `FROM (WITH`.
 - P1-1 records the remaining semantic-scale choice: namespace opt-out parity or
   live DB/result parity.
 - P2-1 records the initial Python aggregate-join design boundary before any
@@ -180,6 +187,15 @@ Latest P0-41 status:
   `2 passed in 0.15s`.
 - Python P0-41 focused replay and manifest passed:
   `6 passed in 0.17s`.
+- Python P0-42 focused join/union coverage passed:
+  `3 passed in 0.10s`.
+- Python P0-42 focused compose replay and manifest passed:
+  `6 passed in 0.52s`.
+- Java P0-42 focused exporter passed:
+  `mvn test -P!multi-db -pl foggy-dataset-model -Dtest=JavaComposeSnapshotTest,JoinCompileTest`
+  with `22` tests passed.
+- Python full coverage after P0-42 passed:
+  `4079 passed, 232 skipped, 53 warnings in 18.72s`.
 - Python P0-32 focused replay passed:
   `14 passed in 0.45s`.
 - Python P0-33 focused coverage passed:
@@ -212,5 +228,5 @@ Latest P0-41 status:
   `mvn test -P!multi-db -pl foggy-dataset-model -Dtest=JavaSemanticScaleSnapshotTest`.
 - Full Python pytest and Java focused Maven status are recorded in the
   P0-26/P0-27 progress docs; P0-29/P0-30/P0-31 focused evidence is recorded in
-  their progress docs. P0-32/P0-33/P0-34/P0-35/P0-36/P0-39/P0-40/P0-41 evidence is
-  recorded in their progress docs.
+  their progress docs. P0-32/P0-33/P0-34/P0-35/P0-36/P0-39/P0-40/P0-41/P0-42
+  evidence is recorded in their progress docs.

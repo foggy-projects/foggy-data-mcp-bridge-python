@@ -65,7 +65,6 @@ from foggy.dataset_model.engine.compose.compilation.plan_hash import (
 from foggy.dataset_model.engine.compose.plan.plan import (
     BaseModelPlan,
     DerivedQueryPlan,
-    JoinOn,
     JoinPlan,
     PlanSubquery,
     QueryPlan,
@@ -226,6 +225,10 @@ class _CompileState:
     datasource_ids: Optional[Dict[str, Optional[str]]] = None
     # Prerequisite CTEs for two-stage calculated field rendering.
     prerequisite_ctes: List[CteUnit] = field(default_factory=list)
+    # SQL Server requires WITH to appear at the top level. When a
+    # JoinPlan/UnionPlan is compiled as the source of a DerivedQueryPlan,
+    # avoid returning SQL that would later be embedded as FROM (WITH ...).
+    embedded_composed_depth: int = 0
 
     def next_alias(self) -> str:
         alias = f"cte_{self.alias_counter}"
@@ -238,6 +241,18 @@ class _CompileState:
 
     def exit_depth(self) -> None:
         self.current_depth -= 1
+
+    def enter_embedded_composed(self) -> None:
+        self.embedded_composed_depth += 1
+
+    def exit_embedded_composed(self) -> None:
+        self.embedded_composed_depth -= 1
+
+    def should_inline_embedded_composed(self) -> bool:
+        return (
+            self.embedded_composed_depth > 0
+            and self.dialect.lower() in {"mssql", "sqlserver"}
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -572,7 +587,11 @@ def _compile_derived(plan: DerivedQueryPlan, state: _CompileState) -> CteUnit:
     Parameter ordering matches v1.3 engine emission (SELECT → WHERE →
     GROUP BY → HAVING → ORDER BY); inner params flow before outer.
     """
-    inner = _compile_any(plan.source, state)
+    state.enter_embedded_composed()
+    try:
+        inner = _compile_any(plan.source, state)
+    finally:
+        state.exit_embedded_composed()
     if isinstance(inner, ComposedSql):
         # Union source → synthesise a CteUnit wrapper so the outer
         # SELECT has a stable inner alias to embed under.
@@ -665,7 +684,10 @@ def _compile_join(plan: JoinPlan, state: _CompileState) -> ComposedSql:
     return CteComposer.compose(
         units=anchors,
         join_specs=[join_spec],
-        use_cte=dialect_supports_cte(state.dialect),
+        use_cte=(
+            dialect_supports_cte(state.dialect)
+            and not state.should_inline_embedded_composed()
+        ),
         select_columns=_join_projection_columns(
             left_unit, right_unit, dialect=state.dialect
         ),
@@ -768,6 +790,7 @@ class _SourceColumnScope:
     columns: List[str]
     qualified_refs: Dict[str, str] = field(default_factory=dict)
     ambiguous_prefixes: frozenset[str] = frozenset()
+    source_aliases: frozenset[str] = frozenset()
 
     @property
     def names(self) -> frozenset:
@@ -919,13 +942,22 @@ def _source_column_scope_for_derived(
     inner: CteUnit,
 ) -> _SourceColumnScope:
     if isinstance(source, UnionPlan):
-        return _SourceColumnScope(derive_schema(source).names())
+        columns = derive_schema(source).names()
+        return _SourceColumnScope(
+            columns,
+            _qualified_refs_for_plan(source, columns),
+            source_aliases=frozenset(_plan_aliases(source)),
+        )
     if inner.select_columns:
         columns = [
             extract_column_alias(column).output_name
             for column in inner.select_columns
         ]
-        return _SourceColumnScope(columns, _qualified_refs_for_plan(source, columns))
+        return _SourceColumnScope(
+            columns,
+            _qualified_refs_for_plan(source, columns),
+            source_aliases=_aliases_visible_from_derived_source(source),
+        )
     if isinstance(source, JoinPlan):
         columns = _declared_output_columns_for_plan(source)
         refs, ambiguous_prefixes = _qualified_refs_for_join(source, columns)
@@ -933,13 +965,22 @@ def _source_column_scope_for_derived(
             columns,
             refs,
             ambiguous_prefixes=ambiguous_prefixes,
+            source_aliases=_aliases_visible_from_derived_source(source),
         )
     if isinstance(source, BaseModelPlan):
         columns = _base_declared_output_names(source)
-        return _SourceColumnScope(columns, _qualified_refs_for_plan(source, columns))
+        return _SourceColumnScope(
+            columns,
+            _qualified_refs_for_plan(source, columns),
+            source_aliases=_aliases_visible_from_derived_source(source),
+        )
     if isinstance(source, DerivedQueryPlan):
         columns = _derived_output_columns(source, _SourceColumnScope([]))
-        return _SourceColumnScope(columns, _qualified_refs_for_plan(source, columns))
+        return _SourceColumnScope(
+            columns,
+            _qualified_refs_for_plan(source, columns),
+            source_aliases=_aliases_visible_from_derived_source(source),
+        )
     return _SourceColumnScope([])
 
 
@@ -1001,6 +1042,12 @@ def _collect_aliases(plan: QueryPlan) -> Tuple[str, ...]:
     return tuple(dict.fromkeys(aliases))
 
 
+def _aliases_visible_from_derived_source(plan: QueryPlan) -> frozenset[str]:
+    if isinstance(plan, UnionPlan):
+        return frozenset(_plan_aliases(plan))
+    return frozenset(_collect_aliases(plan))
+
+
 def _declared_output_columns_for_plan(plan: QueryPlan) -> List[str]:
     if isinstance(plan, BaseModelPlan):
         return _base_declared_output_names(plan)
@@ -1054,6 +1101,7 @@ def _validate_derived_output_refs(
 ) -> None:
     if not source_scope.columns:
         return
+    _validate_projected_source_alias_shadowing(plan, source_scope)
     source_names = set(source_scope.columns)
     current_output_names = {
         _derived_output_name_for_validation(column, source_scope)
@@ -1142,6 +1190,27 @@ def _validate_derived_output_refs(
                         plan_path="DerivedQueryPlan",
                         offending_field=ident,
                     )
+
+
+def _validate_projected_source_alias_shadowing(
+    plan: DerivedQueryPlan,
+    source_scope: _SourceColumnScope,
+) -> None:
+    if not source_scope.source_aliases:
+        return
+    for column in plan.columns:
+        parts = extract_column_alias(column)
+        if parts.has_alias and parts.output_name in source_scope.source_aliases:
+            raise ComposeSchemaError(
+                code=schema_error_codes.JOIN_AMBIGUOUS_COLUMN,
+                message=(
+                    f"projected column alias {parts.output_name!r} shadows "
+                    "a visible source alias; use a distinct output alias"
+                ),
+                phase=schema_error_codes.PHASE_SCHEMA_DERIVE,
+                plan_path="DerivedQueryPlan",
+                offending_field=parts.output_name,
+            )
 
 
 def _derived_output_name_for_validation(

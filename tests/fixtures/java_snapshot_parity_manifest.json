@@ -66,6 +66,9 @@
         "source alias inheritance",
         "qualified left/right join references",
         "shadowed alias/dropped-column refusal",
+        "projected source-alias shadowing refusal",
+        "union branch source-alias refusal",
+        "union result source-alias qualified references",
         "SQL Server fallback shape"
       ],
       "verification": [

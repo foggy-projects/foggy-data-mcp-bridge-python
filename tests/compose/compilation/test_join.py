@@ -441,6 +441,31 @@ class TestJoinBasic:
                 dialect="postgres",
             )
 
+    def test_query_after_join_rejects_projected_alias_shadowing_source_alias(
+        self, svc, ctx
+    ):
+        sales = from_(
+            model="FactSalesModel",
+            columns=["orderStatus$caption", "salesAmount"],
+        ).__fsscript_bind_alias__("sales")
+        orders = from_(
+            model="FactOrderModel",
+            columns=["orderStatus$caption", "totalAmount"],
+        ).__fsscript_bind_alias__("orders")
+        joined = sales.join(
+            orders,
+            type="inner",
+            on=[JoinOn(left="orderStatus$caption", op="=", right="orderStatus$caption")],
+        )
+
+        with pytest.raises(Exception, match="shadow"):
+            compile_plan_to_sql(
+                joined.query(columns=["salesAmount AS sales"]),
+                ctx,
+                semantic_service=svc,
+                dialect="postgres",
+            )
+
     def test_postgres_base_stabilizes_declared_dollar_outputs_with_extra_columns(
         self, ctx
     ):

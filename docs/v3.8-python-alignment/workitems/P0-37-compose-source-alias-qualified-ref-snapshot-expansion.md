@@ -49,9 +49,11 @@ the `dup` source alias is bound on both join sides. Callers must use
 
 Add or refresh Java snapshots for:
 
-- source alias shadowing by projected column alias refusal,
-- union-as-source and stable relation reuse with qualified refs,
+- stable relation reuse with qualified refs,
 - dialect markers for MySQL, PostgreSQL, and SQL Server fallback shape.
+
+P0-42 closes the projected source-alias shadowing and union-as-source alias
+boundary items.
 
 ## Non-Scope
 
