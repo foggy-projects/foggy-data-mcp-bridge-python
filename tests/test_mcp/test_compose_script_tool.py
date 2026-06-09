@@ -170,7 +170,7 @@ async def test_missing_context_returns_error():
 
 
 @pytest.mark.asyncio
-async def test_factory_raising_wraps_to_host_misconfig():
+async def test_factory_raising_wraps_to_internal_error():
     def bad_factory(_ctx):
         raise RuntimeError("can't build resolver")
 
@@ -180,7 +180,7 @@ async def test_factory_raising_wraps_to_host_misconfig():
     )
     result = await tool.execute({"script": "1"}, _tool_ctx())
     assert result.success is False
-    assert result.data["error_code"] == "host-misconfig"
+    assert result.data["error_code"] == "internal-error"
     assert "can't build resolver" in result.data["message"]
 
 

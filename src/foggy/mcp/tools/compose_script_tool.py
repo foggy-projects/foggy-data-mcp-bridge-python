@@ -179,7 +179,7 @@ class ComposeScriptTool(BaseMcpTool):
             )
         except Exception as exc:
             return self._error_payload(
-                error_code="host-misconfig",
+                error_code="internal-error",
                 phase="internal",
                 message=f"authority_resolver_factory raised: {exc}",
             )

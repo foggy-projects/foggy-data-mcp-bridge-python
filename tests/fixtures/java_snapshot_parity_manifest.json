@@ -125,16 +125,16 @@
         "missing X-User-Id header bridge payload",
         "missing X-Namespace header bridge payload",
         "resolver-null host-misconfig payload with status/error_code/phase",
+        "resolver factory exception internal-error payload",
         "remote compose principal-mismatch permission-resolve payload",
         "remote compose missing authority binding invalid-response payload",
         "host error payload without model leakage",
         "forbidden stack/exception marker checks"
       ],
-      "plannedExtensions": [
-        "resolver factory exception payload"
-      ],
+      "plannedExtensions": [],
       "verification": [
         "Python ComposeScriptTool replays Java structured error fields",
+        "Python aligns resolver factory exception payloads to Java internal-error/internal",
         "Python asserts no stack or Java exception markers leak into payload"
       ]
     },

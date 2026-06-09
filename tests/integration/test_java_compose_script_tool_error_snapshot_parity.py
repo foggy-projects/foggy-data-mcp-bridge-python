@@ -40,6 +40,18 @@ class _PermissiveResolver:
         )
 
 
+def _raising_resolver_factory(_ctx):
+    raise RuntimeError("resolver factory boom")
+
+
+def _null_resolver_factory(_ctx):
+    return None
+
+
+def _permissive_resolver_factory(_ctx):
+    return _PermissiveResolver()
+
+
 def _tool_context(raw: dict[str, Any]) -> ToolExecutionContext:
     return ToolExecutionContext(
         request_id=raw.get("traceId", "java-compose-script-tool-error-snapshot"),
@@ -71,11 +83,12 @@ async def _execute_case(case: dict[str, Any]):
             None if context is None else _tool_context(context),
         )
 
-    resolver_factory = (
-        (lambda _ctx: None)
-        if case["id"] == "resolver-null-host-misconfig"
-        else (lambda _ctx: _PermissiveResolver())
-    )
+    if case["id"] == "resolver-null-host-misconfig":
+        resolver_factory = _null_resolver_factory
+    elif case["id"] == "resolver-factory-exception":
+        resolver_factory = _raising_resolver_factory
+    else:
+        resolver_factory = _permissive_resolver_factory
     tool = ComposeScriptTool(
         authority_resolver_factory=resolver_factory,
         semantic_service=_StubSemanticService(),
