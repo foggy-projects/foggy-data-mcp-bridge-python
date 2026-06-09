@@ -7,8 +7,8 @@ GROUP BY should be auto-generated for all non-aggregated dimension columns.
 import pytest
 
 from foggy.dataset_model.semantic import SemanticQueryService
-from foggy.mcp_spi import SemanticQueryRequest
 from foggy.demo.models.ecommerce_models import create_fact_sales_model
+from foggy.mcp_spi import SemanticQueryRequest
 
 
 @pytest.fixture
@@ -84,6 +84,69 @@ class TestAutoGroupBy:
         sql = _build_sql(service, request)
         assert "HAVING" in sql
         assert "SUM(t.sales_amount)" in sql
+
+    def test_having_between_selected_aggregate_aliases(self, service):
+        """HAVING can compare two distinct selected aggregate aliases."""
+        request = SemanticQueryRequest(
+            columns=[
+                "orderStatus$caption",
+                "sum(salesAmount) as totalSales",
+                "sum(costAmount) as totalCost",
+            ],
+            group_by=["orderStatus$caption"],
+            having=[
+                {
+                    "field": "totalSales",
+                    "op": ">",
+                    "value": {"$field": "totalCost"},
+                }
+            ],
+        )
+        response = service.query_model("FactSalesModel", request, mode="validate")
+        assert response.error is None, response.error
+        assert response.sql is not None
+        assert "HAVING" in response.sql
+        assert "SUM(t.sales_amount) > SUM(t.cost_amount)" in response.sql
+        assert response.params in (None, [])
+
+    def test_inline_aggregate_alias_colliding_with_measure_is_rejected(
+        self,
+        service,
+    ):
+        """Inline aggregate aliases cannot shadow an existing schema field."""
+        request = SemanticQueryRequest(
+            columns=["orderStatus$caption", "sum(salesAmount) as salesAmount"],
+            group_by=["orderStatus$caption"],
+            having=[{"field": "salesAmount", "op": ">", "value": 0}],
+        )
+        response = service.query_model("FactSalesModel", request, mode="validate")
+        assert response.error is not None
+        assert "AGGREGATE_ALIAS_COLLIDES_WITH_FIELD" in response.error
+
+    def test_inline_aggregate_alias_collision_is_case_insensitive(self, service):
+        """Aggregate alias collision checks are case-insensitive."""
+        request = SemanticQueryRequest(
+            columns=["orderStatus$caption", "sum(salesAmount) as SalesAmount"],
+            group_by=["orderStatus$caption"],
+            having=[{"field": "SalesAmount", "op": ">", "value": 0}],
+        )
+        response = service.query_model("FactSalesModel", request, mode="validate")
+        assert response.error is not None
+        assert "AGGREGATE_ALIAS_COLLIDES_WITH_FIELD" in response.error
+
+    def test_aggregate_measure_explicit_alias_collision_is_rejected(
+        self,
+        service,
+    ):
+        """Explicit aliases on aggregate measures cannot shadow schema fields."""
+        request = SemanticQueryRequest(
+            columns=["orderStatus$caption", "salesAmount AS salesAmount"],
+            group_by=["orderStatus$caption"],
+            having=[{"field": "salesAmount", "op": ">", "value": 0}],
+        )
+        response = service.query_model("FactSalesModel", request, mode="validate")
+        assert response.error is not None
+        assert "AGGREGATE_ALIAS_COLLIDES_WITH_FIELD" in response.error
 
     def test_aggregate_measure_in_slice_is_lifted_to_having(self, service):
         """Aggregate measures in slice are lifted to HAVING by default."""

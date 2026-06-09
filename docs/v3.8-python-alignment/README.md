@@ -52,6 +52,7 @@ Current P0 execution records:
 - [P0-32-semantic-scale-neutral-snapshot-replay.md](workitems/P0-32-semantic-scale-neutral-snapshot-replay.md)
 - [P0-33-having-aggregate-alias-strictness.md](workitems/P0-33-having-aggregate-alias-strictness.md)
 - [P0-34-compose-script-resolver-factory-exception-snapshot-replay.md](workitems/P0-34-compose-script-resolver-factory-exception-snapshot-replay.md)
+- [P0-35-aggregate-alias-field-collision-boundary.md](workitems/P0-35-aggregate-alias-field-collision-boundary.md)
 
 Current active snapshot lanes:
 
@@ -77,8 +78,9 @@ Current active snapshot lanes:
 - Java-style explicit HAVING aggregate alias validation, while keeping Python
   aggregate-slice auto-lift compatibility
 - Resolver factory exception structured payload replay for MCP compose-script
+- Explicit HAVING aggregate alias field-collision fail-closed boundary
 
-Latest P0-34 status:
+Latest P0-35 status:
 
 - P0-26 extends the active MCP compose-script error snapshot lane with
   `missing-user-id-header` and `missing-namespace-header`.
@@ -111,6 +113,12 @@ Latest P0-34 status:
   `dataset.compose_script`: Java's `resolver-factory-exception` snapshot is
   replayed by Python as `internal-error/internal`, while resolver factory
   `None` remains `host-misconfig/internal`.
+- P0-35 closes the explicit HAVING aggregate-alias shadowing gap left after
+  P0-33: selected aggregate aliases now fail closed when explicit HAVING
+  references an alias that collides with existing model fields, ignoring case.
+  Distinct aliases such as `totalSales` remain valid for HAVING, and compose
+  downstream relation naming can still reuse business field names when not
+  bypassing same-layer HAVING validation.
 - The Java exporters write:
   `tests/fixtures/java_compose_script_tool_error_snapshot_parity.json`.
   and `tests/fixtures/java_compose_script_snapshot_parity.json`.
@@ -130,9 +138,11 @@ Latest P0-34 status:
   `174 passed in 7.41s`.
 - Python P0-34 focused coverage passed:
   `8 passed, 9 warnings in 0.51s`.
+- Python P0-35 focused and full coverage passed:
+  `175 passed in 7.61s`; `4073 passed, 232 skipped, 52 warnings in 17.68s`.
 - Java P0-32 focused exporter passed with SQLite-only profile:
   `mvn test -P!multi-db -pl foggy-dataset-model -Dtest=JavaSemanticScaleSnapshotTest`.
 - Full Python pytest and Java focused Maven status are recorded in the
   P0-26/P0-27 progress docs; P0-29/P0-30/P0-31 focused evidence is recorded in
-  their progress docs. P0-32/P0-33/P0-34 evidence is recorded in their
+  their progress docs. P0-32/P0-33/P0-34/P0-35 evidence is recorded in their
   progress docs.

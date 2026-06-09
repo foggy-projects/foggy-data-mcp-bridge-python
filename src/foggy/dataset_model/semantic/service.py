@@ -1414,6 +1414,11 @@ class SemanticQueryService(SemanticServiceResolver):
                             "expression": sql_expr,
                             "aggregation": agg,
                             "havingEligible": bool(user_alias),
+                            "aliasCollidesWithField": bool(user_alias)
+                            and self._aggregate_alias_collides_with_field(
+                                model,
+                                user_alias,
+                            ),
                         })
                         has_aggregation = True
                     else:
@@ -1461,6 +1466,7 @@ class SemanticQueryService(SemanticServiceResolver):
             ]
         self._reject_window_calculated_field_slice(request, calc_field_defs)
         selected_aggregate_aliases = set(self._selected_aggregate_sql(columns_info).keys())
+        self._reject_having_aggregate_alias_field_collision(request, columns_info)
         self._validate_post_aggregate_calculations(
             post_aggregate_defs,
             selected_aggregate_aliases,
@@ -3114,6 +3120,46 @@ class SemanticQueryService(SemanticServiceResolver):
             "havingEligible": False,
         }
 
+    def _aggregate_alias_collides_with_field(
+        self,
+        model: DbTableModelImpl,
+        alias: str,
+    ) -> bool:
+        schema_fields = _collect_model_schema_fields(model)
+        normalized_schema_fields = {field.casefold() for field in schema_fields}
+        return alias.casefold() in normalized_schema_fields
+
+    def _reject_having_aggregate_alias_field_collision(
+        self,
+        request: SemanticQueryRequest,
+        columns_info: List[Dict[str, Any]],
+    ) -> None:
+        if not request.having:
+            return
+
+        colliding_aliases_by_key = {
+            str(info.get("name")).casefold(): str(info.get("name"))
+            for info in columns_info
+            if info.get("havingEligible") and info.get("aliasCollidesWithField")
+        }
+        matched = sorted(
+            {
+                colliding_aliases_by_key[field.casefold()]
+                for field in self._collect_condition_fields(request.having)
+                if field.casefold() in colliding_aliases_by_key
+            }
+        )
+        if not matched:
+            return
+
+        joined = ", ".join(repr(alias) for alias in matched)
+        raise ValueError(
+            "AGGREGATE_ALIAS_COLLIDES_WITH_FIELD: selected aggregate alias "
+            f"{joined} conflicts with an existing model field and is used in "
+            "request.having. Use a distinct aggregate alias for HAVING, or "
+            "remove the explicit HAVING reference."
+        )
+
     @staticmethod
     def _attach_semantic_scale_metadata(field_info: Dict[str, Any], source: Any) -> None:
         scale = semantic_scale_metadata_value(
@@ -3161,6 +3207,10 @@ class SemanticQueryService(SemanticServiceResolver):
             "aggregation": agg,
             "select_expr": select_expr,
             "havingEligible": True,
+            "aliasCollidesWithField": self._aggregate_alias_collides_with_field(
+                model,
+                parsed.alias,
+            ),
         }
 
     def _aggregate_calc_field_names(
