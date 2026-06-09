@@ -24,5 +24,6 @@ Passed:
 
 ## Follow-Up
 
-Add a Java fixture case with report metadata, then update Python replay to
-validate optional report fields without breaking the existing P0-31 fixture.
+Closed by P0-41: Java fixture cases now include optional report metadata, and
+Python replay validates optional report fields without breaking the existing
+P0-31 fixture.

@@ -10,8 +10,8 @@
       "namespace" : "demo",
       "principal" : {
         "tenantId" : "demo",
-        "userId" : "snapshot-user",
-        "roles" : [ "analyst" ]
+        "roles" : [ "analyst" ],
+        "userId" : "snapshot-user"
       }
     },
     "expected" : {
@@ -41,6 +41,16 @@
       "resultMarkers" : [ "orderStatus", "salesAmount" ],
       "warnings" : [ "timeWindow:currentQuarter" ],
       "errorCode" : null,
+      "reports" : [ {
+        "reportType" : "neutral-runner-case-summary",
+        "toolName" : "dataset.query_model",
+        "model" : "FactSalesModel",
+        "mode" : "execute",
+        "status" : "ok",
+        "warningCount" : 1,
+        "errorCount" : 0,
+        "warningMarkers" : [ "timeWindow:currentQuarter" ]
+      } ],
       "forbiddenMarkers" : [ "odoo", "res_partner", "res_users", "LLM" ]
     }
   }, {
@@ -50,8 +60,8 @@
       "namespace" : "demo",
       "principal" : {
         "tenantId" : "demo",
-        "userId" : "snapshot-user",
-        "roles" : [ "analyst" ]
+        "roles" : [ "analyst" ],
+        "userId" : "snapshot-user"
       }
     },
     "expected" : {
@@ -64,13 +74,13 @@
           "groupBy" : [ "orderMonth" ],
           "orderBy" : [ ],
           "slice" : [ {
-            "op" : "eq",
             "field" : "orderStatus",
+            "op" : "eq",
             "value" : "closed"
           } ],
           "calculatedFields" : [ {
-            "expression" : "salesAmount - costAmount",
-            "name" : "grossMargin"
+            "name" : "grossMargin",
+            "expression" : "salesAmount - costAmount"
           } ],
           "start" : 0,
           "limit" : 20,
@@ -81,6 +91,16 @@
       "resultMarkers" : [ "orderMonth", "grossMargin" ],
       "warnings" : [ "calculatedFields:grossMargin" ],
       "errorCode" : null,
+      "reports" : [ {
+        "reportType" : "neutral-runner-case-summary",
+        "toolName" : "dataset.query_model",
+        "model" : "FactSalesModel",
+        "mode" : "execute",
+        "status" : "ok",
+        "warningCount" : 1,
+        "errorCount" : 0,
+        "warningMarkers" : [ "calculatedFields:grossMargin" ]
+      } ],
       "forbiddenMarkers" : [ "odoo", "res_partner", "res_users", "LLM" ]
     }
   }, {
@@ -90,8 +110,8 @@
       "namespace" : "demo",
       "principal" : {
         "tenantId" : "demo",
-        "userId" : "snapshot-user",
-        "roles" : [ "analyst" ]
+        "roles" : [ "analyst" ],
+        "userId" : "snapshot-user"
       }
     },
     "expected" : {
@@ -110,8 +130,8 @@
           "returnTotal" : false,
           "deniedColumns" : [ {
             "field" : "customerEmail",
-            "table" : "fact_sales",
-            "column" : "customer_email"
+            "column" : "customer_email",
+            "table" : "fact_sales"
           } ]
         }
       },
@@ -119,6 +139,17 @@
       "resultMarkers" : [ ],
       "warnings" : [ "deniedColumns:customerEmail" ],
       "errorCode" : "governance/denied-field",
+      "reports" : [ {
+        "reportType" : "neutral-runner-case-summary",
+        "toolName" : "dataset.query_model",
+        "model" : "FactSalesModel",
+        "mode" : "validate",
+        "status" : "error",
+        "warningCount" : 1,
+        "errorCount" : 1,
+        "warningMarkers" : [ "deniedColumns:customerEmail" ],
+        "errorCode" : "governance/denied-field"
+      } ],
       "forbiddenMarkers" : [ "odoo", "res_partner", "res_users", "LLM" ]
     }
   } ]

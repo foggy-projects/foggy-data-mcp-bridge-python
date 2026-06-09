@@ -300,18 +300,20 @@
         "grouped query request payload",
         "calculated-field plus time-window request payload",
         "denied-field fail-closed payload",
-        "warning/report metadata markers",
+        "warning markers",
+        "neutral runner case-summary report metadata",
         "forbidden Odoo/LLM leakage markers"
       ],
       "plannedExtensions": [
         "deterministic ToolCallCollector-backed Java export",
-        "unsupported construct and report summary cases",
+        "unsupported construct cases",
         "Odoo packs after registry/model drift is resolved"
       ],
       "verification": [
         "Python converts Java camelCase payloads to SemanticQueryRequest",
         "Python replays normalized dataset.query_model arguments through a deterministic semantic boundary",
-        "Python checks stable SQL/result/error/warning markers without LLM or Odoo models"
+        "Python checks stable SQL/result/error/warning markers without LLM or Odoo models",
+        "Python validates optional neutral runner report metadata against deterministic responses"
       ]
     }
   ]

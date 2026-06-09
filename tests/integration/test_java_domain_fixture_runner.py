@@ -77,6 +77,7 @@ def _assert_case_replays(
         assert response.error_detail["code"] == error_code
         for marker in expected.get("warnings", []):
             assert marker in (response.warnings or [])
+        _assert_reports_metadata(expected, response)
         _assert_forbidden_markers_absent(response.model_dump(), expected)
         return
 
@@ -98,6 +99,7 @@ def _assert_case_replays(
         assert marker in response_text
     for marker in expected.get("warnings", []):
         assert marker in (response.warnings or [])
+    _assert_reports_metadata(expected, response)
     _assert_forbidden_markers_absent(response.model_dump(), expected)
 
 
@@ -136,6 +138,37 @@ def _assert_forbidden_markers_absent(
     serialized = json.dumps(payload, sort_keys=True)
     for marker in expected.get("forbiddenMarkers", []):
         assert marker not in serialized
+
+
+def _assert_reports_metadata(
+    expected: dict[str, Any],
+    response: SemanticQueryResponse,
+) -> None:
+    reports = expected.get("reports")
+    if reports is None:
+        return
+
+    assert isinstance(reports, list)
+    assert len(reports) == 1
+    report = reports[0]
+    tool_arguments = expected["toolArguments"]
+    warnings = response.warnings or []
+    error_code = expected.get("errorCode")
+
+    assert report["reportType"] == "neutral-runner-case-summary"
+    assert report["toolName"] == expected["toolName"]
+    assert report["model"] == tool_arguments["model"]
+    assert report["mode"] == tool_arguments["mode"]
+    assert report["status"] == ("error" if error_code else "ok")
+    assert report["warningCount"] == len(warnings)
+    assert report["errorCount"] == (1 if error_code else 0)
+    assert report.get("warningMarkers", []) == expected.get("warnings", [])
+    if error_code:
+        assert report["errorCode"] == error_code
+        assert response.error is not None
+    else:
+        assert "errorCode" not in report
+        assert response.error is None
 
 
 class _NeutralSemanticBoundary:

@@ -58,6 +58,7 @@ Current P0 execution records:
 - [P0-38-domain-question-warning-report-metadata.md](workitems/P0-38-domain-question-warning-report-metadata.md)
 - [P0-39-java-mcp-reactor-verification-baseline.md](workitems/P0-39-java-mcp-reactor-verification-baseline.md)
 - [P0-40-compose-script-resolver-resolve-exception-snapshot-replay.md](workitems/P0-40-compose-script-resolver-resolve-exception-snapshot-replay.md)
+- [P0-41-domain-question-report-metadata-snapshot-replay.md](workitems/P0-41-domain-question-report-metadata-snapshot-replay.md)
 
 Current P1/P2 planning records:
 
@@ -85,8 +86,8 @@ Current active snapshot lanes:
   non-additive subtotal/grandTotal output
 - Pivot domain transport large-domain threshold and SQLite bind-limit
   fail-closed snapshots
-- Domain/question neutral runner normalized tool-argument snapshots and P0-38
-  warning/report metadata expansion planning
+- Domain/question neutral runner normalized tool-argument snapshots, warning
+  markers, and neutral case-summary report metadata
 - Semantic scale neutral snapshots for helper literals, SQL rewriting,
   metadata, and fail-closed carrier-column validation
 - Java-style explicit HAVING aggregate alias validation, while keeping Python
@@ -97,7 +98,7 @@ Current active snapshot lanes:
 - Java MCP focused verification uses the reactor `-am` baseline to avoid stale
   local dependency artifacts
 
-Latest P0-40 status:
+Latest P0-41 status:
 
 - P0-26 extends the active MCP compose-script error snapshot lane with
   `missing-user-id-header` and `missing-namespace-header`.
@@ -155,6 +156,11 @@ Latest P0-40 status:
   Java classifies this path as
   `compose-authority-resolve/upstream-failure` with tool phase
   `permission-resolve`, and Python replay now locks the same payload contract.
+- P0-41 closes the P0-38 report metadata follow-up: the neutral
+  domain/question runner fixture now includes optional
+  `neutral-runner-case-summary` reports, and Python replay validates tool,
+  model, mode, status, warning count, error count, warning markers, and error
+  code against deterministic responses.
 - P1-1 records the remaining semantic-scale choice: namespace opt-out parity or
   live DB/result parity.
 - P2-1 records the initial Python aggregate-join design boundary before any
@@ -172,6 +178,8 @@ Latest P0-40 status:
   `8 passed in 0.48s`.
 - Python P0-31 focused replay passed:
   `2 passed in 0.15s`.
+- Python P0-41 focused replay and manifest passed:
+  `6 passed in 0.17s`.
 - Python P0-32 focused replay passed:
   `14 passed in 0.45s`.
 - Python P0-33 focused coverage passed:
@@ -198,9 +206,11 @@ Latest P0-40 status:
   `mvn -q -pl foggy-dataset-mcp -am -Dtest=LocalDatasetAccessorGovernanceTest -Dsurefire.failIfNoSpecifiedTests=false test`.
 - Java P0-40 MCP reactor exporter passed:
   `mvn -q -pl foggy-dataset-mcp -am -Dtest=JavaComposeScriptToolErrorSnapshotTest -Dsurefire.failIfNoSpecifiedTests=false test`.
+- Java P0-41 MCP reactor exporter passed:
+  `mvn -q -pl foggy-dataset-mcp -am -Dtest=JavaDomainQuestionNeutralRunnerSnapshotTest -Dsurefire.failIfNoSpecifiedTests=false test`.
 - Java P0-32 focused exporter passed with SQLite-only profile:
   `mvn test -P!multi-db -pl foggy-dataset-model -Dtest=JavaSemanticScaleSnapshotTest`.
 - Full Python pytest and Java focused Maven status are recorded in the
   P0-26/P0-27 progress docs; P0-29/P0-30/P0-31 focused evidence is recorded in
-  their progress docs. P0-32/P0-33/P0-34/P0-35/P0-36/P0-39/P0-40 evidence is
+  their progress docs. P0-32/P0-33/P0-34/P0-35/P0-36/P0-39/P0-40/P0-41 evidence is
   recorded in their progress docs.
