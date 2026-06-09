@@ -126,6 +126,7 @@
         "missing X-Namespace header bridge payload",
         "resolver-null host-misconfig payload with status/error_code/phase",
         "resolver factory exception internal-error payload",
+        "resolver resolve exception upstream-failure permission-resolve payload",
         "remote compose principal-mismatch permission-resolve payload",
         "remote compose missing authority binding invalid-response payload",
         "host error payload without model leakage",
@@ -135,6 +136,7 @@
       "verification": [
         "Python ComposeScriptTool replays Java structured error fields",
         "Python aligns resolver factory exception payloads to Java internal-error/internal",
+        "Python aligns resolver resolve exception payloads to Java compose-authority-resolve/upstream-failure permission-resolve",
         "Python asserts no stack or Java exception markers leak into payload"
       ]
     },

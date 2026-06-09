@@ -57,6 +57,7 @@ Current P0 execution records:
 - [P0-37-compose-source-alias-qualified-ref-snapshot-expansion.md](workitems/P0-37-compose-source-alias-qualified-ref-snapshot-expansion.md)
 - [P0-38-domain-question-warning-report-metadata.md](workitems/P0-38-domain-question-warning-report-metadata.md)
 - [P0-39-java-mcp-reactor-verification-baseline.md](workitems/P0-39-java-mcp-reactor-verification-baseline.md)
+- [P0-40-compose-script-resolver-resolve-exception-snapshot-replay.md](workitems/P0-40-compose-script-resolver-resolve-exception-snapshot-replay.md)
 
 Current P1/P2 planning records:
 
@@ -69,7 +70,8 @@ Current active snapshot lanes:
 - Time window catalog
 - Compose query neutral snapshots, including current source-alias and
   qualified-ref fixture coverage plus P0-37 projection/slice/orderBy and
-  derived-inheritance expansion
+  derived-inheritance expansion, and duplicate source-alias fail-closed
+  coverage
 - Compose script tool/runtime neutral snapshots, including execute-mode rows
   envelope shape and MCP host-misconfig structured error payloads
 - Governance / permission visible-model neutral snapshots, including
@@ -89,12 +91,13 @@ Current active snapshot lanes:
   metadata, and fail-closed carrier-column validation
 - Java-style explicit HAVING aggregate alias validation, while keeping Python
   aggregate-slice auto-lift compatibility
-- Resolver factory exception structured payload replay for MCP compose-script
+- Resolver factory and resolver `resolve(...)` exception structured payload
+  replay for MCP compose-script
 - Explicit HAVING aggregate alias field-collision fail-closed boundary
 - Java MCP focused verification uses the reactor `-am` baseline to avoid stale
   local dependency artifacts
 
-Latest P0-39 status:
+Latest P0-40 status:
 
 - P0-26 extends the active MCP compose-script error snapshot lane with
   `missing-user-id-header` and `missing-namespace-header`.
@@ -140,13 +143,18 @@ Latest P0-39 status:
 - P0-37 expands compose source-alias / qualified-ref fixture coverage with
   PostgreSQL projection, slice, orderBy, and derived-inheritance cases, and
   updates Python replay to use the production `.query(...)` alias propagation
-  path for derived snapshot nodes.
+  path for derived snapshot nodes. It also aligns Java/Python fail-closed
+  behavior for duplicate source aliases across join sides.
 - P0-38 records that neutral domain/question runner `warnings` replay is active
   and that `reports` metadata remains the next fixture-envelope expansion.
 - P0-39 closes the recurring Java MCP verification false blocker: module-local
   `-pl foggy-dataset-mcp` can resolve stale local `foggy-dataset-model`
   artifacts, while the reactor `-am` command builds current workspace modules
   and passes the P0-34 exporter and `LocalDatasetAccessorGovernanceTest`.
+- P0-40 closes the resolver `resolve(...)` generic exception snapshot gap:
+  Java classifies this path as
+  `compose-authority-resolve/upstream-failure` with tool phase
+  `permission-resolve`, and Python replay now locks the same payload contract.
 - P1-1 records the remaining semantic-scale choice: namespace opt-out parity or
   live DB/result parity.
 - P2-1 records the initial Python aggregate-join design boundary before any
@@ -170,24 +178,29 @@ Latest P0-39 status:
   `174 passed in 7.41s`.
 - Python P0-34 focused coverage passed:
   `8 passed, 9 warnings in 0.51s`.
+- Python P0-40 focused replay and manifest passed:
+  `6 passed, 8 warnings in 0.51s`.
 - Python P0-35 focused and full coverage passed:
   `175 passed in 7.61s`; `4073 passed, 232 skipped, 52 warnings in 17.68s`.
 - Python P0-36 focused coverage passed:
   `2 passed in 0.43s`; `192 passed in 0.83s`; QM formula audit exit 0.
 - Python P0-37 focused replay passed:
-  `6 passed in 0.48s`; join-focused regression `2 passed in 0.07s`; replay
+  `6 passed in 0.48s`; join-focused regression `3 passed in 0.13s`; replay
   harness ruff check passed.
 - Python full coverage after P0-36/P0-37/P0-38/P1-1/P2-1 records passed:
   `4075 passed, 232 skipped, 52 warnings in 17.46s`.
 - Java P0-37 focused exporter passed:
-  `mvn test -pl foggy-dataset-model -Dtest=JavaComposeSnapshotTest`.
+  `mvn test -pl foggy-dataset-model -Dtest=JavaComposeSnapshotTest` and
+  `mvn test -pl foggy-dataset-model -Dtest=JavaComposeSnapshotTest,JoinCompileTest`.
 - Java P0-39 MCP reactor focused coverage passed:
   `mvn -q -pl foggy-dataset-mcp -am -Dtest=JavaComposeScriptToolErrorSnapshotTest -Dsurefire.failIfNoSpecifiedTests=false test`
   and
   `mvn -q -pl foggy-dataset-mcp -am -Dtest=LocalDatasetAccessorGovernanceTest -Dsurefire.failIfNoSpecifiedTests=false test`.
+- Java P0-40 MCP reactor exporter passed:
+  `mvn -q -pl foggy-dataset-mcp -am -Dtest=JavaComposeScriptToolErrorSnapshotTest -Dsurefire.failIfNoSpecifiedTests=false test`.
 - Java P0-32 focused exporter passed with SQLite-only profile:
   `mvn test -P!multi-db -pl foggy-dataset-model -Dtest=JavaSemanticScaleSnapshotTest`.
 - Full Python pytest and Java focused Maven status are recorded in the
   P0-26/P0-27 progress docs; P0-29/P0-30/P0-31 focused evidence is recorded in
-  their progress docs. P0-32/P0-33/P0-34/P0-35/P0-36/P0-39 evidence is
+  their progress docs. P0-32/P0-33/P0-34/P0-35/P0-36/P0-39/P0-40 evidence is
   recorded in their progress docs.

@@ -40,8 +40,17 @@ class _PermissiveResolver:
         )
 
 
+class _RaisingResolveResolver:
+    def resolve(self, request):
+        raise RuntimeError("resolver resolve boom")
+
+
 def _raising_resolver_factory(_ctx):
     raise RuntimeError("resolver factory boom")
+
+
+def _raising_resolve_resolver_factory(_ctx):
+    return _RaisingResolveResolver()
 
 
 def _null_resolver_factory(_ctx):
@@ -87,6 +96,8 @@ async def _execute_case(case: dict[str, Any]):
         resolver_factory = _null_resolver_factory
     elif case["id"] == "resolver-factory-exception":
         resolver_factory = _raising_resolver_factory
+    elif case["id"] == "resolver-resolve-exception":
+        resolver_factory = _raising_resolve_resolver_factory
     else:
         resolver_factory = _permissive_resolver_factory
     tool = ComposeScriptTool(
