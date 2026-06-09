@@ -10,8 +10,8 @@
       "traceId" : "java-compose-script-tool-error-snapshot",
       "namespace" : "demo",
       "headers" : {
-        "X-User-Id" : "snapshot-user",
-        "X-Namespace" : "demo"
+        "X-Namespace" : "demo",
+        "X-User-Id" : "snapshot-user"
       }
     },
     "expected" : {
@@ -81,8 +81,8 @@
       "traceId" : "java-compose-script-tool-error-snapshot",
       "namespace" : "demo",
       "headers" : {
-        "X-User-Id" : "snapshot-user",
-        "X-Namespace" : "demo"
+        "X-Namespace" : "demo",
+        "X-User-Id" : "snapshot-user"
       }
     },
     "expected" : {
@@ -101,8 +101,8 @@
       "traceId" : "java-compose-script-tool-error-snapshot",
       "namespace" : "demo",
       "headers" : {
-        "X-User-Id" : "snapshot-user",
-        "X-Namespace" : "demo"
+        "X-Namespace" : "demo",
+        "X-User-Id" : "snapshot-user"
       }
     },
     "expected" : {
@@ -118,30 +118,30 @@
       "script" : "return from({\n  model: \"FactSalesModel\",\n  columns: [\"salesAmount\"]\n}).execute();\n",
       "__foggyAuthorityBinding" : {
         "namespace" : "odoo",
-        "issuer" : "test-fixture-issuer",
-        "principal" : {
-          "userId" : "u2",
-          "tenantId" : "t1"
-        },
+        "version" : "foggy.compose.authority-binding.v1",
         "bindings" : {
           "FactSalesModel" : {
-            "deniedColumns" : [ ],
+            "fieldAccess" : [ "salesAmount" ],
             "systemSlice" : [ ],
-            "fieldAccess" : [ "salesAmount" ]
+            "deniedColumns" : [ ]
           }
         },
-        "version" : "foggy.compose.authority-binding.v1"
+        "principal" : {
+          "tenantId" : "t1",
+          "userId" : "u2"
+        },
+        "issuer" : "test-fixture-issuer"
       }
     },
     "context" : {
       "traceId" : "java-compose-script-tool-error-snapshot",
       "namespace" : "odoo",
       "headers" : {
-        "X-Foggy-Remote-Compose" : "1",
         "X-Namespace" : "odoo",
-        "X-Tenant-Id" : "t1",
+        "X-Foggy-Remote-Compose" : "1",
+        "X-User-Id" : "u1",
         "X-Roles" : "analyst",
-        "X-User-Id" : "u1"
+        "X-Tenant-Id" : "t1"
       }
     },
     "expected" : {
@@ -160,11 +160,11 @@
       "traceId" : "java-compose-script-tool-error-snapshot",
       "namespace" : "odoo",
       "headers" : {
-        "X-Foggy-Remote-Compose" : "1",
         "X-Namespace" : "odoo",
-        "X-Tenant-Id" : "t1",
+        "X-Foggy-Remote-Compose" : "1",
+        "X-User-Id" : "u1",
         "X-Roles" : "analyst",
-        "X-User-Id" : "u1"
+        "X-Tenant-Id" : "t1"
       }
     },
     "expected" : {
