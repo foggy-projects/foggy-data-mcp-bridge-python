@@ -53,12 +53,21 @@ Current P0 execution records:
 - [P0-33-having-aggregate-alias-strictness.md](workitems/P0-33-having-aggregate-alias-strictness.md)
 - [P0-34-compose-script-resolver-factory-exception-snapshot-replay.md](workitems/P0-34-compose-script-resolver-factory-exception-snapshot-replay.md)
 - [P0-35-aggregate-alias-field-collision-boundary.md](workitems/P0-35-aggregate-alias-field-collision-boundary.md)
+- [P0-36-formula-parity-catalog-and-qm-audit-refresh.md](workitems/P0-36-formula-parity-catalog-and-qm-audit-refresh.md)
+- [P0-37-compose-source-alias-qualified-ref-snapshot-expansion.md](workitems/P0-37-compose-source-alias-qualified-ref-snapshot-expansion.md)
+- [P0-38-domain-question-warning-report-metadata.md](workitems/P0-38-domain-question-warning-report-metadata.md)
+
+Current P1/P2 planning records:
+
+- [P1-1-semantic-scale-namespace-opt-out-or-live-result-parity.md](workitems/P1-1-semantic-scale-namespace-opt-out-or-live-result-parity.md)
+- [P2-1-querymodel-aggregate-join-python-design.md](workitems/P2-1-querymodel-aggregate-join-python-design.md)
 
 Current active snapshot lanes:
 
-- Formula compiler catalog
+- Formula compiler catalog and QM formula audit
 - Time window catalog
-- Compose query neutral snapshots
+- Compose query neutral snapshots, including current source-alias and
+  qualified-ref fixture coverage plus P0-37 expansion planning
 - Compose script tool/runtime neutral snapshots, including execute-mode rows
   envelope shape and MCP host-misconfig structured error payloads
 - Governance / permission visible-model neutral snapshots, including
@@ -72,7 +81,8 @@ Current active snapshot lanes:
   non-additive subtotal/grandTotal output
 - Pivot domain transport large-domain threshold and SQLite bind-limit
   fail-closed snapshots
-- Domain/question neutral runner normalized tool-argument snapshots
+- Domain/question neutral runner normalized tool-argument snapshots and P0-38
+  warning/report metadata expansion planning
 - Semantic scale neutral snapshots for helper literals, SQL rewriting,
   metadata, and fail-closed carrier-column validation
 - Java-style explicit HAVING aggregate alias validation, while keeping Python
@@ -80,7 +90,7 @@ Current active snapshot lanes:
 - Resolver factory exception structured payload replay for MCP compose-script
 - Explicit HAVING aggregate alias field-collision fail-closed boundary
 
-Latest P0-35 status:
+Latest P0-38 status:
 
 - P0-26 extends the active MCP compose-script error snapshot lane with
   `missing-user-id-header` and `missing-namespace-header`.
@@ -119,6 +129,18 @@ Latest P0-35 status:
   Distinct aliases such as `totalSales` remain valid for HAVING, and compose
   downstream relation naming can still reuse business field names when not
   bypassing same-layer HAVING validation.
+- P0-36 refreshes formula parity evidence and QM formula audit. Formula focused
+  pytest is green, the demo QM audit exits zero, multiline Odoo formula
+  concatenation is parsed correctly, and window formulas are reported as
+  skipped instead of FormulaCompiler failures.
+- P0-37 records the current compose source-alias / qualified-ref fixture
+  coverage and freezes the next neutral snapshot expansion list.
+- P0-38 records that neutral domain/question runner `warnings` replay is active
+  and that `reports` metadata remains the next fixture-envelope expansion.
+- P1-1 records the remaining semantic-scale choice: namespace opt-out parity or
+  live DB/result parity.
+- P2-1 records the initial Python aggregate-join design boundary before any
+  implementation work.
 - The Java exporters write:
   `tests/fixtures/java_compose_script_tool_error_snapshot_parity.json`.
   and `tests/fixtures/java_compose_script_snapshot_parity.json`.
@@ -140,9 +162,13 @@ Latest P0-35 status:
   `8 passed, 9 warnings in 0.51s`.
 - Python P0-35 focused and full coverage passed:
   `175 passed in 7.61s`; `4073 passed, 232 skipped, 52 warnings in 17.68s`.
+- Python P0-36 focused coverage passed:
+  `2 passed in 0.43s`; `192 passed in 0.83s`; QM formula audit exit 0.
+- Python full coverage after P0-36/P0-37/P0-38/P1-1/P2-1 records passed:
+  `4075 passed, 232 skipped, 52 warnings in 17.46s`.
 - Java P0-32 focused exporter passed with SQLite-only profile:
   `mvn test -P!multi-db -pl foggy-dataset-model -Dtest=JavaSemanticScaleSnapshotTest`.
 - Full Python pytest and Java focused Maven status are recorded in the
   P0-26/P0-27 progress docs; P0-29/P0-30/P0-31 focused evidence is recorded in
-  their progress docs. P0-32/P0-33/P0-34/P0-35 evidence is recorded in their
-  progress docs.
+  their progress docs. P0-32/P0-33/P0-34/P0-35/P0-36 evidence is recorded in
+  their progress docs.
