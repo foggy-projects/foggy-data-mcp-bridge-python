@@ -19,6 +19,7 @@ The active Java compose snapshot fixture already covers:
   join,
 - inherited source-alias refs through a derived query that retains projected
   fields before the next join,
+- duplicated source alias prefixes across join sides fail closed as ambiguous,
 - dropped-column source alias refusal,
 - SQL Server derived-chain fallback guard against `FROM (WITH`.
 
@@ -34,16 +35,20 @@ Added Java snapshot cases:
 
 - `qualified-source-alias-slice-order-postgres`
 - `inherited-source-alias-through-derived-postgres`
+- `ambiguous-duplicate-source-alias-ref-refused`
 
 The Python replay harness now reconstructs derived snapshot nodes through
 `QueryPlan.query(...)` instead of direct `from_(source=...)` construction, so
 replay uses the same compose alias propagation path as production callers.
 
+Java and Python now both reject qualified refs such as `dup.salesAmount` when
+the `dup` source alias is bound on both join sides. Callers must use
+`left`/`right` or distinct source aliases.
+
 ## Remaining Expansion
 
 Add or refresh Java snapshots for:
 
-- ambiguous duplicate source alias refusal,
 - source alias shadowing by projected column alias refusal,
 - union-as-source and stable relation reuse with qualified refs,
 - dialect markers for MySQL, PostgreSQL, and SQL Server fallback shape.

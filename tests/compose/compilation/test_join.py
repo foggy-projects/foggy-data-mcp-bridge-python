@@ -416,6 +416,31 @@ class TestJoinBasic:
         assert "firstOrders." not in composed.sql
         assert "mayOrders." not in composed.sql
 
+    def test_query_after_join_rejects_duplicate_source_alias_refs(
+        self, svc, ctx
+    ):
+        sales = from_(
+            model="FactSalesModel",
+            columns=["orderStatus$caption", "salesAmount"],
+        ).__fsscript_bind_alias__("dup")
+        orders = from_(
+            model="FactOrderModel",
+            columns=["orderStatus$caption AS order_status", "totalAmount"],
+        ).__fsscript_bind_alias__("dup")
+        joined = sales.join(
+            orders,
+            type="inner",
+            on=[JoinOn(left="orderStatus$caption", op="=", right="order_status")],
+        )
+
+        with pytest.raises(Exception, match="ambiguous"):
+            compile_plan_to_sql(
+                joined.query(columns=["dup.salesAmount"]),
+                ctx,
+                semantic_service=svc,
+                dialect="postgres",
+            )
+
     def test_postgres_base_stabilizes_declared_dollar_outputs_with_extra_columns(
         self, ctx
     ):

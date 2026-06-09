@@ -767,6 +767,7 @@ _LOWER_SAFE_IDENT = re.compile(r"^[a-z_][a-z0-9_]*$")
 class _SourceColumnScope:
     columns: List[str]
     qualified_refs: Dict[str, str] = field(default_factory=dict)
+    ambiguous_prefixes: frozenset[str] = frozenset()
 
     @property
     def names(self) -> frozenset:
@@ -776,6 +777,20 @@ class _SourceColumnScope:
         stripped = ref.strip()
         if stripped in self.names:
             return stripped
+        if _DOTTED_REF.match(stripped):
+            prefix = stripped.split(".", 1)[0]
+            if prefix in self.ambiguous_prefixes:
+                raise ComposeSchemaError(
+                    code=schema_error_codes.JOIN_AMBIGUOUS_COLUMN,
+                    phase=schema_error_codes.PHASE_SCHEMA_DERIVE,
+                    message=(
+                        f"qualified source alias {prefix!r} is ambiguous "
+                        "across join sides; use left/right or distinct "
+                        "source aliases"
+                    ),
+                    plan_path="DerivedQueryPlan",
+                    offending_field=stripped,
+                )
         return self.qualified_refs.get(stripped)
 
 
@@ -913,7 +928,12 @@ def _source_column_scope_for_derived(
         return _SourceColumnScope(columns, _qualified_refs_for_plan(source, columns))
     if isinstance(source, JoinPlan):
         columns = _declared_output_columns_for_plan(source)
-        return _SourceColumnScope(columns, _qualified_refs_for_join(source, columns))
+        refs, ambiguous_prefixes = _qualified_refs_for_join(source, columns)
+        return _SourceColumnScope(
+            columns,
+            refs,
+            ambiguous_prefixes=ambiguous_prefixes,
+        )
     if isinstance(source, BaseModelPlan):
         columns = _base_declared_output_names(source)
         return _SourceColumnScope(columns, _qualified_refs_for_plan(source, columns))
@@ -944,9 +964,12 @@ def _qualified_refs_for_plan(
 def _qualified_refs_for_join(
     plan: JoinPlan,
     output_columns: List[str],
-) -> Dict[str, str]:
+) -> Tuple[Dict[str, str], frozenset[str]]:
     output = set(output_columns)
     refs: Dict[str, str] = {}
+    ambiguous_prefixes = frozenset(
+        set(_collect_aliases(plan.left)).intersection(_collect_aliases(plan.right))
+    )
 
     def add_refs(qualifiers: Tuple[str, ...], columns: List[str]) -> None:
         for qualifier in qualifiers:
@@ -962,7 +985,20 @@ def _qualified_refs_for_join(
         ("right",) + _plan_aliases(plan.right),
         [column for column in right_columns if column not in left_names],
     )
-    return refs
+    return refs, ambiguous_prefixes
+
+
+def _collect_aliases(plan: QueryPlan) -> Tuple[str, ...]:
+    aliases = list(_plan_aliases(plan))
+    if isinstance(plan, DerivedQueryPlan):
+        aliases.extend(_collect_aliases(plan.source))
+    elif isinstance(plan, JoinPlan):
+        aliases.extend(_collect_aliases(plan.left))
+        aliases.extend(_collect_aliases(plan.right))
+    elif isinstance(plan, UnionPlan):
+        aliases.extend(_collect_aliases(plan.left))
+        aliases.extend(_collect_aliases(plan.right))
+    return tuple(dict.fromkeys(aliases))
 
 
 def _declared_output_columns_for_plan(plan: QueryPlan) -> List[str]:

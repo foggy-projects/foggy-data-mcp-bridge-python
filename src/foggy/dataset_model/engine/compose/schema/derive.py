@@ -122,7 +122,7 @@ def _derive_derived(plan: DerivedQueryPlan, *, path: str) -> OutputSchema:
     source_path = f"{path}DerivedQueryPlan/source/"
     source_schema = _derive(plan.source, path=source_path)
     source_names = source_schema.name_set()
-    qualified_refs = _qualified_refs_for_derived_source(
+    qualified_refs, ambiguous_prefixes = _qualified_refs_for_derived_source(
         plan.source,
         source_schema,
         path=source_path,
@@ -133,6 +133,7 @@ def _derive_derived(plan: DerivedQueryPlan, *, path: str) -> OutputSchema:
         _normalize_qualified_parts(
             _parse_alias_or_raise(c, plan_path=current_path),
             qualified_refs,
+            ambiguous_prefixes,
             source_names,
             plan_path=current_path,
         )
@@ -359,14 +360,28 @@ def _plan_aliases(plan: QueryPlan) -> Tuple[str, ...]:
     return tuple(getattr(plan, "_compose_local_aliases", ()))
 
 
+def _collect_aliases(plan: QueryPlan) -> Set[str]:
+    aliases = set(_plan_aliases(plan))
+    if isinstance(plan, DerivedQueryPlan):
+        aliases.update(_collect_aliases(plan.source))
+    elif isinstance(plan, JoinPlan):
+        aliases.update(_collect_aliases(plan.left))
+        aliases.update(_collect_aliases(plan.right))
+    elif isinstance(plan, UnionPlan):
+        aliases.update(_collect_aliases(plan.left))
+        aliases.update(_collect_aliases(plan.right))
+    return aliases
+
+
 def _qualified_refs_for_derived_source(
     source: QueryPlan,
     source_schema: OutputSchema,
     *,
     path: str,
-) -> Dict[str, str]:
+) -> Tuple[Dict[str, str], Set[str]]:
     output_names = set(source_schema.names())
     refs: Dict[str, str] = {}
+    ambiguous_prefixes: Set[str] = set()
 
     def add_refs(qualifiers: Tuple[str, ...], names: Iterable[str]) -> None:
         for qualifier in qualifiers:
@@ -377,6 +392,9 @@ def _qualified_refs_for_derived_source(
     if isinstance(source, JoinPlan):
         left_schema = _derive(source.left, path=f"{path}JoinPlan/left/")
         right_schema = _derive(source.right, path=f"{path}JoinPlan/right/")
+        ambiguous_prefixes.update(
+            _collect_aliases(source.left).intersection(_collect_aliases(source.right))
+        )
         left_names = left_schema.names()
         right_names = right_schema.names()
         left_name_set = set(left_names)
@@ -385,24 +403,36 @@ def _qualified_refs_for_derived_source(
             ("right",) + _plan_aliases(source.right),
             [name for name in right_names if name not in left_name_set],
         )
-        return refs
+        return refs, ambiguous_prefixes
 
     add_refs(_plan_aliases(source), source_schema.names())
-    return refs
+    return refs, ambiguous_prefixes
 
 
 def _normalize_qualified_parts(
     parts: ColumnAliasParts,
     qualified_refs: Dict[str, str],
+    ambiguous_prefixes: Set[str],
     source_names: frozenset,
     *,
     plan_path: str,
 ) -> ColumnAliasParts:
     if not _QUALIFIED_FIELD_REF.match(parts.expression):
         return parts
+    qualifier = parts.expression.split(".", 1)[0]
+    if qualifier in ambiguous_prefixes:
+        raise ComposeSchemaError(
+            code=error_codes.JOIN_AMBIGUOUS_COLUMN,
+            message=(
+                f"qualified source alias {qualifier!r} is ambiguous across "
+                "join sides; use left/right or distinct source aliases"
+            ),
+            phase=error_codes.PHASE_SCHEMA_DERIVE,
+            plan_path=plan_path,
+            offending_field=parts.expression,
+        )
     resolved = qualified_refs.get(parts.expression)
     if resolved is None:
-        qualifier = parts.expression.split(".", 1)[0]
         raise ComposeSchemaError(
             code=error_codes.DERIVED_QUERY_UNKNOWN_FIELD,
             message=(

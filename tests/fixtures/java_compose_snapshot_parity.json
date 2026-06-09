@@ -178,6 +178,37 @@
       "params" : [ 0 ]
     }
   }, {
+    "id" : "ambiguous-duplicate-source-alias-ref-refused",
+    "dialect" : "postgres",
+    "plan" : {
+      "type" : "derived",
+      "source" : {
+        "type" : "join",
+        "left" : {
+          "type" : "base",
+          "model" : "FactSalesModel",
+          "columns" : [ "orderStatus$caption", "salesAmount" ],
+          "aliases" : [ "dup" ]
+        },
+        "right" : {
+          "type" : "base",
+          "model" : "FactOrderModel",
+          "columns" : [ "orderStatus$caption", "totalAmount" ],
+          "aliases" : [ "dup" ]
+        },
+        "joinType" : "inner",
+        "on" : [ {
+          "left" : "left.orderStatus$caption",
+          "op" : "=",
+          "right" : "right.orderStatus$caption"
+        } ]
+      },
+      "columns" : [ "dup.salesAmount" ]
+    },
+    "expected" : {
+      "errorCode" : "ambiguous"
+    }
+  }, {
     "id" : "source-alias-dropped-column-refused",
     "dialect" : "mysql8",
     "plan" : {
