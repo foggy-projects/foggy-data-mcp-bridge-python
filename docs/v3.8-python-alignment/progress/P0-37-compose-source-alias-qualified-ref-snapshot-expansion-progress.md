@@ -83,4 +83,5 @@ Observed but not used as a blocker:
 ## Follow-Up
 
 Stable relation reuse with qualified refs remains separate. P0-37/P0-42 source
-alias boundary work is closed by the P0-42 progress evidence.
+alias boundary work is closed by the P0-42 progress evidence and
+[P0-37 acceptance](../acceptance/P0-37-compose-source-alias-qualified-ref-snapshot-expansion-acceptance.md).

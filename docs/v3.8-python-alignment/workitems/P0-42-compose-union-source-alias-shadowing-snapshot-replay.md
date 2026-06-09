@@ -44,5 +44,5 @@ Python alignment:
 - Python focused join/union tests pass.
 - Python Java compose snapshot replay plus manifest passes.
 - Full Python pytest remains green or any environmental failure is recorded.
-- P0-42 progress records the combined P0-37/P0-42 source-alias boundary
-  closeout evidence.
+- P0-37 acceptance records the combined P0-37/P0-42 source-alias boundary
+  closeout.

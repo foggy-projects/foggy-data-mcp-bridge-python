@@ -86,4 +86,6 @@ Open follow-up:
 - Any unsupported ambiguity is recorded as fail-closed rather than silently
   compiling.
 - Closed for the current alias-boundary scope by
-  [P0-42 progress](../progress/P0-42-compose-union-source-alias-shadowing-snapshot-replay-progress.md).
+  [P0-42 progress](../progress/P0-42-compose-union-source-alias-shadowing-snapshot-replay-progress.md)
+  and
+  [P0-37 acceptance](../acceptance/P0-37-compose-source-alias-qualified-ref-snapshot-expansion-acceptance.md).
