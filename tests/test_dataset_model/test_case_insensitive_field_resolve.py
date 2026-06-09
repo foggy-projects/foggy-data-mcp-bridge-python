@@ -111,12 +111,12 @@ class TestCaseInsensitiveFieldResolve:
         sql = _build_sql(service, request)
         assert "GROUP BY" in sql.upper()
 
-    def test_having_case_variant_resolves(self, service):
-        """Having filter with case variant measure should resolve."""
+    def test_having_selected_alias_from_case_variant_measure_resolves(self, service):
+        """Having filter should accept an alias selected from a case variant measure."""
         request = SemanticQueryRequest(
-            columns=["salesDate$caption", "salesAmount"],
+            columns=["salesDate$caption", "SALESAMOUNT AS totalSales"],
             group_by=["salesDate$caption"],
-            having=[{"field": "SALESAMOUNT", "op": ">", "value": 0}],
+            having=[{"field": "totalSales", "op": ">", "value": 0}],
         )
         sql = _build_sql(service, request)
         assert "HAVING" in sql.upper()

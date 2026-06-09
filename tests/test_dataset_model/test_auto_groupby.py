@@ -74,12 +74,12 @@ class TestAutoGroupBy:
         # paymentMethod should NOT be in GROUP BY since explicit groupby was provided
         assert "t.payment_method" not in group_part
 
-    def test_having_on_aggregate_measure(self, service):
-        """Top-level having filters aggregate measures after grouping."""
+    def test_having_on_aggregate_alias(self, service):
+        """Top-level having filters selected aggregate aliases after grouping."""
         request = SemanticQueryRequest(
-            columns=["orderStatus$caption", "salesAmount"],
+            columns=["orderStatus$caption", "sum(salesAmount) as totalSales"],
             group_by=["orderStatus$caption"],
-            having=[{"field": "salesAmount", "op": ">", "value": 0}],
+            having=[{"field": "totalSales", "op": ">", "value": 0}],
         )
         sql = _build_sql(service, request)
         assert "HAVING" in sql

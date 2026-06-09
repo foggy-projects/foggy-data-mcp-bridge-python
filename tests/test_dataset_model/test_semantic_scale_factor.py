@@ -109,16 +109,46 @@ def test_dimension_property_query_uses_semantic_unit_sql():
     assert '((dp.unit_price) / 100.0) AS "unitPriceYuan"' in sql
 
 
-def test_measure_select_filter_and_having_use_semantic_unit_sql():
+def test_measure_select_and_slice_lift_use_semantic_unit_sql():
     sql = _validate(
         SemanticQueryRequest(
             columns=["orderId", "salesAmountYuan"],
             group_by=["orderId"],
-            having=[{"field": "salesAmountYuan", "op": ">", "value": 2000}],
+            slice=[{"field": "salesAmountYuan", "op": ">", "value": 2000}],
         )
     )
 
     assert 'SUM(((t.sales_amount) / 100.0)) AS "salesAmountYuan"' in sql
+    assert "HAVING SUM(((t.sales_amount) / 100.0)) > ?" in sql
+
+
+def test_direct_measure_having_requires_selected_aggregate_alias():
+    response = _service().query_model(
+        "SemanticScaleFact",
+        SemanticQueryRequest(
+            columns=["orderId", "salesAmountYuan"],
+            group_by=["orderId"],
+            having=[{"field": "salesAmountYuan", "op": ">", "value": 2000}],
+        ),
+        mode="validate",
+    )
+
+    assert response.sql is None
+    assert response.error is not None
+    assert "HAVING_REQUIRES_AGGREGATE_FIELD" in response.error
+    assert "selected aggregate alias" in response.error
+
+
+def test_aggregate_alias_having_uses_semantic_unit_sql():
+    sql = _validate(
+        SemanticQueryRequest(
+            columns=["orderId", "sum(salesAmountYuan) as totalSalesAmountYuan"],
+            group_by=["orderId"],
+            having=[{"field": "totalSalesAmountYuan", "op": ">", "value": 2000}],
+        )
+    )
+
+    assert 'SUM(((t.sales_amount) / 100.0)) AS "totalSalesAmountYuan"' in sql
     assert "HAVING SUM(((t.sales_amount) / 100.0)) > ?" in sql
 
 

@@ -1408,7 +1408,13 @@ class SemanticQueryService(SemanticServiceResolver):
                         else:
                             sel = f"{agg}({sql_expr}) AS {self._qi(label)}"
                         builder.select(sel)
-                        columns_info.append({"name": label, "fieldName": col_name, "expression": sql_expr, "aggregation": agg})
+                        columns_info.append({
+                            "name": label,
+                            "fieldName": col_name,
+                            "expression": sql_expr,
+                            "aggregation": agg,
+                            "havingEligible": bool(user_alias),
+                        })
                         has_aggregation = True
                     else:
                         builder.select(f"{sql_expr} AS {self._qi(label)}")
@@ -1545,6 +1551,7 @@ class SemanticQueryService(SemanticServiceResolver):
         # post-aggregate filters and are emitted as HAVING by default.
         effective_slice = list(request.slice or [])
         effective_having = list(request.having or [])
+        lifted_having: List[Any] = []
         post_aggregate_slice: List[Any] = []
         
         # Ensure inline aggregate aliases are recognized as aggregate fields
@@ -1562,7 +1569,6 @@ class SemanticQueryService(SemanticServiceResolver):
                 effective_slice,
                 all_aggregate_fields,
             )
-            effective_having.extend(lifted_having)
         else:
             self._reject_aggregate_conditions_in_slice(model, effective_slice, all_aggregate_fields)
 
@@ -1591,12 +1597,12 @@ class SemanticQueryService(SemanticServiceResolver):
                     dim = model.get_dimension(col_name)
                     alias = model.get_table_alias_for_model(model.get_field_model_name(col_name))
                     builder.group_by(f"{alias}.{dim.column}" if dim else f"{alias}.{col_name}")
-        elif (has_aggregation or effective_having) and selected_dims:
+        elif (has_aggregation or effective_having or lifted_having) and selected_dims:
             for dim_expr in selected_dims:
                 builder.group_by(dim_expr)
 
         # 5. HAVING
-        if effective_having:
+        if effective_having or lifted_having:
             if not has_aggregation and not request.group_by and not selected_dims:
                 raise ValueError(
                     "HAVING_REQUIRES_AGGREGATE_QUERY: aggregate filters require "
@@ -1612,6 +1618,19 @@ class SemanticQueryService(SemanticServiceResolver):
                     compiled_calcs_params=compiled_calcs_params,
                     aggregate_calc_fields=all_aggregate_fields,
                     selected_aggregate_sql=selected_aggregate_sql,
+                )
+                if fragment:
+                    builder.having(fragment, params=params or None)
+            for condition in lifted_having:
+                fragment, params = self._build_having_condition(
+                    model,
+                    condition,
+                    ensure_runtime_joins,
+                    compiled_calcs=compiled_calcs,
+                    compiled_calcs_params=compiled_calcs_params,
+                    aggregate_calc_fields=all_aggregate_fields,
+                    selected_aggregate_sql=selected_aggregate_sql,
+                    allow_direct_measure=True,
                 )
                 if fragment:
                     builder.having(fragment, params=params or None)
@@ -3092,6 +3111,7 @@ class SemanticQueryService(SemanticServiceResolver):
             "expression": sql_expr,
             "aggregation": agg,
             "select_expr": select_expr,
+            "havingEligible": False,
         }
 
     @staticmethod
@@ -3140,6 +3160,7 @@ class SemanticQueryService(SemanticServiceResolver):
             "expression": sql_col,
             "aggregation": agg,
             "select_expr": select_expr,
+            "havingEligible": True,
         }
 
     def _aggregate_calc_field_names(
@@ -3270,6 +3291,8 @@ class SemanticQueryService(SemanticServiceResolver):
         for info in columns_info:
             agg = info.get("aggregation")
             if not agg:
+                continue
+            if not info.get("havingEligible"):
                 continue
             expr = info.get("expression")
             alias = info.get("name")
@@ -3513,6 +3536,7 @@ class SemanticQueryService(SemanticServiceResolver):
         compiled_calcs_params: Optional[Dict[str, List[Any]]] = None,
         aggregate_calc_fields: Optional[set[str]] = None,
         selected_aggregate_sql: Optional[Dict[str, str]] = None,
+        allow_direct_measure: bool = False,
     ) -> Tuple[str, List[Any]]:
         if not isinstance(item, dict):
             raise ValueError(
@@ -3533,6 +3557,7 @@ class SemanticQueryService(SemanticServiceResolver):
                         compiled_calcs_params=compiled_calcs_params,
                         aggregate_calc_fields=aggregate_calc_fields,
                         selected_aggregate_sql=selected_aggregate_sql,
+                        allow_direct_measure=allow_direct_measure,
                     )
                     if fragment:
                         fragments.append(fragment)
@@ -3580,6 +3605,13 @@ class SemanticQueryService(SemanticServiceResolver):
                     f"{column!r} must be a predefined aggregate measure or "
                     "aggregate alias."
                 )
+            if not allow_direct_measure:
+                raise ValueError(
+                    "HAVING_REQUIRES_AGGREGATE_FIELD: having field "
+                    f"{column!r} must reference a selected aggregate alias. "
+                    "Use columns[] like 'sum(<measure>) as <alias>' and "
+                    "filter that alias."
+                )
             if resolved["join_def"] and ensure_join:
                 ensure_join(resolved["join_def"])
             agg = str(resolved["aggregation"]).upper()
@@ -3592,7 +3624,10 @@ class SemanticQueryService(SemanticServiceResolver):
         if is_field_ref:
             if compiled_calcs and ref_field in compiled_calcs:
                 if ref_field not in aggregate_calc_fields:
-                    raise ValueError(f"HAVING_REQUIRES_AGGREGATE_FIELD: having field {ref_field!r} is not an aggregate calculated field.")
+                    raise ValueError(
+                        "HAVING_REQUIRES_AGGREGATE_FIELD: having field "
+                        f"{ref_field!r} is not an aggregate calculated field."
+                    )
                 ref_expr = f"({compiled_calcs[ref_field]})"
                 condition_params.extend(list((compiled_calcs_params or {}).get(ref_field, [])))
             elif ref_field in selected_aggregate_sql:
@@ -3600,7 +3635,18 @@ class SemanticQueryService(SemanticServiceResolver):
             else:
                 ref_resolved = model.resolve_field(ref_field, dialect_name=self._field_formula_dialect_name())
                 if not ref_resolved or not ref_resolved.get("is_measure") or not ref_resolved.get("aggregation"):
-                    raise ValueError(f"HAVING_REQUIRES_AGGREGATE_FIELD: having field {ref_field!r} must be a predefined aggregate measure or aggregate alias.")
+                    raise ValueError(
+                        "HAVING_REQUIRES_AGGREGATE_FIELD: having field "
+                        f"{ref_field!r} must be a predefined aggregate measure "
+                        "or aggregate alias."
+                    )
+                if not allow_direct_measure:
+                    raise ValueError(
+                        "HAVING_REQUIRES_AGGREGATE_FIELD: having field "
+                        f"{ref_field!r} must reference a selected aggregate alias. "
+                        "Use columns[] like 'sum(<measure>) as <alias>' and "
+                        "filter that alias."
+                    )
                 if ref_resolved["join_def"] and ensure_join:
                     ensure_join(ref_resolved["join_def"])
                 agg_ref = str(ref_resolved["aggregation"]).upper()

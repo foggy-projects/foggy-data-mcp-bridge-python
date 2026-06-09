@@ -244,9 +244,9 @@ class TestBaseModelPlanShapeFields:
     def test_having_is_forwarded_to_v1_engine(self, svc, ctx):
         plan = from_(
             model="FactSalesModel",
-            columns=["orderStatus$caption", "salesAmount"],
+            columns=["orderStatus$caption", "sum(salesAmount) as totalSales"],
             group_by=["orderStatus$caption"],
-            having=[{"field": "salesAmount", "op": ">", "value": 0}],
+            having=[{"field": "totalSales", "op": ">", "value": 0}],
         )
         composed = compile_plan_to_sql(
             plan, ctx, semantic_service=svc, dialect="mysql8"

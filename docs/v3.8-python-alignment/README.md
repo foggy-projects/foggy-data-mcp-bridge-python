@@ -50,6 +50,7 @@ Current P0 execution records:
 - [P0-30-semantic-scale-factor-money-units.md](workitems/P0-30-semantic-scale-factor-money-units.md)
 - [P0-31-domain-question-neutral-runner-snapshot-replay.md](workitems/P0-31-domain-question-neutral-runner-snapshot-replay.md)
 - [P0-32-semantic-scale-neutral-snapshot-replay.md](workitems/P0-32-semantic-scale-neutral-snapshot-replay.md)
+- [P0-33-having-aggregate-alias-strictness.md](workitems/P0-33-having-aggregate-alias-strictness.md)
 
 Current active snapshot lanes:
 
@@ -72,8 +73,10 @@ Current active snapshot lanes:
 - Domain/question neutral runner normalized tool-argument snapshots
 - Semantic scale neutral snapshots for helper literals, SQL rewriting,
   metadata, and fail-closed carrier-column validation
+- Java-style explicit HAVING aggregate alias validation, while keeping Python
+  aggregate-slice auto-lift compatibility
 
-Latest P0-32 status:
+Latest P0-33 status:
 
 - P0-26 extends the active MCP compose-script error snapshot lane with
   `missing-user-id-header` and `missing-namespace-header`.
@@ -99,6 +102,10 @@ Latest P0-32 status:
 - P0-32 promotes semantic scale into the active Java snapshot parity catalog,
   with Java-exported helper, SQL, metadata, and fail-closed cases replayed by
   Python against a neutral synthetic model.
+- P0-33 closes the direct ordinary aggregate-measure `request.having` drift:
+  explicit HAVING now requires a selected aggregate alias such as
+  `sum(salesAmount) as totalSales`, while aggregate-measure `slice` shorthand
+  continues to auto-lift to HAVING for compatibility.
 - The Java exporters write:
   `tests/fixtures/java_compose_script_tool_error_snapshot_parity.json`.
   and `tests/fixtures/java_compose_script_snapshot_parity.json`.
@@ -114,8 +121,10 @@ Latest P0-32 status:
   `2 passed in 0.15s`.
 - Python P0-32 focused replay passed:
   `14 passed in 0.45s`.
+- Python P0-33 focused coverage passed:
+  `174 passed in 7.41s`.
 - Java P0-32 focused exporter passed with SQLite-only profile:
   `mvn test -P!multi-db -pl foggy-dataset-model -Dtest=JavaSemanticScaleSnapshotTest`.
 - Full Python pytest and Java focused Maven status are recorded in the
   P0-26/P0-27 progress docs; P0-29/P0-30/P0-31 focused evidence is recorded in
-  their progress docs. P0-32 evidence is recorded in its progress doc.
+  their progress docs. P0-32/P0-33 evidence is recorded in their progress docs.
