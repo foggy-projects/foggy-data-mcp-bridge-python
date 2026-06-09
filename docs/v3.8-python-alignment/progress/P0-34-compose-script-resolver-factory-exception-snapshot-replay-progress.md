@@ -30,14 +30,21 @@ Passed:
 - Full Python pytest:
   `.venv/bin/python -m pytest -q`
   - `4069 passed, 232 skipped, 52 warnings in 17.76s`
+- Java focused Maven with reactor dependencies:
+  `mvn -q -pl foggy-dataset-mcp -am -Dtest=JavaComposeScriptToolErrorSnapshotTest -Dsurefire.failIfNoSpecifiedTests=false test`
+  - passed in P0-39
+
+False Blockers:
+
+- Java module-local Maven without `-am`:
+  `mvn -q -pl foggy-dataset-mcp -Dtest=JavaComposeScriptToolErrorSnapshotTest test`
+  fails before test execution when it resolves a stale local
+  `foggy-dataset-model` artifact. Current workspace source contains
+  `SemanticQueryRequest.OutputFormattingItem` and `getOutputFormatting()`;
+  the reactor command above is the valid focused baseline.
 
 Blocked:
 
-- Java focused Maven:
-  `mvn -q -pl foggy-dataset-mcp -Dtest=JavaComposeScriptToolErrorSnapshotTest test`
-  remains blocked before test execution by the existing
-  `LocalDatasetAccessorGovernanceTest` testCompile drift around
-  `SemanticQueryRequest.OutputFormattingItem` and `getOutputFormatting()`.
 - Scoped ruff:
   `.venv/bin/ruff check src/foggy/mcp/tools/compose_script_tool.py tests/integration/test_java_compose_script_tool_error_snapshot_parity.py tests/test_mcp/test_compose_script_tool.py`
   remains blocked by existing file-wide lint debt in touched files:

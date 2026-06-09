@@ -557,10 +557,9 @@ P0-22 follow-up:
   - `resolver-null-host-misconfig`
 - The replay validates `status/error_code/phase`, absence of `model`, message
   markers, and forbidden stack/exception markers.
-- Java `foggy-dataset-mcp` focused Maven execution is currently blocked before
-  test execution by an existing `LocalDatasetAccessorGovernanceTest`
-  testCompile drift around `SemanticQueryRequest.OutputFormattingItem` and
-  `getOutputFormatting()`.
+- Java `foggy-dataset-mcp` module-local focused Maven execution was later
+  reclassified by P0-39 as a missing-`-am` reactor verification issue, not a
+  current source/test drift.
 - The new exporter compiles standalone with the module classpath and was
   executed through reflection to generate the Python fixture.
 - Python focused replay plus manifest passed:
@@ -582,10 +581,9 @@ P0-23 follow-up:
 - The replay validates `compose-authority-resolve/principal-mismatch`,
   `permission-resolve`, absence of `model`, message markers, and forbidden
   stack/exception markers.
-- Java `foggy-dataset-mcp` focused Maven execution remains blocked before test
-  execution by the existing `LocalDatasetAccessorGovernanceTest` testCompile
-  drift around `SemanticQueryRequest.OutputFormattingItem` and
-  `getOutputFormatting()`.
+- Java `foggy-dataset-mcp` module-local focused Maven execution was later
+  reclassified by P0-39 as a missing-`-am` reactor verification issue, not a
+  current source/test drift.
 - The updated exporter compiles standalone with the module classpath and was
   executed through reflection to generate the two-case Python fixture.
 - Python focused replay plus manifest passed:
@@ -606,10 +604,9 @@ P0-24 follow-up:
 - Added neutral Java/Python case:
   - `remote-missing-authority-binding`
 - Updated Python binding unit coverage for the new error-code/phase contract.
-- Java `foggy-dataset-mcp` focused Maven execution remains blocked before test
-  execution by the existing `LocalDatasetAccessorGovernanceTest` testCompile
-  drift around `SemanticQueryRequest.OutputFormattingItem` and
-  `getOutputFormatting()`.
+- Java `foggy-dataset-mcp` module-local focused Maven execution was later
+  reclassified by P0-39 as a missing-`-am` reactor verification issue, not a
+  current source/test drift.
 - The updated exporter compiles standalone with the module classpath and was
   executed through reflection to generate the three-case Python fixture.
 - Python focused replay, binding test, and manifest passed:
@@ -637,10 +634,9 @@ P0-25 follow-up:
   through reflection to generate the five-case Python fixture.
 - Python focused replay, input/context unit checks, and manifest passed:
   `9 passed, 6 warnings in 0.54s`.
-- Java `foggy-dataset-mcp` focused Maven execution remains blocked before test
-  execution by the existing `LocalDatasetAccessorGovernanceTest` testCompile
-  drift around `SemanticQueryRequest.OutputFormattingItem` and
-  `getOutputFormatting()`.
+- Java `foggy-dataset-mcp` module-local focused Maven execution was later
+  reclassified by P0-39 as a missing-`-am` reactor verification issue, not a
+  current source/test drift.
 - Scoped ruff is blocked by existing file-wide lint debt in touched files:
   `src/foggy/mcp/tools/compose_script_tool.py` typing-modernization findings
   and `tests/test_mcp/test_compose_script_tool.py` import/typing findings.
@@ -739,6 +735,16 @@ P0-35 follow-up:
   selected aggregate alias in same-layer explicit HAVING.
 - Distinct selected aggregate aliases remain valid in HAVING, including
   alias-to-alias comparisons.
+
+P0-39 follow-up:
+
+- Reclassified the recurring Java MCP `SemanticQueryRequest.OutputFormattingItem`
+  testCompile failure as a module-local Maven classpath issue caused by running
+  `-pl foggy-dataset-mcp` without `-am`.
+- Established the focused Java MCP baseline:
+  `mvn -q -pl foggy-dataset-mcp -am -Dtest=<TargetTest> -Dsurefire.failIfNoSpecifiedTests=false test`.
+- Verified both `JavaComposeScriptToolErrorSnapshotTest` and
+  `LocalDatasetAccessorGovernanceTest` with that reactor command.
 
 Odoo registry consumer baseline:
 

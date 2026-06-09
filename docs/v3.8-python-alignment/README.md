@@ -56,6 +56,7 @@ Current P0 execution records:
 - [P0-36-formula-parity-catalog-and-qm-audit-refresh.md](workitems/P0-36-formula-parity-catalog-and-qm-audit-refresh.md)
 - [P0-37-compose-source-alias-qualified-ref-snapshot-expansion.md](workitems/P0-37-compose-source-alias-qualified-ref-snapshot-expansion.md)
 - [P0-38-domain-question-warning-report-metadata.md](workitems/P0-38-domain-question-warning-report-metadata.md)
+- [P0-39-java-mcp-reactor-verification-baseline.md](workitems/P0-39-java-mcp-reactor-verification-baseline.md)
 
 Current P1/P2 planning records:
 
@@ -89,8 +90,10 @@ Current active snapshot lanes:
   aggregate-slice auto-lift compatibility
 - Resolver factory exception structured payload replay for MCP compose-script
 - Explicit HAVING aggregate alias field-collision fail-closed boundary
+- Java MCP focused verification uses the reactor `-am` baseline to avoid stale
+  local dependency artifacts
 
-Latest P0-38 status:
+Latest P0-39 status:
 
 - P0-26 extends the active MCP compose-script error snapshot lane with
   `missing-user-id-header` and `missing-namespace-header`.
@@ -137,6 +140,10 @@ Latest P0-38 status:
   coverage and freezes the next neutral snapshot expansion list.
 - P0-38 records that neutral domain/question runner `warnings` replay is active
   and that `reports` metadata remains the next fixture-envelope expansion.
+- P0-39 closes the recurring Java MCP verification false blocker: module-local
+  `-pl foggy-dataset-mcp` can resolve stale local `foggy-dataset-model`
+  artifacts, while the reactor `-am` command builds current workspace modules
+  and passes the P0-34 exporter and `LocalDatasetAccessorGovernanceTest`.
 - P1-1 records the remaining semantic-scale choice: namespace opt-out parity or
   live DB/result parity.
 - P2-1 records the initial Python aggregate-join design boundary before any
@@ -166,9 +173,13 @@ Latest P0-38 status:
   `2 passed in 0.43s`; `192 passed in 0.83s`; QM formula audit exit 0.
 - Python full coverage after P0-36/P0-37/P0-38/P1-1/P2-1 records passed:
   `4075 passed, 232 skipped, 52 warnings in 17.46s`.
+- Java P0-39 MCP reactor focused coverage passed:
+  `mvn -q -pl foggy-dataset-mcp -am -Dtest=JavaComposeScriptToolErrorSnapshotTest -Dsurefire.failIfNoSpecifiedTests=false test`
+  and
+  `mvn -q -pl foggy-dataset-mcp -am -Dtest=LocalDatasetAccessorGovernanceTest -Dsurefire.failIfNoSpecifiedTests=false test`.
 - Java P0-32 focused exporter passed with SQLite-only profile:
   `mvn test -P!multi-db -pl foggy-dataset-model -Dtest=JavaSemanticScaleSnapshotTest`.
 - Full Python pytest and Java focused Maven status are recorded in the
   P0-26/P0-27 progress docs; P0-29/P0-30/P0-31 focused evidence is recorded in
-  their progress docs. P0-32/P0-33/P0-34/P0-35/P0-36 evidence is recorded in
-  their progress docs.
+  their progress docs. P0-32/P0-33/P0-34/P0-35/P0-36/P0-39 evidence is
+  recorded in their progress docs.
