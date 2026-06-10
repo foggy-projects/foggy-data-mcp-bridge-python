@@ -78,6 +78,7 @@
         "SQLite base CTE success shape",
         "SQLite derived filter/order/limit CTE success shape",
         "SQLite top-level union success shape",
+        "SQLite join CTE success shape",
         "PostgreSQL join CTE success shape",
         "PostgreSQL top-level union success shape",
         "SQL Server join subquery fallback shape",

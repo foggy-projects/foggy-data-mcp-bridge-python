@@ -82,6 +82,7 @@ Current P0 execution records:
 - [P0-62-compose-mysql57-join-snapshot-expansion.md](workitems/P0-62-compose-mysql57-join-snapshot-expansion.md)
 - [P0-63-compose-sqlite-derived-snapshot-expansion.md](workitems/P0-63-compose-sqlite-derived-snapshot-expansion.md)
 - [P0-64-compose-sqlite-union-snapshot-expansion.md](workitems/P0-64-compose-sqlite-union-snapshot-expansion.md)
+- [P0-65-compose-sqlite-join-snapshot-expansion.md](workitems/P0-65-compose-sqlite-join-snapshot-expansion.md)
 
 Current P1/P2 planning records:
 
@@ -104,8 +105,9 @@ Current active snapshot lanes:
   snapshots are fully strict on SQL shape, include MySQL8 join success
   evidence, MySQL 5.7 derived/union/join fallback evidence, PostgreSQL
   join/union success evidence, SQL Server top-level union success evidence,
-  SQLite base and derived CTE evidence, SQLite union evidence, and have an executable
-  dialect/plan/status coverage inventory
+  SQLite base/derived/join CTE evidence, SQLite union evidence, and have an
+  executable dialect/plan/status coverage inventory with no missing success
+  cells in the current target matrix
 - Compose script tool/runtime neutral snapshots, including execute-mode rows
   envelope shape and MCP host-misconfig structured error payloads
 - Governance / permission visible-model neutral snapshots, including
@@ -135,7 +137,7 @@ Current active snapshot lanes:
 - Registry/Odoo consumer readonly temp-dir audit for current community/pro
   `1.1.10` bundles, without refreshing committed generated Odoo models
 
-Latest P0-64 status:
+Latest P0-65 status:
 
 - P0-26 extends the active MCP compose-script error snapshot lane with
   `missing-user-id-header` and `missing-namespace-header`.
@@ -282,6 +284,9 @@ Latest P0-64 status:
 - P0-64 adds Java-exported SQLite top-level union coverage. The compose
   inventory now reports `30` total cases and `26/26` strict successful
   SQL-shape replay. Remaining missing success cell is SQLite `join`.
+- P0-65 adds Java-exported SQLite join CTE coverage. The compose inventory now
+  reports `31` total cases and `27/27` strict successful SQL-shape replay.
+  `missingSuccessCells` is empty for the current target matrix.
 - P1-1 records the remaining semantic-scale choice: namespace opt-out parity or
   live DB/result parity.
 - P2-1 records the initial Python aggregate-join design boundary before any

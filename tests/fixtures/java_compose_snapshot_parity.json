@@ -442,6 +442,47 @@
       }
     }
   }, {
+    "id" : "join-sqlite-cte",
+    "dialect" : "sqlite",
+    "plan" : {
+      "type" : "join",
+      "left" : {
+        "type" : "base",
+        "model" : "FactSalesModel",
+        "columns" : [ "orderStatus$caption", "salesAmount" ]
+      },
+      "right" : {
+        "type" : "base",
+        "model" : "FactOrderModel",
+        "columns" : [ "orderStatus$caption", "totalAmount" ]
+      },
+      "joinType" : "inner",
+      "on" : [ {
+        "left" : "left.orderStatus$caption",
+        "op" : "=",
+        "right" : "right.orderStatus$caption"
+      } ]
+    },
+    "expected" : {
+      "sqlMarkers" : [ "WITH ", "INNER JOIN", "salesAmount", "totalAmount" ],
+      "forbiddenSqlMarkers" : [ "FROM (WITH" ],
+      "params" : [ ],
+      "strictSqlShape" : true,
+      "sqlShape" : {
+        "rootUsesCte" : true,
+        "rootUsesSubquery" : false,
+        "containsFromWith" : false,
+        "containsUnion" : false,
+        "containsUnionAll" : false,
+        "containsInnerJoin" : true,
+        "containsLeftJoin" : false,
+        "containsRightJoin" : false,
+        "containsFullOuterJoin" : false,
+        "containsWhere" : false,
+        "containsOrderBy" : false
+      }
+    }
+  }, {
     "id" : "join-postgres-cte",
     "dialect" : "postgres",
     "plan" : {
