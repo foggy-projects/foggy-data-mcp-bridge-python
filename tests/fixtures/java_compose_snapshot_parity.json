@@ -149,6 +149,44 @@
       }
     }
   }, {
+    "id" : "derived-filter-order-limit-mysql57-subquery",
+    "dialect" : "mysql",
+    "plan" : {
+      "type" : "derived",
+      "source" : {
+        "type" : "base",
+        "model" : "FactSalesModel",
+        "columns" : [ "orderStatus$caption", "salesAmount" ]
+      },
+      "columns" : [ "orderStatus$caption", "salesAmount" ],
+      "slice" : [ {
+        "field" : "orderStatus$caption",
+        "op" : "=",
+        "value" : "COMPLETED"
+      } ],
+      "orderBy" : [ "-salesAmount" ],
+      "limit" : 5
+    },
+    "expected" : {
+      "sqlMarkers" : [ "SELECT", "FROM (", "WHERE", "ORDER BY", "LIMIT" ],
+      "forbiddenSqlMarkers" : [ "WITH ", "FROM (WITH" ],
+      "params" : [ "COMPLETED" ],
+      "strictSqlShape" : true,
+      "sqlShape" : {
+        "rootUsesCte" : false,
+        "rootUsesSubquery" : true,
+        "containsFromWith" : false,
+        "containsUnion" : false,
+        "containsUnionAll" : false,
+        "containsInnerJoin" : false,
+        "containsLeftJoin" : false,
+        "containsRightJoin" : false,
+        "containsFullOuterJoin" : false,
+        "containsWhere" : true,
+        "containsOrderBy" : true
+      }
+    }
+  }, {
     "id" : "union-all-sales-orders-mysql8",
     "dialect" : "mysql8",
     "plan" : {

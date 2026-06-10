@@ -20,8 +20,8 @@ def test_compose_snapshot_coverage_script_summary() -> None:
     summary = json.loads(completed.stdout)
 
     assert summary["feature"] == "composeQuery"
-    assert summary["caseCount"] >= 24
-    assert summary["successCaseCount"] >= 20
+    assert summary["caseCount"] >= 25
+    assert summary["successCaseCount"] >= 21
     assert summary["strictSuccessCaseCount"] == summary["successCaseCount"]
     assert summary["successStrictCoverage"] == (
         f"{summary['successCaseCount']}/{summary['successCaseCount']}"
@@ -37,6 +37,10 @@ def test_compose_snapshot_coverage_script_summary() -> None:
         "dialect": "sqlite",
         "planType": "base",
     } in missing_success_cells
+    assert {
+        "dialect": "mysql",
+        "planType": "derived",
+    } not in missing_success_cells
     assert {
         "dialect": "mysql8",
         "planType": "join",
