@@ -27,10 +27,10 @@ Evidence:
   passed with `36 passed in 0.17s`.
 - Python compose compilation suite:
   `.venv/bin/python -m pytest tests/compose/compilation -q`
-  passed with `275 passed in 0.69s`.
+  passed with `275 passed in 0.68s`.
 - Python full suite:
   `.venv/bin/python -m pytest -q`
-  passed with `4082 passed, 232 skipped, 53 warnings in 17.85s`.
+  passed with `4082 passed, 232 skipped, 53 warnings in 17.95s`.
 
 Status:
 
