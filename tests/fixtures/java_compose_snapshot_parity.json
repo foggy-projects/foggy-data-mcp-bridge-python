@@ -324,6 +324,42 @@
       }
     }
   }, {
+    "id" : "union-all-sales-orders-sqlite",
+    "dialect" : "sqlite",
+    "plan" : {
+      "type" : "union",
+      "left" : {
+        "type" : "base",
+        "model" : "FactSalesModel",
+        "columns" : [ "orderStatus$caption AS bucket", "salesAmount AS amount" ]
+      },
+      "right" : {
+        "type" : "base",
+        "model" : "FactOrderModel",
+        "columns" : [ "orderStatus$caption AS bucket", "totalAmount AS amount" ]
+      },
+      "all" : true
+    },
+    "expected" : {
+      "sqlMarkers" : [ "SELECT", "UNION ALL", "order_status" ],
+      "forbiddenSqlMarkers" : [ "FROM (WITH" ],
+      "params" : [ ],
+      "strictSqlShape" : true,
+      "sqlShape" : {
+        "rootUsesCte" : false,
+        "rootUsesSubquery" : false,
+        "containsFromWith" : false,
+        "containsUnion" : true,
+        "containsUnionAll" : true,
+        "containsInnerJoin" : false,
+        "containsLeftJoin" : false,
+        "containsRightJoin" : false,
+        "containsFullOuterJoin" : false,
+        "containsWhere" : false,
+        "containsOrderBy" : false
+      }
+    }
+  }, {
     "id" : "join-mysql8-cte",
     "dialect" : "mysql8",
     "plan" : {
