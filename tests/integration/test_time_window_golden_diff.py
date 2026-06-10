@@ -47,9 +47,7 @@ _POST_SCALAR_CASE_NAMES = {
     "rolling_7d-post-calc-gap-happy",
 }
 
-_EXPECTED_JAVA_GENERATION_ERRORS = {
-    "wow-week-happy": "salesDate$week",
-}
+_EXPECTED_JAVA_GENERATION_ERRORS: dict[str, str] = {}
 
 
 def _load_catalog() -> list[dict[str, Any]]:
@@ -202,10 +200,9 @@ def test_full_golden_diff_when_snapshot_available() -> None:
     (Stage 4+ scope).
 
     This test validates that the Java snapshot contains the expected current
-    success set plus the documented Java-side generation drift for the old
-    WoW fixture whose catalog field is absent from the current Java model.
-    Successful Java snapshots are then checked for semantic SQL markers and
-    replayed through the Python validate path.
+    success set with no Java-side generation drift. Successful Java snapshots
+    are then checked for semantic SQL markers and replayed through the Python
+    validate path.
 
     When the normalizer is extended for full-query normalization, this
     test can be upgraded to use ``assert_golden_cases`` directly.
@@ -244,7 +241,7 @@ def test_full_golden_diff_when_snapshot_available() -> None:
         assert marker in error["message"]
 
     assert set(java_by_name) == happy_names - set(_EXPECTED_JAVA_GENERATION_ERRORS)
-    assert len(java_by_name) == 8
+    assert len(java_by_name) == 9
 
     for entry in happy_cases:
         if entry["name"] in java_errors_by_name:

@@ -60,3 +60,7 @@ Next timeWindow work should either fix/export the Java `wow-week-happy`
 catalog/model mismatch or move to live DB/result parity for the current 8-case
 success set. Pivot+timeWindow refusal should stay in the separate
 pivot/domain edge-behavior lane.
+
+Follow-up status: P0-67 closed the `wow-week-happy` catalog/model mismatch and
+refreshed the active snapshot lane to 9 Java-success cases with no generation
+errors. The remaining follow-up is live DB/result parity for that 9-case set.

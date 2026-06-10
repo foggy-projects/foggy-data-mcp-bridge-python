@@ -29,6 +29,7 @@ Status: coding complete
 
 - Java current `FactSalesQueryModel` and the legacy timeWindow catalog still
   disagree on `wow-week-happy` because `salesDate$week` is not present.
+  Follow-up status: closed by P0-67.
 - Full normalized SQL diff remains deferred for multi-CTE timeWindow SQL.
 - Live DB/result parity beyond the existing SQLite execution tests remains a
   follow-up.
