@@ -1,8 +1,5 @@
 """6.5 · dialect CTE-vs-subquery fallback + 4-dialect SQL snapshots.
 
-Uses ``tests/integration/_sql_normalizer.py`` to canonicalise emitted
-SQL before assertions, matching the spec §验收硬门槛 #4 directive.
-
 4 dialects × 3 shapes (single / union / join / derived-chain) with
 structural rather than byte-for-byte comparison — the r3 Q3 addition
 specifies derived-chain snapshots too because that is the only path
@@ -10,19 +7,7 @@ where M6 self-templates ``SELECT ... FROM (<inner>) AS alias``.
 """
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import pytest
-
-# The integration _sql_normalizer is kept intentionally private
-# (filename starts with _). We reach it via sys.path.
-_REPO_TESTS = Path(__file__).resolve().parents[2]
-_INTEGRATION_DIR = _REPO_TESTS / "integration"
-if str(_INTEGRATION_DIR) not in sys.path:
-    sys.path.insert(0, str(_INTEGRATION_DIR))
-
-from _sql_normalizer import to_canonical  # type: ignore  # noqa: E402
 
 from foggy.dataset_model.engine.compose.compilation import (
     compile_plan_to_sql,
@@ -202,6 +187,19 @@ class TestDerivedChain4Dialects:
             derived_chain_plan, ctx, semantic_service=svc, dialect="sqlite"
         )
         assert composed.sql.count("FROM (") >= 2
+
+    def test_derived_chain_sqlserver_uses_java_subquery_fallback(
+        self, svc, ctx, derived_chain_plan
+    ):
+        composed = compile_plan_to_sql(
+            derived_chain_plan, ctx, semantic_service=svc, dialect="sqlserver"
+        )
+        assert not composed.sql.startswith("WITH ")
+        assert composed.sql.startswith("SELECT")
+        assert composed.sql.count("FROM (") >= 2
+        assert " AS t0" in composed.sql
+        assert "WITH " not in composed.sql
+        assert "FROM (WITH" not in composed.sql
 
 
 # ---------------------------------------------------------------------------

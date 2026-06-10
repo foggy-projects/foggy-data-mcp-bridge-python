@@ -69,7 +69,8 @@
         "projected source-alias shadowing refusal",
         "union branch source-alias refusal",
         "union result source-alias qualified references",
-        "SQL Server fallback shape"
+        "SQL Server embedded composed-source fallback shape",
+        "SQL Server union-as-derived and root derived-chain subquery fallback shape"
       ],
       "verification": [
         "Python compiles JSON plans through compile_plan_to_sql",

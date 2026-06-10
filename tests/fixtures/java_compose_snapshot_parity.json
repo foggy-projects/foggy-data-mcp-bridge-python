@@ -448,6 +448,41 @@
       "params" : [ 0 ]
     }
   }, {
+    "id" : "sqlserver-union-result-alias-derived-fallback",
+    "dialect" : "sqlserver",
+    "plan" : {
+      "type" : "derived",
+      "source" : {
+        "type" : "union",
+        "left" : {
+          "type" : "base",
+          "model" : "FactSalesModel",
+          "columns" : [ "orderStatus$caption AS bucket", "salesAmount AS amount" ],
+          "aliases" : [ "sales" ]
+        },
+        "right" : {
+          "type" : "base",
+          "model" : "FactOrderModel",
+          "columns" : [ "orderStatus$caption AS bucket", "totalAmount AS amount" ],
+          "aliases" : [ "orders" ]
+        },
+        "all" : true,
+        "aliases" : [ "combined" ]
+      },
+      "columns" : [ "combined.amount" ],
+      "slice" : [ {
+        "field" : "combined.amount",
+        "op" : ">",
+        "value" : 0
+      } ],
+      "orderBy" : [ "-combined.amount" ]
+    },
+    "expected" : {
+      "sqlMarkers" : [ "UNION ALL", "WHERE", "ORDER BY", "amount" ],
+      "forbiddenSqlMarkers" : [ "FROM (WITH", "combined.amount", "sales.amount", "orders.amount" ],
+      "params" : [ 0 ]
+    }
+  }, {
     "id" : "sqlserver-derived-chain-top-level-with",
     "dialect" : "sqlserver",
     "plan" : {
@@ -464,8 +499,8 @@
       "columns" : [ "orderStatus$caption" ]
     },
     "expected" : {
-      "sqlMarkers" : [ "SELECT" ],
-      "forbiddenSqlMarkers" : [ "FROM (WITH" ],
+      "sqlMarkers" : [ "SELECT", "FROM (", " AS t0" ],
+      "forbiddenSqlMarkers" : [ "WITH ", "FROM (WITH" ],
       "params" : [ ]
     }
   } ]

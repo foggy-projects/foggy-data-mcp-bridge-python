@@ -153,6 +153,12 @@ def dialect_supports_cte(dialect: str) -> bool:
     return instance.supports_cte
 
 
+def _top_level_unit_uses_cte(plan: QueryPlan, dialect: str) -> bool:
+    if isinstance(plan, DerivedQueryPlan) and dialect.lower() in {"mssql", "sqlserver"}:
+        return False
+    return dialect_supports_cte(dialect)
+
+
 def _assert_dialect(dialect: str) -> None:
     """Fail-closed: reject unknown dialect strings early so downstream
     snapshot drift is caught here rather than at a live query.
@@ -332,7 +338,7 @@ def compile_to_composed_sql(
     return CteComposer.compose(
         units=[result],
         join_specs=[],
-        use_cte=dialect_supports_cte(dialect),
+        use_cte=_top_level_unit_uses_cte(plan, dialect),
     )
 
 

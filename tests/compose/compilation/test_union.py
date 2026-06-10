@@ -218,6 +218,37 @@ class TestUnionWithDerived:
         )
         assert composed.params == [0]
 
+    def test_sqlserver_derived_over_union_result_alias_avoids_from_with(
+        self, svc, ctx
+    ):
+        current = from_(
+            model="FactSalesModel",
+            columns=["orderStatus$caption AS bucket", "salesAmount AS amount"],
+        ).__fsscript_bind_alias__("sales")
+        prior = from_(
+            model="FactOrderModel",
+            columns=["orderStatus$caption AS bucket", "totalAmount AS amount"],
+        ).__fsscript_bind_alias__("orders")
+        unioned = current.union(prior, all=True).__fsscript_bind_alias__("combined")
+        derived = unioned.query(
+            columns=["combined.amount"],
+            slice=[{"field": "combined.amount", "op": ">", "value": 0}],
+            order_by=["-combined.amount"],
+        )
+
+        composed = compile_plan_to_sql(
+            derived, ctx, semantic_service=svc, dialect="sqlserver"
+        )
+
+        assert "UNION ALL" in composed.sql
+        assert "WHERE" in composed.sql
+        assert "ORDER BY" in composed.sql
+        assert "FROM (WITH" not in composed.sql
+        assert "combined.amount" not in composed.sql
+        assert "sales.amount" not in composed.sql
+        assert "orders.amount" not in composed.sql
+        assert composed.params == [0]
+
 
 class TestUnionMultipleWay:
     def test_three_way_union_left_associative(
