@@ -72,7 +72,10 @@
         "union result source-alias qualified references",
         "cross-dialect base CTE/subquery shape for MySQL 5.7, PostgreSQL, and SQL Server",
         "MySQL8 join CTE success shape",
+        "PostgreSQL join CTE success shape",
+        "PostgreSQL top-level union success shape",
         "SQL Server join subquery fallback shape",
+        "SQL Server top-level union subquery fallback shape",
         "SQL Server embedded composed-source fallback shape",
         "SQL Server union-as-derived and root derived-chain subquery fallback shape"
       ],

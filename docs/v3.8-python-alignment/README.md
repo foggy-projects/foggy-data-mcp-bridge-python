@@ -72,6 +72,10 @@ Current P0 execution records:
 - [P0-52-compose-snapshot-coverage-inventory.md](workitems/P0-52-compose-snapshot-coverage-inventory.md)
 - [P0-53-compose-mysql8-join-snapshot-expansion.md](workitems/P0-53-compose-mysql8-join-snapshot-expansion.md)
 - [P0-54-registry-odoo-consumer-readonly-audit.md](workitems/P0-54-registry-odoo-consumer-readonly-audit.md)
+- [P0-55-compose-postgres-join-snapshot-expansion.md](workitems/P0-55-compose-postgres-join-snapshot-expansion.md)
+- [P0-56-compose-postgres-union-snapshot-expansion.md](workitems/P0-56-compose-postgres-union-snapshot-expansion.md)
+- [P0-57-compose-sqlserver-union-snapshot-expansion.md](workitems/P0-57-compose-sqlserver-union-snapshot-expansion.md)
+- [P0-58-compose-sqlite-lane-evaluation.md](workitems/P0-58-compose-sqlite-lane-evaluation.md)
 
 Current P1/P2 planning records:
 
@@ -92,7 +96,9 @@ Current active snapshot lanes:
   manifest replay with strict root-wrapper checks for frozen fallback cases
   and derived-over-composed root-wrapper parity; current successful compose
   snapshots are fully strict on SQL shape, include MySQL8 join success
-  evidence, and have an executable dialect/plan/status coverage inventory
+  evidence, PostgreSQL join/union success evidence, SQL Server top-level union
+  success evidence, and have an executable dialect/plan/status coverage
+  inventory
 - Compose script tool/runtime neutral snapshots, including execute-mode rows
   envelope shape and MCP host-misconfig structured error payloads
 - Governance / permission visible-model neutral snapshots, including
@@ -122,7 +128,7 @@ Current active snapshot lanes:
 - Registry/Odoo consumer readonly temp-dir audit for current community/pro
   `1.1.10` bundles, without refreshing committed generated Odoo models
 
-Latest P0-54 status:
+Latest P0-58 status:
 
 - P0-26 extends the active MCP compose-script error snapshot lane with
   `missing-user-id-header` and `missing-namespace-header`.
@@ -237,6 +243,17 @@ Latest P0-54 status:
   pass drift checks, and load through the Python model loader with namespace
   `odoo`. The committed demo Odoo directory remains `1.1.9` lock plus drift and
   is intentionally not refreshed in this phase.
+- P0-55 adds Java-exported `join-postgres-cte` coverage and removes
+  `postgres/join` from the compose inventory missing success cells.
+- P0-56 adds Java-exported `union-all-sales-orders-postgres` coverage. The
+  accepted Java shape is a direct top-level `SELECT ... UNION ALL ...` output,
+  not a forced CTE wrapper.
+- P0-57 adds Java-exported `union-all-sales-orders-sqlserver` coverage and
+  keeps SQL Server compose fallback guarded against embedded `FROM (WITH`.
+- P0-58 evaluates SQLite as a separate compose dialect lane. After P0-55
+  through P0-57, the compose inventory reports `24` total cases and `20/20`
+  strict successful SQL-shape replay. Remaining missing success cells are
+  MySQL non-CTE `derived/union/join` and SQLite `base/derived/union/join`.
 - P1-1 records the remaining semantic-scale choice: namespace opt-out parity or
   live DB/result parity.
 - P2-1 records the initial Python aggregate-join design boundary before any

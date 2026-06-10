@@ -226,6 +226,83 @@
       }
     }
   }, {
+    "id" : "join-postgres-cte",
+    "dialect" : "postgres",
+    "plan" : {
+      "type" : "join",
+      "left" : {
+        "type" : "base",
+        "model" : "FactSalesModel",
+        "columns" : [ "orderStatus$caption", "salesAmount" ]
+      },
+      "right" : {
+        "type" : "base",
+        "model" : "FactOrderModel",
+        "columns" : [ "orderStatus$caption", "totalAmount" ]
+      },
+      "joinType" : "inner",
+      "on" : [ {
+        "left" : "left.orderStatus$caption",
+        "op" : "=",
+        "right" : "right.orderStatus$caption"
+      } ]
+    },
+    "expected" : {
+      "sqlMarkers" : [ "WITH ", "INNER JOIN", "salesAmount", "totalAmount" ],
+      "forbiddenSqlMarkers" : [ "FROM (WITH" ],
+      "params" : [ ],
+      "strictSqlShape" : true,
+      "sqlShape" : {
+        "rootUsesCte" : true,
+        "rootUsesSubquery" : false,
+        "containsFromWith" : false,
+        "containsUnion" : false,
+        "containsUnionAll" : false,
+        "containsInnerJoin" : true,
+        "containsLeftJoin" : false,
+        "containsRightJoin" : false,
+        "containsFullOuterJoin" : false,
+        "containsWhere" : false,
+        "containsOrderBy" : false
+      }
+    }
+  }, {
+    "id" : "union-all-sales-orders-postgres",
+    "dialect" : "postgres",
+    "plan" : {
+      "type" : "union",
+      "left" : {
+        "type" : "base",
+        "model" : "FactSalesModel",
+        "columns" : [ "orderStatus$caption AS bucket", "salesAmount AS amount" ]
+      },
+      "right" : {
+        "type" : "base",
+        "model" : "FactOrderModel",
+        "columns" : [ "orderStatus$caption AS bucket", "totalAmount AS amount" ]
+      },
+      "all" : true
+    },
+    "expected" : {
+      "sqlMarkers" : [ "SELECT", "UNION ALL", "order_status" ],
+      "forbiddenSqlMarkers" : [ "WITH ", "FROM (WITH" ],
+      "params" : [ ],
+      "strictSqlShape" : true,
+      "sqlShape" : {
+        "rootUsesCte" : false,
+        "rootUsesSubquery" : false,
+        "containsFromWith" : false,
+        "containsUnion" : true,
+        "containsUnionAll" : true,
+        "containsInnerJoin" : false,
+        "containsLeftJoin" : false,
+        "containsRightJoin" : false,
+        "containsFullOuterJoin" : false,
+        "containsWhere" : false,
+        "containsOrderBy" : false
+      }
+    }
+  }, {
     "id" : "qualified-source-alias-join-postgres",
     "dialect" : "postgres",
     "plan" : {
@@ -307,6 +384,42 @@
         "containsUnion" : false,
         "containsUnionAll" : false,
         "containsInnerJoin" : true,
+        "containsLeftJoin" : false,
+        "containsRightJoin" : false,
+        "containsFullOuterJoin" : false,
+        "containsWhere" : false,
+        "containsOrderBy" : false
+      }
+    }
+  }, {
+    "id" : "union-all-sales-orders-sqlserver",
+    "dialect" : "sqlserver",
+    "plan" : {
+      "type" : "union",
+      "left" : {
+        "type" : "base",
+        "model" : "FactSalesModel",
+        "columns" : [ "orderStatus$caption AS bucket", "salesAmount AS amount" ]
+      },
+      "right" : {
+        "type" : "base",
+        "model" : "FactOrderModel",
+        "columns" : [ "orderStatus$caption AS bucket", "totalAmount AS amount" ]
+      },
+      "all" : true
+    },
+    "expected" : {
+      "sqlMarkers" : [ "SELECT", "UNION ALL", "order_status" ],
+      "forbiddenSqlMarkers" : [ "WITH ", "FROM (WITH" ],
+      "params" : [ ],
+      "strictSqlShape" : true,
+      "sqlShape" : {
+        "rootUsesCte" : false,
+        "rootUsesSubquery" : false,
+        "containsFromWith" : false,
+        "containsUnion" : true,
+        "containsUnionAll" : true,
+        "containsInnerJoin" : false,
         "containsLeftJoin" : false,
         "containsRightJoin" : false,
         "containsFullOuterJoin" : false,
