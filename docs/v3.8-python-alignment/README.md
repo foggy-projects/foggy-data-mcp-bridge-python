@@ -80,6 +80,7 @@ Current P0 execution records:
 - [P0-60-compose-mysql57-union-snapshot-expansion.md](workitems/P0-60-compose-mysql57-union-snapshot-expansion.md)
 - [P0-61-compose-sqlite-base-snapshot-expansion.md](workitems/P0-61-compose-sqlite-base-snapshot-expansion.md)
 - [P0-62-compose-mysql57-join-snapshot-expansion.md](workitems/P0-62-compose-mysql57-join-snapshot-expansion.md)
+- [P0-63-compose-sqlite-derived-snapshot-expansion.md](workitems/P0-63-compose-sqlite-derived-snapshot-expansion.md)
 
 Current P1/P2 planning records:
 
@@ -102,8 +103,8 @@ Current active snapshot lanes:
   snapshots are fully strict on SQL shape, include MySQL8 join success
   evidence, MySQL 5.7 derived/union/join fallback evidence, PostgreSQL
   join/union success evidence, SQL Server top-level union success evidence,
-  SQLite base CTE evidence, and have an executable dialect/plan/status
-  coverage inventory
+  SQLite base and derived CTE evidence, and have an executable
+  dialect/plan/status coverage inventory
 - Compose script tool/runtime neutral snapshots, including execute-mode rows
   envelope shape and MCP host-misconfig structured error payloads
 - Governance / permission visible-model neutral snapshots, including
@@ -133,7 +134,7 @@ Current active snapshot lanes:
 - Registry/Odoo consumer readonly temp-dir audit for current community/pro
   `1.1.10` bundles, without refreshing committed generated Odoo models
 
-Latest P0-62 status:
+Latest P0-63 status:
 
 - P0-26 extends the active MCP compose-script error snapshot lane with
   `missing-user-id-header` and `missing-namespace-header`.
@@ -274,6 +275,9 @@ Latest P0-62 status:
   inventory now reports `28` total cases and `24/24` strict successful
   SQL-shape replay. The non-SQLite compose success matrix is now complete;
   remaining missing success cells are SQLite `derived/union/join`.
+- P0-63 adds Java-exported SQLite derived filter/order/limit CTE coverage. The
+  compose inventory now reports `29` total cases and `25/25` strict successful
+  SQL-shape replay. Remaining missing success cells are SQLite `union/join`.
 - P1-1 records the remaining semantic-scale choice: namespace opt-out parity or
   live DB/result parity.
 - P2-1 records the initial Python aggregate-join design boundary before any
