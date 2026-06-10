@@ -17,7 +17,7 @@ Status: coding complete
 
 ## Verification
 
-- `mvn test -pl foggy-dataset-model -Dtest=JavaComposeSnapshotTest`
+- `mvn test -P!multi-db -pl foggy-dataset-model -Dtest=JavaComposeSnapshotTest`
   - Result: passed.
 - `.venv/bin/python scripts/summarize-compose-snapshot-coverage.py`
   - Result: `27` cases, `23/23` strict successful cases.
