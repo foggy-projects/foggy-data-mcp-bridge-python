@@ -1,8 +1,7 @@
-"""TimeWindow + calculatedFields post-scalar parity checks (Stage 3).
+"""TimeWindow Java snapshot parity checks (Stage 3).
 
-Exercises the two post-scalar calculatedFields happy cases from the Java
-8.5.0 timeWindow parity catalog and asserts Python SQL output matches the
-Java fixture's structural expectations.
+Exercises the Java timeWindow parity catalog and asserts Python SQL output
+matches the Java fixture's structural expectations.
 
 The structural assertions verify:
 
@@ -12,10 +11,10 @@ The structural assertions verify:
   comparative CTE, window frame, etc.)
 
 When ``_time_window_parity_snapshot.json`` is present, the snapshot test
-validates Java-side schema and semantic SQL markers, then cross-checks that
-Python produces valid SQL for the same cases.  Full token-by-token normalized
-SQL diff is intentionally deferred until the normalizer can canonicalize
-multi-CTE query structures.
+validates Java-side schema, success/error coverage, and semantic SQL markers,
+then cross-checks that Python produces valid SQL for the same Java-success
+cases. Full token-by-token normalized SQL diff is intentionally deferred until
+the normalizer can canonicalize multi-CTE query structures.
 """
 
 from __future__ import annotations
@@ -29,7 +28,6 @@ import pytest
 from foggy.dataset_model.semantic.service import SemanticQueryService
 from foggy.demo.models.ecommerce_models import create_fact_sales_model
 from foggy.mcp_spi import SemanticQueryRequest
-
 
 # --------------------------------------------------------------------------- #
 # Fixture loading
@@ -47,6 +45,10 @@ _SNAPSHOT_PATH = Path(__file__).with_name("_time_window_parity_snapshot.json")
 _POST_SCALAR_CASE_NAMES = {
     "yoy-month-post-calc-growth-happy",
     "rolling_7d-post-calc-gap-happy",
+}
+
+_EXPECTED_JAVA_GENERATION_ERRORS = {
+    "wow-week-happy": "salesDate$week",
 }
 
 
@@ -88,6 +90,21 @@ def _query_shape(case: dict[str, Any]) -> tuple[list[str], list[str]]:
 
     if comparison == "mom":
         group_by = ["salesDate$month", "salesDate$id"]
+        columns = request_columns or expected_columns
+        return _unique(list(columns)), group_by
+
+    if comparison == "mtd":
+        group_by = ["salesDate$year", "salesDate$month", "salesDate$id"]
+        columns = request_columns or [*group_by, "salesAmount", *expected_columns]
+        return _unique(list(columns)), group_by
+
+    if comparison == "ytd":
+        group_by = ["salesDate$year", "salesDate$id"]
+        columns = request_columns or [*group_by, "salesAmount", *expected_columns]
+        return _unique(list(columns)), group_by
+
+    if comparison == "wow":
+        group_by = ["salesDate$week", "salesDate$dayOfWeek"]
         columns = request_columns or expected_columns
         return _unique(list(columns)), group_by
 
@@ -176,7 +193,7 @@ def test_post_scalar_structural_parity(case: dict[str, Any]) -> None:
 
 
 def test_full_golden_diff_when_snapshot_available() -> None:
-    """Stage 3: structural key-marker diff for timeWindow post-scalar cases.
+    """Stage 3: structural key-marker diff for Java timeWindow snapshots.
 
     Both Java and Python compile paths produce semantically equivalent but
     syntactically different SQL (different CTE naming, subquery structure,
@@ -184,10 +201,11 @@ def test_full_golden_diff_when_snapshot_available() -> None:
     require the normalizer to be extended for multi-CTE query structures
     (Stage 4+ scope).
 
-    This test validates that the Java snapshot contains the expected
-    semantic markers that prove both engines implement the same logic:
-    - Window frames, comparative join structure, post-calc field aliases
-    - Both sides produce valid SQL (not empty, not error)
+    This test validates that the Java snapshot contains the expected current
+    success set plus the documented Java-side generation drift for the old
+    WoW fixture whose catalog field is absent from the current Java model.
+    Successful Java snapshots are then checked for semantic SQL markers and
+    replayed through the Python validate path.
 
     When the normalizer is extended for full-query normalization, this
     test can be upgraded to use ``assert_golden_cases`` directly.
@@ -211,47 +229,58 @@ def test_full_golden_diff_when_snapshot_available() -> None:
     java_by_name: dict[str, dict] = {
         row["name"]: row for row in snapshot.get("snapshots", [])
     }
+    java_errors_by_name: dict[str, dict] = {
+        row["name"]: row for row in snapshot.get("generation_errors", [])
+    }
 
-    # Both target cases must be present in the snapshot
-    for name in _POST_SCALAR_CASE_NAMES:
-        assert name in java_by_name, (
-            f"Java snapshot missing case: {name}"
-        )
-
-    # --- yoy-month-post-calc-growth-happy ---
-    yoy_sql = java_by_name["yoy-month-post-calc-growth-happy"]["sql_normalized"]
-    assert yoy_sql, "Java yoy SQL is empty"
-    # Comparative join structure markers
-    assert '"growthPercent"' in yoy_sql, "Java yoy SQL missing growthPercent alias"
-    assert '"salesAmount__prior"' in yoy_sql, "Java yoy SQL missing __prior alias"
-    assert '"salesAmount__diff"' in yoy_sql, "Java yoy SQL missing __diff alias"
-    assert '"salesAmount__ratio"' in yoy_sql, "Java yoy SQL missing __ratio alias"
-    assert '"salesDate$year"' in yoy_sql.lower() or '"salesdate$year"' in yoy_sql.lower(), (
-        "Java yoy SQL missing salesDate$year"
-    )
-    assert '"salesDate$month"' in yoy_sql.lower() or '"salesdate$month"' in yoy_sql.lower(), (
-        "Java yoy SQL missing salesDate$month"
-    )
-
-    # --- rolling_7d-post-calc-gap-happy ---
-    rolling_sql = java_by_name["rolling_7d-post-calc-gap-happy"]["sql_normalized"]
-    assert rolling_sql, "Java rolling SQL is empty"
-    # Window function markers
-    assert "OVER" in rolling_sql, "Java rolling SQL missing OVER clause"
-    assert "ROWS BETWEEN" in rolling_sql, "Java rolling SQL missing window frame"
-    assert "6 PRECEDING" in rolling_sql, "Java rolling SQL missing 7-day window offset"
-    assert '"rollingGap"' in rolling_sql, "Java rolling SQL missing rollingGap alias"
-    assert '"salesAmount__rolling_7d"' in rolling_sql, "Java rolling SQL missing __rolling_7d alias"
-
-    # Cross-check: run Python queries and verify both sides produce valid SQL
     catalog = _load_catalog()
-    for entry in catalog:
-        if entry["name"] not in _POST_SCALAR_CASE_NAMES:
+    happy_cases = [entry for entry in catalog if "expectedError" not in entry]
+    happy_names = {entry["name"] for entry in happy_cases}
+
+    assert set(java_errors_by_name) == set(_EXPECTED_JAVA_GENERATION_ERRORS)
+    for name, marker in _EXPECTED_JAVA_GENERATION_ERRORS.items():
+        error = java_errors_by_name[name]
+        assert error["error_code"] == "GENERATE_SQL_FAILED"
+        assert marker in error["message"]
+
+    assert set(java_by_name) == happy_names - set(_EXPECTED_JAVA_GENERATION_ERRORS)
+    assert len(java_by_name) == 8
+
+    for entry in happy_cases:
+        if entry["name"] in java_errors_by_name:
             continue
-        py_sql, py_cols = _run_python_query(entry)
         java_sql = java_by_name[entry["name"]]["sql_normalized"]
+        _assert_java_sql_markers(entry, java_sql)
+
+        py_sql, py_cols = _run_python_query(entry)
         assert py_sql, f"Python SQL is empty for {entry['name']}"
         assert java_sql, f"Java SQL is empty for {entry['name']}"
-        # Both sides produce non-trivial SQL (> 50 chars)
         assert len(py_sql) > 50, f"Python SQL suspiciously short for {entry['name']}"
         assert len(java_sql) > 50, f"Java SQL suspiciously short for {entry['name']}"
+        assert set(entry["expectedColumns"]).issubset(set(py_cols))
+
+
+def _assert_java_sql_markers(case: dict[str, Any], sql: str) -> None:
+    assert sql, f"Java SQL is empty for {case['name']}"
+    for column in case.get("expectedColumns", []):
+        assert f'"{column}"' in sql, (
+            f"Java SQL for {case['name']} missing expected column {column}"
+        )
+
+    assertions = case.get("assertions", {})
+    if "windowFrame" in assertions:
+        assert assertions["windowFrame"] in sql
+
+    comparison = case["comparison"]
+    if comparison in {"yoy", "mom"}:
+        assert '"salesAmount__prior"' in sql
+        assert '"salesAmount__diff"' in sql
+        assert '"salesAmount__ratio"' in sql
+        assert "LEFT JOIN" in sql
+    if comparison in {"rolling_7d", "rolling_30d", "mtd", "ytd"}:
+        assert "OVER" in sql
+    if comparison in {"mtd", "ytd"}:
+        assert "UNBOUNDED PRECEDING" in sql
+    if assertions.get("postCalcFieldPresent"):
+        for calc in case.get("calculatedFields", []):
+            assert f'AS "{calc["name"]}"' in sql

@@ -45,7 +45,8 @@
       "verification": [
         "expected columns and Java structural assertions",
         "negative fixture expected error contract",
-        "committed Java snapshot schema/version/source checks"
+        "committed Java snapshot schema/version/source checks",
+        "current Java snapshot contains 8 SQL success cases plus documented wow-week-happy generation drift"
       ]
     },
     {

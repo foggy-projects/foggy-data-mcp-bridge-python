@@ -3,14 +3,51 @@
   "source" : "TimeWindowParitySnapshotTest",
   "feature" : "timeWindow",
   "snapshots" : [ {
-    "name" : "yoy-month-post-calc-growth-happy",
+    "name" : "mom-month-happy",
     "dialect" : "default",
-    "sql_normalized" : "SELECT \"salesDate$year\", \"salesDate$month\", \"salesAmount\", \"salesAmount__prior\", \"salesAmount__diff\", \"salesAmount__ratio\", \"salesAmount__ratio\" * 100 AS \"growthPercent\"\nFROM (SELECT \"salesDate$year\", \"salesDate$month\", \"salesAmount\", \"salesAmount__prior\", (\"salesAmount\" - \"salesAmount__prior\") AS \"salesAmount__diff\", CASE WHEN ((\"salesAmount__prior\" IS NULL) OR (\"salesAmount__prior\" = 0)) THEN NULL ELSE ((\"salesAmount\" - \"salesAmount__prior\") / NULLIF(\"salesAmount__prior\", 0)) END AS \"salesAmount__ratio\"\nFROM (WITH cte_1 AS (SELECT \"salesDate$year\", \"salesDate$month\", \"salesAmount\" AS \"salesAmount\"\nFROM (select\td137.year \"salesDate$year\",\td137.month \"salesDate$month\",\tSUM(t1.sales_amount) \"salesAmount\"\tfrom fact_sales t1\t left join dim_date d137  on t1.date_key=d137.date_key\tgroup by d137.year,\td137.month) AS cte_0),\ncte_2 AS (SELECT (\"salesDate$year\" + 1) AS \"salesDate$year\", \"salesDate$month\", \"salesAmount\" AS \"salesAmount__prior\"\nFROM (select\td137.year \"salesDate$year\",\td137.month \"salesDate$month\",\tSUM(t1.sales_amount) \"salesAmount\"\tfrom fact_sales t1\t left join dim_date d137  on t1.date_key=d137.date_key\tgroup by d137.year,\td137.month) AS cte_0)\nSELECT cte_1.\"salesDate$year\", cte_1.\"salesDate$month\", cte_1.\"salesAmount\", cte_2.\"salesAmount__prior\"\nFROM cte_1\nLEFT JOIN cte_2 ON cte_1.\"salesDate$year\" = cte_2.\"salesDate$year\" AND cte_1.\"salesDate$month\" = cte_2.\"salesDate$month\") AS cte_3) AS cte_4",
+    "sql_normalized" : "SELECT \"salesDate$month\", \"salesDate$id\", \"salesAmount\", \"salesAmount__prior\", (\"salesAmount\" - \"salesAmount__prior\") AS \"salesAmount__diff\", CASE WHEN ((\"salesAmount__prior\" IS NULL) OR (\"salesAmount__prior\" = 0)) THEN NULL ELSE ((\"salesAmount\" - \"salesAmount__prior\") / NULLIF(\"salesAmount__prior\", 0)) END AS \"salesAmount__ratio\"\nFROM (WITH cte_1 AS (SELECT \"salesDate$month\", \"salesDate$id\", \"salesAmount\" AS \"salesAmount\"\nFROM (select\td1.month \"salesDate$month\",\tt1.date_key \"salesDate$id\",\tSUM(t1.sales_amount) \"salesAmount\"\tfrom fact_sales t1\t left join dim_date d1  on t1.date_key=d1.date_key\tgroup by d1.month,\tt1.date_key) AS cte_0),\ncte_2 AS (SELECT (\"salesDate$month\" + 1) AS \"salesDate$month\", \"salesDate$id\", \"salesAmount\" AS \"salesAmount__prior\"\nFROM (select\td1.month \"salesDate$month\",\tt1.date_key \"salesDate$id\",\tSUM(t1.sales_amount) \"salesAmount\"\tfrom fact_sales t1\t left join dim_date d1  on t1.date_key=d1.date_key\tgroup by d1.month,\tt1.date_key) AS cte_0)\nSELECT cte_1.\"salesDate$month\", cte_1.\"salesDate$id\", cte_1.\"salesAmount\", cte_2.\"salesAmount__prior\"\nFROM cte_1\nLEFT JOIN cte_2 ON cte_1.\"salesDate$month\" = cte_2.\"salesDate$month\" AND cte_1.\"salesDate$id\" = cte_2.\"salesDate$id\") AS cte_3",
+    "bind_params" : [ ]
+  }, {
+    "name" : "mtd-day-happy",
+    "dialect" : "default",
+    "sql_normalized" : "WITH cte_1 AS (SELECT \"salesDate$year\", \"salesDate$month\", \"salesDate$id\", \"salesAmount\", SUM(\"salesAmount\") OVER (PARTITION BY \"salesDate$year\", \"salesDate$month\" ORDER BY \"salesDate$id\" ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS \"salesAmount__mtd\"\nFROM (select\td1.year \"salesDate$year\",\td1.month \"salesDate$month\",\tt1.date_key \"salesDate$id\",\tSUM(t1.sales_amount) \"salesAmount\"\tfrom fact_sales t1\t left join dim_date d1  on t1.date_key=d1.date_key\tgroup by d1.year,\td1.month,\tt1.date_key) AS cte_0)\nSELECT cte_1.\"salesDate$year\", cte_1.\"salesDate$month\", cte_1.\"salesDate$id\", cte_1.\"salesAmount\", cte_1.\"salesAmount__mtd\"\nFROM cte_1",
+    "bind_params" : [ ]
+  }, {
+    "name" : "rolling_30d-day-happy",
+    "dialect" : "default",
+    "sql_normalized" : "WITH cte_1 AS (SELECT \"salesDate$id\", \"salesAmount\", SUM(\"salesAmount\") OVER (ORDER BY \"salesDate$id\" ASC ROWS BETWEEN 29 PRECEDING AND CURRENT ROW) AS \"salesAmount__rolling_30d\"\nFROM (select\tt1.date_key \"salesDate$id\",\tSUM(t1.sales_amount) \"salesAmount\"\tfrom fact_sales t1\t\tgroup by t1.date_key) AS cte_0)\nSELECT cte_1.\"salesDate$id\", cte_1.\"salesAmount\", cte_1.\"salesAmount__rolling_30d\"\nFROM cte_1",
+    "bind_params" : [ ]
+  }, {
+    "name" : "rolling_7d-day-happy",
+    "dialect" : "default",
+    "sql_normalized" : "WITH cte_1 AS (SELECT \"salesDate$id\", \"salesAmount\", AVG(\"salesAmount\") OVER (ORDER BY \"salesDate$id\" ASC ROWS BETWEEN 6 PRECEDING AND CURRENT ROW) AS \"salesAmount__rolling_7d\"\nFROM (select\tt1.date_key \"salesDate$id\",\tSUM(t1.sales_amount) \"salesAmount\"\tfrom fact_sales t1\t\tgroup by t1.date_key) AS cte_0)\nSELECT cte_1.\"salesDate$id\", cte_1.\"salesAmount\", cte_1.\"salesAmount__rolling_7d\"\nFROM cte_1",
     "bind_params" : [ ]
   }, {
     "name" : "rolling_7d-post-calc-gap-happy",
     "dialect" : "default",
     "sql_normalized" : "WITH cte_2 AS (SELECT \"salesDate$id\", \"salesAmount\", \"salesAmount__rolling_7d\", \"salesAmount\" - \"salesAmount__rolling_7d\" AS \"rollingGap\"\nFROM (SELECT \"salesDate$id\", \"salesAmount\", SUM(\"salesAmount\") OVER (ORDER BY \"salesDate$id\" ASC ROWS BETWEEN 6 PRECEDING AND CURRENT ROW) AS \"salesAmount__rolling_7d\"\nFROM (select\tt1.date_key \"salesDate$id\",\tSUM(t1.sales_amount) \"salesAmount\"\tfrom fact_sales t1\t\tgroup by t1.date_key) AS cte_0) AS cte_1)\nSELECT cte_2.\"salesDate$id\", cte_2.\"salesAmount\", cte_2.\"salesAmount__rolling_7d\", cte_2.\"rollingGap\"\nFROM cte_2",
     "bind_params" : [ ]
+  }, {
+    "name" : "yoy-month-happy",
+    "dialect" : "default",
+    "sql_normalized" : "SELECT \"salesDate$year\", \"salesDate$month\", \"salesAmount\", \"salesAmount__prior\", (\"salesAmount\" - \"salesAmount__prior\") AS \"salesAmount__diff\", CASE WHEN ((\"salesAmount__prior\" IS NULL) OR (\"salesAmount__prior\" = 0)) THEN NULL ELSE ((\"salesAmount\" - \"salesAmount__prior\") / NULLIF(\"salesAmount__prior\", 0)) END AS \"salesAmount__ratio\"\nFROM (WITH cte_1 AS (SELECT \"salesDate$year\", \"salesDate$month\", \"salesAmount\" AS \"salesAmount\"\nFROM (select\td1.year \"salesDate$year\",\td1.month \"salesDate$month\",\tSUM(t1.sales_amount) \"salesAmount\"\tfrom fact_sales t1\t left join dim_date d1  on t1.date_key=d1.date_key\tgroup by d1.year,\td1.month) AS cte_0),\ncte_2 AS (SELECT (\"salesDate$year\" + 1) AS \"salesDate$year\", \"salesDate$month\", \"salesAmount\" AS \"salesAmount__prior\"\nFROM (select\td1.year \"salesDate$year\",\td1.month \"salesDate$month\",\tSUM(t1.sales_amount) \"salesAmount\"\tfrom fact_sales t1\t left join dim_date d1  on t1.date_key=d1.date_key\tgroup by d1.year,\td1.month) AS cte_0)\nSELECT cte_1.\"salesDate$year\", cte_1.\"salesDate$month\", cte_1.\"salesAmount\", cte_2.\"salesAmount__prior\"\nFROM cte_1\nLEFT JOIN cte_2 ON cte_1.\"salesDate$year\" = cte_2.\"salesDate$year\" AND cte_1.\"salesDate$month\" = cte_2.\"salesDate$month\") AS cte_3",
+    "bind_params" : [ ]
+  }, {
+    "name" : "yoy-month-post-calc-growth-happy",
+    "dialect" : "default",
+    "sql_normalized" : "SELECT \"salesDate$year\", \"salesDate$month\", \"salesAmount\", \"salesAmount__prior\", \"salesAmount__diff\", \"salesAmount__ratio\", \"salesAmount__ratio\" * 100 AS \"growthPercent\"\nFROM (SELECT \"salesDate$year\", \"salesDate$month\", \"salesAmount\", \"salesAmount__prior\", (\"salesAmount\" - \"salesAmount__prior\") AS \"salesAmount__diff\", CASE WHEN ((\"salesAmount__prior\" IS NULL) OR (\"salesAmount__prior\" = 0)) THEN NULL ELSE ((\"salesAmount\" - \"salesAmount__prior\") / NULLIF(\"salesAmount__prior\", 0)) END AS \"salesAmount__ratio\"\nFROM (WITH cte_1 AS (SELECT \"salesDate$year\", \"salesDate$month\", \"salesAmount\" AS \"salesAmount\"\nFROM (select\td1.year \"salesDate$year\",\td1.month \"salesDate$month\",\tSUM(t1.sales_amount) \"salesAmount\"\tfrom fact_sales t1\t left join dim_date d1  on t1.date_key=d1.date_key\tgroup by d1.year,\td1.month) AS cte_0),\ncte_2 AS (SELECT (\"salesDate$year\" + 1) AS \"salesDate$year\", \"salesDate$month\", \"salesAmount\" AS \"salesAmount__prior\"\nFROM (select\td1.year \"salesDate$year\",\td1.month \"salesDate$month\",\tSUM(t1.sales_amount) \"salesAmount\"\tfrom fact_sales t1\t left join dim_date d1  on t1.date_key=d1.date_key\tgroup by d1.year,\td1.month) AS cte_0)\nSELECT cte_1.\"salesDate$year\", cte_1.\"salesDate$month\", cte_1.\"salesAmount\", cte_2.\"salesAmount__prior\"\nFROM cte_1\nLEFT JOIN cte_2 ON cte_1.\"salesDate$year\" = cte_2.\"salesDate$year\" AND cte_1.\"salesDate$month\" = cte_2.\"salesDate$month\") AS cte_3) AS cte_4",
+    "bind_params" : [ ]
+  }, {
+    "name" : "ytd-month-happy",
+    "dialect" : "default",
+    "sql_normalized" : "WITH cte_1 AS (SELECT \"salesDate$year\", \"salesDate$id\", \"salesAmount\", SUM(\"salesAmount\") OVER (PARTITION BY \"salesDate$year\" ORDER BY \"salesDate$id\" ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS \"salesAmount__ytd\"\nFROM (select\td1.year \"salesDate$year\",\tt1.date_key \"salesDate$id\",\tSUM(t1.sales_amount) \"salesAmount\"\tfrom fact_sales t1\t left join dim_date d1  on t1.date_key=d1.date_key\tgroup by d1.year,\tt1.date_key) AS cte_0)\nSELECT cte_1.\"salesDate$year\", cte_1.\"salesDate$id\", cte_1.\"salesAmount\", cte_1.\"salesAmount__ytd\"\nFROM cte_1",
+    "bind_params" : [ ]
+  } ],
+  "generation_errors" : [ {
+    "name" : "wow-week-happy",
+    "dialect" : "default",
+    "error_code" : "GENERATE_SQL_FAILED",
+    "exception" : "ComposeCompileException",
+    "message" : "[compose-compile-error/per-base-compile-failed] (compile) v1.3 engine build failed for model 'FactSalesQueryModel': ExRuntimeExceptionImpl: Field 'salesDate$week' not found in model 'FactSalesQueryModel'. Did you mean 'salesDate$dayOfWeek'?"
   } ]
 }
