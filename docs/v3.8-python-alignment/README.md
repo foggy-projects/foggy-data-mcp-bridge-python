@@ -60,6 +60,7 @@ Current P0 execution records:
 - [P0-40-compose-script-resolver-resolve-exception-snapshot-replay.md](workitems/P0-40-compose-script-resolver-resolve-exception-snapshot-replay.md)
 - [P0-41-domain-question-report-metadata-snapshot-replay.md](workitems/P0-41-domain-question-report-metadata-snapshot-replay.md)
 - [P0-42-compose-union-source-alias-shadowing-snapshot-replay.md](workitems/P0-42-compose-union-source-alias-shadowing-snapshot-replay.md)
+- [P0-43-compose-stable-relation-reuse-qualified-ref-snapshot-replay.md](workitems/P0-43-compose-stable-relation-reuse-qualified-ref-snapshot-replay.md)
 
 Current P1/P2 planning records:
 
@@ -74,7 +75,8 @@ Current active snapshot lanes:
   qualified-ref fixture coverage plus P0-37 projection/slice/orderBy and
   derived-inheritance expansion, duplicate source-alias fail-closed coverage,
   projected source-alias shadowing refusal, union branch-alias refusal, union
-  result-alias qualified refs, and SQL Server embedded composed-source fallback
+  result-alias qualified refs, stable relation reuse qualified refs, and SQL
+  Server embedded composed-source fallback
 - Compose script tool/runtime neutral snapshots, including execute-mode rows
   envelope shape and MCP host-misconfig structured error payloads
 - Governance / permission visible-model neutral snapshots, including
@@ -168,6 +170,9 @@ Latest P0-42 status:
   output aliases that shadow visible source aliases, reject branch source
   aliases after a union boundary, accept the union result alias for qualified
   refs, and keep SQL Server embedded composed-source SQL free of `FROM (WITH`.
+- P0-43 closes the P0-37 stable relation reuse residual with a test-only
+  `reuseKey` neutral snapshot contract and a reused-base derived-join case
+  using `left.*` / `right.*` projection, slice, and orderBy refs.
 - P1-1 records the remaining semantic-scale choice: namespace opt-out parity or
   live DB/result parity.
 - P2-1 records the initial Python aggregate-join design boundary before any
@@ -191,9 +196,18 @@ Latest P0-42 status:
   `3 passed in 0.10s`.
 - Python P0-42 focused compose replay and manifest passed:
   `6 passed in 0.52s`.
+- Python P0-43 local regression passed:
+  `1 passed in 0.13s`.
+- Python P0-43 focused compose replay and manifest passed:
+  `6 passed in 0.50s`.
 - Java P0-42 focused exporter passed:
   `mvn test -P!multi-db -pl foggy-dataset-model -Dtest=JavaComposeSnapshotTest,JoinCompileTest`
   with `22` tests passed.
+- Java P0-43 focused exporter passed:
+  `mvn test -pl foggy-dataset-model -Dtest=JavaComposeSnapshotTest`
+  across the default, MySQL, and PostgreSQL executions.
+- Python full coverage after P0-43 passed:
+  `4080 passed, 232 skipped, 53 warnings in 17.97s`.
 - Python full coverage after P0-42 passed:
   `4079 passed, 232 skipped, 53 warnings in 18.72s`.
 - Python P0-32 focused replay passed:
@@ -229,4 +243,4 @@ Latest P0-42 status:
 - Full Python pytest and Java focused Maven status are recorded in the
   P0-26/P0-27 progress docs; P0-29/P0-30/P0-31 focused evidence is recorded in
   their progress docs. P0-32/P0-33/P0-34/P0-35/P0-36/P0-39/P0-40/P0-41/P0-42
-  evidence is recorded in their progress docs.
+  /P0-43 evidence is recorded in their progress docs.

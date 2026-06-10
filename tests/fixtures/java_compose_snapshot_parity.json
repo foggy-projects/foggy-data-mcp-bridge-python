@@ -399,6 +399,55 @@
       "params" : [ 0 ]
     }
   }, {
+    "id" : "stable-reused-base-qualified-ref-postgres",
+    "dialect" : "postgres",
+    "plan" : {
+      "type" : "derived",
+      "source" : {
+        "type" : "join",
+        "left" : {
+          "type" : "derived",
+          "source" : {
+            "type" : "base",
+            "model" : "FactSalesModel",
+            "columns" : [ "orderStatus$caption", "salesAmount" ],
+            "reuseKey" : "sharedSales"
+          },
+          "columns" : [ "orderStatus$caption AS statusLeft", "salesAmount AS amountLeft" ],
+          "aliases" : [ "leftSales" ]
+        },
+        "right" : {
+          "type" : "derived",
+          "source" : {
+            "type" : "base",
+            "model" : "FactSalesModel",
+            "columns" : [ "orderStatus$caption", "salesAmount" ],
+            "reuseKey" : "sharedSales"
+          },
+          "columns" : [ "orderStatus$caption AS statusRight", "salesAmount AS amountRight" ],
+          "aliases" : [ "rightSales" ]
+        },
+        "joinType" : "inner",
+        "on" : [ {
+          "left" : "left.statusLeft",
+          "op" : "=",
+          "right" : "right.statusRight"
+        } ]
+      },
+      "columns" : [ "left.amountLeft", "right.amountRight" ],
+      "slice" : [ {
+        "field" : "left.amountLeft",
+        "op" : ">",
+        "value" : 0
+      } ],
+      "orderBy" : [ "-right.amountRight" ]
+    },
+    "expected" : {
+      "sqlMarkers" : [ "INNER JOIN", "WHERE", "ORDER BY", "amountLeft", "amountRight" ],
+      "forbiddenSqlMarkers" : [ "left.amountLeft", "right.amountRight" ],
+      "params" : [ 0 ]
+    }
+  }, {
     "id" : "sqlserver-derived-chain-top-level-with",
     "dialect" : "sqlserver",
     "plan" : {

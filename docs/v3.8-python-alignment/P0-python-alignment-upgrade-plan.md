@@ -779,6 +779,16 @@ P0-42 follow-up:
 - Python SQL Server embedded composed-source compilation no longer emits
   `FROM (WITH` for the Java snapshot case.
 
+P0-43 follow-up:
+
+- Extended the compose snapshot fixture DSL with a test-only `reuseKey` so Java
+  and Python replay can reconstruct the same base `QueryPlan` instance across
+  branches.
+- Added reused-base derived-join coverage for `left.*` / `right.*`
+  projection, slice, and orderBy refs.
+- Closed the P0-37 stable relation reuse qualified-ref residual without
+  changing the user-facing compose API or the stable relation S7 snapshots.
+
 Odoo registry consumer baseline:
 
 - Python has `scripts/pull-odoo-models.py` and `scripts/check-model-drift.py`.
@@ -928,7 +938,8 @@ Tasks:
 1. Fix formula/calculated-field parity gaps proven by P0 snapshots.
 2. Align compose dialect fallback and source alias behavior where Java snapshots
    show drift. P0-42 closes the projected source-alias shadowing and
-   union-as-source alias boundary; stable relation reuse remains open.
+   union-as-source alias boundary; P0-43 closes stable relation reuse
+   qualified-ref replay. Broader dialect SQL-shape coverage remains open.
 3. Refresh timeWindow relative-date and pivot/domain-transport edge behavior.
 4. Add neutral domain fixture runner that can replay Java request/expected tool
    argument cases without Odoo models.

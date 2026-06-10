@@ -93,11 +93,20 @@ def _get_int(node: dict[str, Any], *names: str) -> int | None:
     return None
 
 
-def _plan_from_snapshot(node: dict[str, Any]) -> QueryPlan:
+def _plan_from_snapshot(
+    node: dict[str, Any],
+    reuse_cache: dict[str, QueryPlan] | None = None,
+) -> QueryPlan:
+    if reuse_cache is None:
+        reuse_cache = {}
+    reuse_key = node.get("reuseKey")
+    if reuse_key and reuse_key in reuse_cache:
+        return _bind_aliases(reuse_cache[reuse_key], node)
+
     node_type = node.get("type")
 
     if node_type == "base":
-        return _bind_aliases(
+        plan = _bind_aliases(
             from_(
                 model=node["model"],
                 columns=list(node["columns"]),
@@ -112,10 +121,13 @@ def _plan_from_snapshot(node: dict[str, Any]) -> QueryPlan:
             ),
             node,
         )
+        if reuse_key:
+            reuse_cache[reuse_key] = plan
+        return plan
 
     if node_type == "derived":
-        source = _plan_from_snapshot(node["source"])
-        return _bind_aliases(
+        source = _plan_from_snapshot(node["source"], reuse_cache)
+        plan = _bind_aliases(
             source.query(
                 columns=list(node["columns"]),
                 slice=_get_list(node, "slice"),
@@ -127,15 +139,21 @@ def _plan_from_snapshot(node: dict[str, Any]) -> QueryPlan:
             ),
             node,
         )
+        if reuse_key:
+            reuse_cache[reuse_key] = plan
+        return plan
 
     if node_type == "union":
-        return _bind_aliases(
-            _plan_from_snapshot(node["left"]).union(
-                _plan_from_snapshot(node["right"]),
+        plan = _bind_aliases(
+            _plan_from_snapshot(node["left"], reuse_cache).union(
+                _plan_from_snapshot(node["right"], reuse_cache),
                 all=_get_bool(node, "all", "unionAll"),
             ),
             node,
         )
+        if reuse_key:
+            reuse_cache[reuse_key] = plan
+        return plan
 
     if node_type == "join":
         join_type = node.get("joinType", node.get("typeName", "left"))
@@ -143,14 +161,17 @@ def _plan_from_snapshot(node: dict[str, Any]) -> QueryPlan:
             JoinOn(left=item["left"], op=item.get("op", "="), right=item["right"])
             for item in node.get("on", [])
         ]
-        return _bind_aliases(
-            _plan_from_snapshot(node["left"]).join(
-                _plan_from_snapshot(node["right"]),
+        plan = _bind_aliases(
+            _plan_from_snapshot(node["left"], reuse_cache).join(
+                _plan_from_snapshot(node["right"], reuse_cache),
                 type=join_type,
                 on=on,
             ),
             node,
         )
+        if reuse_key:
+            reuse_cache[reuse_key] = plan
+        return plan
 
     raise AssertionError(f"Unsupported compose snapshot plan type: {node_type!r}")
 

@@ -416,6 +416,51 @@ class TestJoinBasic:
         assert "firstOrders." not in composed.sql
         assert "mayOrders." not in composed.sql
 
+    def test_postgres_reused_base_allows_side_qualified_refs(
+        self, svc, ctx
+    ):
+        shared_sales = from_(
+            model="FactSalesModel",
+            columns=["orderStatus$caption", "salesAmount"],
+        )
+        left_sales = shared_sales.query(
+            columns=[
+                "orderStatus$caption AS statusLeft",
+                "salesAmount AS amountLeft",
+            ],
+        ).__fsscript_bind_alias__("leftSales")
+        right_sales = shared_sales.query(
+            columns=[
+                "orderStatus$caption AS statusRight",
+                "salesAmount AS amountRight",
+            ],
+        ).__fsscript_bind_alias__("rightSales")
+        joined = left_sales.join(
+            right_sales,
+            type="inner",
+            on=[JoinOn(left="statusLeft", op="=", right="statusRight")],
+        )
+
+        result = joined.query(
+            columns=["left.amountLeft", "right.amountRight"],
+            slice=[{"field": "left.amountLeft", "op": ">", "value": 0}],
+            order_by=["-right.amountRight"],
+        )
+
+        composed = compile_plan_to_sql(
+            result,
+            ctx,
+            semantic_service=svc,
+            dialect="postgres",
+        )
+
+        assert "INNER JOIN" in composed.sql
+        assert 'cte_3."amountLeft"' in composed.sql
+        assert 'cte_3."amountRight"' in composed.sql
+        assert 'ORDER BY "amountRight" DESC' in composed.sql
+        assert "left.amountLeft" not in composed.sql
+        assert "right.amountRight" not in composed.sql
+
     def test_query_after_join_rejects_duplicate_source_alias_refs(
         self, svc, ctx
     ):
