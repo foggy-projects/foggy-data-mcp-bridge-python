@@ -228,3 +228,59 @@ def _assert_case_replays(case: dict[str, Any]) -> None:
         assert marker not in sql, f"[{case['id']}] forbidden SQL marker present: {marker}"
     if "params" in expected:
         assert list(composed.params) == list(expected["params"])
+    if "sqlShape" in expected:
+        _assert_sql_shape(
+            case["id"],
+            _sql_shape(sql),
+            expected["sqlShape"],
+            strict=bool(expected.get("strictSqlShape")),
+        )
+
+
+_STABLE_SQL_SHAPE_KEYS = (
+    "containsFromWith",
+    "containsUnion",
+    "containsUnionAll",
+    "containsInnerJoin",
+    "containsLeftJoin",
+    "containsRightJoin",
+    "containsFullOuterJoin",
+    "containsWhere",
+    "containsOrderBy",
+)
+
+
+def _assert_sql_shape(
+    case_id: str,
+    actual: dict[str, bool],
+    expected: dict[str, bool],
+    *,
+    strict: bool,
+) -> None:
+    keys = tuple(expected) if strict else _STABLE_SQL_SHAPE_KEYS
+    mismatches = {
+        key: {"expected": expected.get(key), "actual": actual.get(key)}
+        for key in keys
+        if actual.get(key) != expected.get(key)
+    }
+    assert not mismatches, f"[{case_id}] SQL shape mismatch: {mismatches}"
+
+
+def _sql_shape(sql: str) -> dict[str, bool]:
+    stripped = sql.strip()
+    upper = stripped.upper()
+    starts_with_with = upper.startswith("WITH ") or upper.startswith(";WITH ")
+    starts_with_select = upper.startswith("SELECT ")
+    return {
+        "rootUsesCte": starts_with_with,
+        "rootUsesSubquery": starts_with_select and "FROM (" in upper,
+        "containsFromWith": "FROM (WITH" in upper or "FROM (;WITH" in upper,
+        "containsUnion": "UNION" in upper,
+        "containsUnionAll": "UNION ALL" in upper,
+        "containsInnerJoin": "INNER JOIN" in upper,
+        "containsLeftJoin": "LEFT JOIN" in upper,
+        "containsRightJoin": "RIGHT JOIN" in upper,
+        "containsFullOuterJoin": "FULL OUTER JOIN" in upper,
+        "containsWhere": " WHERE " in upper or "\nWHERE " in upper,
+        "containsOrderBy": "ORDER BY" in upper,
+    }

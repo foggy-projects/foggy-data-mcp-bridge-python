@@ -13,7 +13,21 @@
     "expected" : {
       "sqlMarkers" : [ "WITH ", "cte_0 AS", "salesAmount" ],
       "forbiddenSqlMarkers" : [ ],
-      "params" : [ ]
+      "params" : [ ],
+      "strictSqlShape" : true,
+      "sqlShape" : {
+        "rootUsesCte" : true,
+        "rootUsesSubquery" : false,
+        "containsFromWith" : false,
+        "containsUnion" : false,
+        "containsUnionAll" : false,
+        "containsInnerJoin" : false,
+        "containsLeftJoin" : false,
+        "containsRightJoin" : false,
+        "containsFullOuterJoin" : false,
+        "containsWhere" : false,
+        "containsOrderBy" : false
+      }
     }
   }, {
     "id" : "base-mysql57-subquery",
@@ -26,7 +40,21 @@
     "expected" : {
       "sqlMarkers" : [ "SELECT", "FROM (", " AS t0" ],
       "forbiddenSqlMarkers" : [ "WITH " ],
-      "params" : [ ]
+      "params" : [ ],
+      "strictSqlShape" : true,
+      "sqlShape" : {
+        "rootUsesCte" : false,
+        "rootUsesSubquery" : true,
+        "containsFromWith" : false,
+        "containsUnion" : false,
+        "containsUnionAll" : false,
+        "containsInnerJoin" : false,
+        "containsLeftJoin" : false,
+        "containsRightJoin" : false,
+        "containsFullOuterJoin" : false,
+        "containsWhere" : false,
+        "containsOrderBy" : false
+      }
     }
   }, {
     "id" : "base-postgres-cte",
@@ -39,7 +67,21 @@
     "expected" : {
       "sqlMarkers" : [ "WITH ", "cte_0 AS", "salesAmount" ],
       "forbiddenSqlMarkers" : [ " AS t0" ],
-      "params" : [ ]
+      "params" : [ ],
+      "strictSqlShape" : true,
+      "sqlShape" : {
+        "rootUsesCte" : true,
+        "rootUsesSubquery" : false,
+        "containsFromWith" : false,
+        "containsUnion" : false,
+        "containsUnionAll" : false,
+        "containsInnerJoin" : false,
+        "containsLeftJoin" : false,
+        "containsRightJoin" : false,
+        "containsFullOuterJoin" : false,
+        "containsWhere" : false,
+        "containsOrderBy" : false
+      }
     }
   }, {
     "id" : "base-sqlserver-subquery",
@@ -52,7 +94,21 @@
     "expected" : {
       "sqlMarkers" : [ "SELECT", "FROM (", " AS t0" ],
       "forbiddenSqlMarkers" : [ "WITH ", "FROM (WITH" ],
-      "params" : [ ]
+      "params" : [ ],
+      "strictSqlShape" : true,
+      "sqlShape" : {
+        "rootUsesCte" : false,
+        "rootUsesSubquery" : true,
+        "containsFromWith" : false,
+        "containsUnion" : false,
+        "containsUnionAll" : false,
+        "containsInnerJoin" : false,
+        "containsLeftJoin" : false,
+        "containsRightJoin" : false,
+        "containsFullOuterJoin" : false,
+        "containsWhere" : false,
+        "containsOrderBy" : false
+      }
     }
   }, {
     "id" : "derived-filter-order-limit-mysql8",
@@ -76,7 +132,20 @@
     "expected" : {
       "sqlMarkers" : [ "WITH ", "WHERE", "ORDER BY", "LIMIT" ],
       "forbiddenSqlMarkers" : [ ],
-      "params" : [ "COMPLETED" ]
+      "params" : [ "COMPLETED" ],
+      "sqlShape" : {
+        "rootUsesCte" : true,
+        "rootUsesSubquery" : false,
+        "containsFromWith" : false,
+        "containsUnion" : false,
+        "containsUnionAll" : false,
+        "containsInnerJoin" : false,
+        "containsLeftJoin" : false,
+        "containsRightJoin" : false,
+        "containsFullOuterJoin" : false,
+        "containsWhere" : true,
+        "containsOrderBy" : true
+      }
     }
   }, {
     "id" : "union-all-sales-orders-mysql8",
@@ -98,7 +167,20 @@
     "expected" : {
       "sqlMarkers" : [ "UNION ALL", "order_status" ],
       "forbiddenSqlMarkers" : [ ],
-      "params" : [ ]
+      "params" : [ ],
+      "sqlShape" : {
+        "rootUsesCte" : false,
+        "rootUsesSubquery" : false,
+        "containsFromWith" : false,
+        "containsUnion" : true,
+        "containsUnionAll" : true,
+        "containsInnerJoin" : false,
+        "containsLeftJoin" : false,
+        "containsRightJoin" : false,
+        "containsFullOuterJoin" : false,
+        "containsWhere" : false,
+        "containsOrderBy" : false
+      }
     }
   }, {
     "id" : "qualified-source-alias-join-postgres",
@@ -132,7 +214,20 @@
     "expected" : {
       "sqlMarkers" : [ "INNER JOIN", "salesAmount", "totalAmount", "ORDER BY" ],
       "forbiddenSqlMarkers" : [ "sales.salesAmount", "orders.totalAmount" ],
-      "params" : [ ]
+      "params" : [ ],
+      "sqlShape" : {
+        "rootUsesCte" : false,
+        "rootUsesSubquery" : true,
+        "containsFromWith" : true,
+        "containsUnion" : false,
+        "containsUnionAll" : false,
+        "containsInnerJoin" : true,
+        "containsLeftJoin" : false,
+        "containsRightJoin" : false,
+        "containsFullOuterJoin" : false,
+        "containsWhere" : false,
+        "containsOrderBy" : true
+      }
     }
   }, {
     "id" : "join-sqlserver-subquery",
@@ -159,7 +254,21 @@
     "expected" : {
       "sqlMarkers" : [ "INNER JOIN", "FROM (", " AS t0" ],
       "forbiddenSqlMarkers" : [ "WITH ", "FROM (WITH" ],
-      "params" : [ ]
+      "params" : [ ],
+      "strictSqlShape" : true,
+      "sqlShape" : {
+        "rootUsesCte" : false,
+        "rootUsesSubquery" : true,
+        "containsFromWith" : false,
+        "containsUnion" : false,
+        "containsUnionAll" : false,
+        "containsInnerJoin" : true,
+        "containsLeftJoin" : false,
+        "containsRightJoin" : false,
+        "containsFullOuterJoin" : false,
+        "containsWhere" : false,
+        "containsOrderBy" : false
+      }
     }
   }, {
     "id" : "qualified-source-alias-slice-order-postgres",
@@ -198,7 +307,20 @@
     "expected" : {
       "sqlMarkers" : [ "INNER JOIN", "WHERE", "ORDER BY", "salesAmount", "totalAmount" ],
       "forbiddenSqlMarkers" : [ "sales.salesAmount", "orders.totalAmount" ],
-      "params" : [ 0 ]
+      "params" : [ 0 ],
+      "sqlShape" : {
+        "rootUsesCte" : false,
+        "rootUsesSubquery" : true,
+        "containsFromWith" : true,
+        "containsUnion" : false,
+        "containsUnionAll" : false,
+        "containsInnerJoin" : true,
+        "containsLeftJoin" : false,
+        "containsRightJoin" : false,
+        "containsFullOuterJoin" : false,
+        "containsWhere" : true,
+        "containsOrderBy" : true
+      }
     }
   }, {
     "id" : "qualified-source-alias-slice-order-mysql8",
@@ -237,7 +359,20 @@
     "expected" : {
       "sqlMarkers" : [ "INNER JOIN", "WHERE", "ORDER BY", "salesAmount", "totalAmount" ],
       "forbiddenSqlMarkers" : [ "sales.salesAmount", "orders.totalAmount" ],
-      "params" : [ 0 ]
+      "params" : [ 0 ],
+      "sqlShape" : {
+        "rootUsesCte" : false,
+        "rootUsesSubquery" : true,
+        "containsFromWith" : true,
+        "containsUnion" : false,
+        "containsUnionAll" : false,
+        "containsInnerJoin" : true,
+        "containsLeftJoin" : false,
+        "containsRightJoin" : false,
+        "containsFullOuterJoin" : false,
+        "containsWhere" : true,
+        "containsOrderBy" : true
+      }
     }
   }, {
     "id" : "qualified-source-alias-slice-order-sqlserver",
@@ -276,7 +411,20 @@
     "expected" : {
       "sqlMarkers" : [ "INNER JOIN", "WHERE", "ORDER BY", "salesAmount", "totalAmount" ],
       "forbiddenSqlMarkers" : [ "sales.salesAmount", "orders.totalAmount" ],
-      "params" : [ 0 ]
+      "params" : [ 0 ],
+      "sqlShape" : {
+        "rootUsesCte" : false,
+        "rootUsesSubquery" : true,
+        "containsFromWith" : false,
+        "containsUnion" : false,
+        "containsUnionAll" : false,
+        "containsInnerJoin" : true,
+        "containsLeftJoin" : false,
+        "containsRightJoin" : false,
+        "containsFullOuterJoin" : false,
+        "containsWhere" : true,
+        "containsOrderBy" : true
+      }
     }
   }, {
     "id" : "inherited-source-alias-through-derived-postgres",
@@ -319,7 +467,20 @@
     "expected" : {
       "sqlMarkers" : [ "LEFT JOIN", "ORDER BY", "salesAmount", "totalAmount" ],
       "forbiddenSqlMarkers" : [ "sales.salesAmount", "orders.totalAmount" ],
-      "params" : [ 0 ]
+      "params" : [ 0 ],
+      "sqlShape" : {
+        "rootUsesCte" : false,
+        "rootUsesSubquery" : true,
+        "containsFromWith" : true,
+        "containsUnion" : false,
+        "containsUnionAll" : false,
+        "containsInnerJoin" : false,
+        "containsLeftJoin" : true,
+        "containsRightJoin" : false,
+        "containsFullOuterJoin" : false,
+        "containsWhere" : true,
+        "containsOrderBy" : true
+      }
     }
   }, {
     "id" : "ambiguous-duplicate-source-alias-ref-refused",
@@ -462,7 +623,20 @@
     "expected" : {
       "sqlMarkers" : [ "UNION ALL", "WHERE", "ORDER BY", "amount" ],
       "forbiddenSqlMarkers" : [ "combined.amount", "sales.amount", "orders.amount" ],
-      "params" : [ 0 ]
+      "params" : [ 0 ],
+      "sqlShape" : {
+        "rootUsesCte" : false,
+        "rootUsesSubquery" : true,
+        "containsFromWith" : false,
+        "containsUnion" : true,
+        "containsUnionAll" : true,
+        "containsInnerJoin" : false,
+        "containsLeftJoin" : false,
+        "containsRightJoin" : false,
+        "containsFullOuterJoin" : false,
+        "containsWhere" : true,
+        "containsOrderBy" : true
+      }
     }
   }, {
     "id" : "stable-reused-base-qualified-ref-postgres",
@@ -511,7 +685,20 @@
     "expected" : {
       "sqlMarkers" : [ "INNER JOIN", "WHERE", "ORDER BY", "amountLeft", "amountRight" ],
       "forbiddenSqlMarkers" : [ "left.amountLeft", "right.amountRight" ],
-      "params" : [ 0 ]
+      "params" : [ 0 ],
+      "sqlShape" : {
+        "rootUsesCte" : false,
+        "rootUsesSubquery" : true,
+        "containsFromWith" : true,
+        "containsUnion" : false,
+        "containsUnionAll" : false,
+        "containsInnerJoin" : true,
+        "containsLeftJoin" : false,
+        "containsRightJoin" : false,
+        "containsFullOuterJoin" : false,
+        "containsWhere" : true,
+        "containsOrderBy" : true
+      }
     }
   }, {
     "id" : "sqlserver-union-result-alias-derived-fallback",
@@ -546,7 +733,21 @@
     "expected" : {
       "sqlMarkers" : [ "UNION ALL", "WHERE", "ORDER BY", "amount" ],
       "forbiddenSqlMarkers" : [ "FROM (WITH", "combined.amount", "sales.amount", "orders.amount" ],
-      "params" : [ 0 ]
+      "params" : [ 0 ],
+      "strictSqlShape" : true,
+      "sqlShape" : {
+        "rootUsesCte" : false,
+        "rootUsesSubquery" : true,
+        "containsFromWith" : false,
+        "containsUnion" : true,
+        "containsUnionAll" : true,
+        "containsInnerJoin" : false,
+        "containsLeftJoin" : false,
+        "containsRightJoin" : false,
+        "containsFullOuterJoin" : false,
+        "containsWhere" : true,
+        "containsOrderBy" : true
+      }
     }
   }, {
     "id" : "sqlserver-derived-chain-top-level-with",
@@ -567,7 +768,21 @@
     "expected" : {
       "sqlMarkers" : [ "SELECT", "FROM (", " AS t0" ],
       "forbiddenSqlMarkers" : [ "WITH ", "FROM (WITH" ],
-      "params" : [ ]
+      "params" : [ ],
+      "strictSqlShape" : true,
+      "sqlShape" : {
+        "rootUsesCte" : false,
+        "rootUsesSubquery" : true,
+        "containsFromWith" : false,
+        "containsUnion" : false,
+        "containsUnionAll" : false,
+        "containsInnerJoin" : false,
+        "containsLeftJoin" : false,
+        "containsRightJoin" : false,
+        "containsFullOuterJoin" : false,
+        "containsWhere" : false,
+        "containsOrderBy" : false
+      }
     }
   } ]
 }

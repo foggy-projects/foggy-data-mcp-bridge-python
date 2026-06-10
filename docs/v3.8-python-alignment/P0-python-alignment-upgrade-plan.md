@@ -811,6 +811,18 @@ P0-45 follow-up:
   CTE/subquery shape plus SQL Server join subquery fallback.
 - Updated Python fallback tests and replayed Java compose snapshots.
 
+P0-46 follow-up:
+
+- Added Java-exported `expected.sqlShape` metadata to successful compose
+  snapshot cases.
+- Added `strictSqlShape` for frozen root-wrapper contracts, including base
+  cross-dialect CTE/subquery cases and SQL Server fallback cases.
+- Python replay now validates stable SQL structure keys for every successful
+  compose snapshot and validates root CTE/subquery wrapping only for strict
+  cases.
+- Kept PostgreSQL derived-over-join root-wrapper drift visible in the fixture
+  but non-strict until Java/Python converge that shape deliberately.
+
 Odoo registry consumer baseline:
 
 - Python has `scripts/pull-odoo-models.py` and `scripts/check-model-drift.py`.
@@ -962,8 +974,9 @@ Tasks:
    show drift. P0-42 closes the projected source-alias shadowing and
    union-as-source alias boundary; P0-43 closes stable relation reuse
    qualified-ref replay; P0-44 adds SQL Server union-as-derived fallback.
-   P0-45 aligns compose-level SQL Server CTE capability. Broader dialect
-   SQL-shape coverage remains open.
+   P0-45 aligns compose-level SQL Server CTE capability. P0-46 adds fixture
+   SQL-shape manifests and strict root-wrapper checks for frozen fallback
+   cases. Broader dialect SQL-shape coverage remains open.
 3. Refresh timeWindow relative-date and pivot/domain-transport edge behavior.
 4. Add neutral domain fixture runner that can replay Java request/expected tool
    argument cases without Odoo models.
