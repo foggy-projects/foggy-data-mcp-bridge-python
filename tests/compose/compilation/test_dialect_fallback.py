@@ -27,13 +27,13 @@ from foggy.dataset_model.engine.compose.plan.plan import JoinOn
 class TestDialectCapabilityTable:
     @pytest.mark.parametrize(
         "dialect",
-        ["mysql8", "postgres", "postgresql", "mssql", "sqlserver", "sqlite"],
+        ["mysql8", "postgres", "postgresql", "sqlite"],
     )
     def test_cte_capable_dialects(self, dialect):
         assert dialect_supports_cte(dialect) is True
 
-    @pytest.mark.parametrize("dialect", ["mysql", "mysql57"])
-    def test_mysql_legacy_is_not_cte_capable(self, dialect):
+    @pytest.mark.parametrize("dialect", ["mysql", "mysql57", "mssql", "sqlserver"])
+    def test_subquery_fallback_dialects_are_not_cte_capable(self, dialect):
         assert dialect_supports_cte(dialect) is False
 
     def test_case_insensitive(self):
@@ -79,11 +79,13 @@ class TestSingleBase4Dialects:
         assert "WITH " in composed.sql
         assert "cte_0 AS" in composed.sql
 
-    def test_mssql_cte_form(self, svc, ctx, plan):
+    def test_mssql_subquery_form(self, svc, ctx, plan):
         composed = compile_plan_to_sql(
             plan, ctx, semantic_service=svc, dialect="mssql"
         )
-        assert "WITH " in composed.sql
+        assert "WITH " not in composed.sql
+        assert "FROM (" in composed.sql
+        assert "AS t0" in composed.sql
 
     def test_sqlite_cte_form(self, svc, ctx, plan):
         composed = compile_plan_to_sql(
@@ -130,7 +132,7 @@ class TestJoin4Dialects:
             ("mysql", False),
             ("mysql8", True),
             ("postgres", True),
-            ("mssql", True),
+            ("mssql", False),
             ("sqlite", True),
         ],
     )

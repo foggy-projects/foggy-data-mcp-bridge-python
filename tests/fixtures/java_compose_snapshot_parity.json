@@ -16,6 +16,45 @@
       "params" : [ ]
     }
   }, {
+    "id" : "base-mysql57-subquery",
+    "dialect" : "mysql",
+    "plan" : {
+      "type" : "base",
+      "model" : "FactSalesModel",
+      "columns" : [ "orderStatus$caption", "salesAmount" ]
+    },
+    "expected" : {
+      "sqlMarkers" : [ "SELECT", "FROM (", " AS t0" ],
+      "forbiddenSqlMarkers" : [ "WITH " ],
+      "params" : [ ]
+    }
+  }, {
+    "id" : "base-postgres-cte",
+    "dialect" : "postgres",
+    "plan" : {
+      "type" : "base",
+      "model" : "FactSalesModel",
+      "columns" : [ "orderStatus$caption", "salesAmount" ]
+    },
+    "expected" : {
+      "sqlMarkers" : [ "WITH ", "cte_0 AS", "salesAmount" ],
+      "forbiddenSqlMarkers" : [ " AS t0" ],
+      "params" : [ ]
+    }
+  }, {
+    "id" : "base-sqlserver-subquery",
+    "dialect" : "sqlserver",
+    "plan" : {
+      "type" : "base",
+      "model" : "FactSalesModel",
+      "columns" : [ "orderStatus$caption", "salesAmount" ]
+    },
+    "expected" : {
+      "sqlMarkers" : [ "SELECT", "FROM (", " AS t0" ],
+      "forbiddenSqlMarkers" : [ "WITH ", "FROM (WITH" ],
+      "params" : [ ]
+    }
+  }, {
     "id" : "derived-filter-order-limit-mysql8",
     "dialect" : "mysql8",
     "plan" : {
@@ -93,6 +132,33 @@
     "expected" : {
       "sqlMarkers" : [ "INNER JOIN", "salesAmount", "totalAmount", "ORDER BY" ],
       "forbiddenSqlMarkers" : [ "sales.salesAmount", "orders.totalAmount" ],
+      "params" : [ ]
+    }
+  }, {
+    "id" : "join-sqlserver-subquery",
+    "dialect" : "sqlserver",
+    "plan" : {
+      "type" : "join",
+      "left" : {
+        "type" : "base",
+        "model" : "FactSalesModel",
+        "columns" : [ "orderStatus$caption", "salesAmount" ]
+      },
+      "right" : {
+        "type" : "base",
+        "model" : "FactOrderModel",
+        "columns" : [ "orderStatus$caption", "totalAmount" ]
+      },
+      "joinType" : "inner",
+      "on" : [ {
+        "left" : "left.orderStatus$caption",
+        "op" : "=",
+        "right" : "right.orderStatus$caption"
+      } ]
+    },
+    "expected" : {
+      "sqlMarkers" : [ "INNER JOIN", "FROM (", " AS t0" ],
+      "forbiddenSqlMarkers" : [ "WITH ", "FROM (WITH" ],
       "params" : [ ]
     }
   }, {

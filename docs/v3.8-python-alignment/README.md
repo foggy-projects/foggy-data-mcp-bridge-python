@@ -62,6 +62,7 @@ Current P0 execution records:
 - [P0-42-compose-union-source-alias-shadowing-snapshot-replay.md](workitems/P0-42-compose-union-source-alias-shadowing-snapshot-replay.md)
 - [P0-43-compose-stable-relation-reuse-qualified-ref-snapshot-replay.md](workitems/P0-43-compose-stable-relation-reuse-qualified-ref-snapshot-replay.md)
 - [P0-44-compose-sqlserver-union-derived-fallback-snapshot-replay.md](workitems/P0-44-compose-sqlserver-union-derived-fallback-snapshot-replay.md)
+- [P0-45-compose-sqlserver-cte-capability-parity.md](workitems/P0-45-compose-sqlserver-cte-capability-parity.md)
 
 Current P1/P2 planning records:
 
@@ -78,6 +79,7 @@ Current active snapshot lanes:
   projected source-alias shadowing refusal, union branch-alias refusal, union
   result-alias qualified refs, stable relation reuse qualified refs, and SQL
   Server embedded composed-source fallback including union-as-derived fallback
+  and compose-level SQL Server CTE capability parity
 - Compose script tool/runtime neutral snapshots, including execute-mode rows
   envelope shape and MCP host-misconfig structured error payloads
 - Governance / permission visible-model neutral snapshots, including
@@ -178,6 +180,9 @@ Latest P0-42 status:
   `derived(union(...))` using the union result alias in projection, slice, and
   orderBy, and aligns root derived-chain output to Java's subquery fallback
   while forbidding embedded `FROM (WITH`.
+- P0-45 aligns Python compose-level SQL Server CTE capability with Java:
+  `mssql` / `sqlserver` now use subquery fallback in compose lowering while
+  lower-level dialect metadata remains unchanged.
 - P1-1 records the remaining semantic-scale choice: namespace opt-out parity or
   live DB/result parity.
 - P2-1 records the initial Python aggregate-join design boundary before any
@@ -209,6 +214,10 @@ Latest P0-42 status:
   `8 passed in 0.15s`.
 - Python P0-44 compose compilation suite passed:
   `275 passed in 0.70s`.
+- Python P0-45 focused fallback and replay coverage passed:
+  `36 passed in 0.17s`.
+- Python P0-45 compose compilation suite passed:
+  `275 passed in 0.69s`.
 - Java P0-42 focused exporter passed:
   `mvn test -P!multi-db -pl foggy-dataset-model -Dtest=JavaComposeSnapshotTest,JoinCompileTest`
   with `22` tests passed.
@@ -218,10 +227,15 @@ Latest P0-42 status:
 - Java P0-44 focused exporter passed:
   `mvn test -pl foggy-dataset-model -Dtest=JavaComposeSnapshotTest`
   across the default, MySQL, and PostgreSQL executions.
+- Java P0-45 focused exporter passed:
+  `mvn test -pl foggy-dataset-model -Dtest=JavaComposeSnapshotTest`
+  across the default, MySQL, and PostgreSQL executions.
 - Python full coverage after P0-43 passed:
   `4080 passed, 232 skipped, 53 warnings in 17.97s`.
 - Python full coverage after P0-44 passed:
   `4082 passed, 232 skipped, 53 warnings in 22.16s`.
+- Python full coverage after P0-45 passed:
+  `4082 passed, 232 skipped, 53 warnings in 17.85s`.
 - Python full coverage after P0-42 passed:
   `4079 passed, 232 skipped, 53 warnings in 18.72s`.
 - Python P0-32 focused replay passed:
@@ -257,4 +271,4 @@ Latest P0-42 status:
 - Full Python pytest and Java focused Maven status are recorded in the
   P0-26/P0-27 progress docs; P0-29/P0-30/P0-31 focused evidence is recorded in
   their progress docs. P0-32/P0-33/P0-34/P0-35/P0-36/P0-39/P0-40/P0-41/P0-42
-  /P0-43/P0-44 evidence is recorded in their progress docs.
+  /P0-43/P0-44/P0-45 evidence is recorded in their progress docs.

@@ -17,10 +17,12 @@ the same ``_CompileState``; ``id(plan)`` is checked first as a fast
 path, then structural equality as a fallback.
 
 Dialect-driven output:
-  - ``dialect in {"mysql8", "postgres", "postgresql", "mssql", "sqlite"}``
+  - ``dialect in {"mysql8", "postgres", "postgresql", "sqlite"}``
     → ``use_cte=True`` (``WITH cte_0 AS (...) SELECT * FROM cte_0``)
   - ``dialect in {"mysql", "mysql57"}`` (legacy MySQL 5.7 without CTE
-    support) → ``use_cte=False`` (``SELECT ... FROM (...) AS t0``)
+    support) and ``dialect in {"mssql", "sqlserver"}`` (SQL Server CTE
+    cannot be nested under derived tables) → ``use_cte=False``
+    (``SELECT ... FROM (...) AS t0``)
 
 Note: ``"mysql"`` alone is interpreted as "5.7-compat" for safety —
 callers that know they're on MySQL 8+ should pass ``"mysql8"`` to opt
@@ -83,10 +85,9 @@ from foggy.dataset_model.order_by import normalize_order_by_item
 # ``SqliteDialect`` / ``SqlServerDialect``) all report ``supports_cte =
 # True`` because they target modern versions. M6 needs to distinguish
 # MySQL 5.7 (no CTE) from 8.0+ (CTE), which ``FDialect`` does not model.
-# So M6 owns the MySQL version distinction, and for every *other* dialect
-# we look up the ``FDialect`` instance by name and delegate to its
-# ``supports_cte`` property — any new FDialect implementation is picked
-# up automatically without touching this module.
+# SQL Server also needs a compose-level conservative fallback because CTEs
+# cannot be nested under derived tables. So M6 owns those aliases directly,
+# and delegates the remaining dialects to ``FDialect.supports_cte``.
 
 
 _MYSQL_LEGACY_ALIASES: frozenset = frozenset({"mysql", "mysql57"})
@@ -95,6 +96,9 @@ Callers on modern MySQL must pass ``"mysql8"`` explicitly."""
 
 _MYSQL_MODERN_ALIASES: frozenset = frozenset({"mysql8"})
 """Explicit opt-in to modern MySQL (CTE emission)."""
+
+_SQLSERVER_FALLBACK_ALIASES: frozenset = frozenset({"mssql", "sqlserver"})
+"""Compose planner emits inline subqueries for SQL Server plan lowering."""
 
 
 def _fdialect_for_name(name: str) -> Optional[Any]:
@@ -110,15 +114,13 @@ def _fdialect_for_name(name: str) -> Optional[Any]:
         return cache[name]
     from foggy.dataset.dialects.postgres import PostgresDialect
     from foggy.dataset.dialects.sqlite import SqliteDialect
-    from foggy.dataset.dialects.sqlserver import SqlServerDialect
 
-    # Intentionally NOT mapping ``mysql`` / ``mysql57`` / ``mysql8`` here —
-    # those are owned by ``dialect_supports_cte`` directly.
+    # Intentionally NOT mapping ``mysql`` / ``mysql57`` / ``mysql8`` or
+    # ``mssql`` / ``sqlserver`` here — those are owned by
+    # ``dialect_supports_cte`` directly.
     factory_table = {
         "postgres": PostgresDialect,
         "postgresql": PostgresDialect,
-        "mssql": SqlServerDialect,
-        "sqlserver": SqlServerDialect,
         "sqlite": SqliteDialect,
     }
     factory = factory_table.get(name)
@@ -140,7 +142,7 @@ def dialect_supports_cte(dialect: str) -> bool:
     ``FDialect.supports_cte`` (see module-level comment).
     """
     n = dialect.lower()
-    if n in _MYSQL_LEGACY_ALIASES:
+    if n in _MYSQL_LEGACY_ALIASES or n in _SQLSERVER_FALLBACK_ALIASES:
         return False
     if n in _MYSQL_MODERN_ALIASES:
         return True
@@ -154,8 +156,6 @@ def dialect_supports_cte(dialect: str) -> bool:
 
 
 def _top_level_unit_uses_cte(plan: QueryPlan, dialect: str) -> bool:
-    if isinstance(plan, DerivedQueryPlan) and dialect.lower() in {"mssql", "sqlserver"}:
-        return False
     return dialect_supports_cte(dialect)
 
 
@@ -167,7 +167,11 @@ def _assert_dialect(dialect: str) -> None:
     which ``_fdialect_for_name`` returns a non-None FDialect.
     """
     n = dialect.lower()
-    if n in _MYSQL_LEGACY_ALIASES or n in _MYSQL_MODERN_ALIASES:
+    if (
+        n in _MYSQL_LEGACY_ALIASES
+        or n in _MYSQL_MODERN_ALIASES
+        or n in _SQLSERVER_FALLBACK_ALIASES
+    ):
         return
     if _fdialect_for_name(n) is not None:
         return
