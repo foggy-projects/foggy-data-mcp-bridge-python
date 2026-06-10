@@ -69,6 +69,7 @@ def _assert_case_replays(
     _assert_payload_round_trips(payload, request)
 
     error_code = expected.get("errorCode")
+    _assert_collector_record(expected)
     if error_code:
         response = boundary.query_model(
             tool_arguments["model"],
@@ -106,6 +107,35 @@ def _assert_case_replays(
         assert marker in (response.warnings or [])
     _assert_reports_metadata(expected, response)
     _assert_forbidden_markers_absent(response.model_dump(), expected)
+
+
+def _assert_collector_record(expected: dict[str, Any]) -> None:
+    collector = expected.get("collectorRecord")
+    assert isinstance(collector, dict)
+
+    error_code = expected.get("errorCode")
+    expected_success = error_code is None
+
+    assert collector["sessionId"] == "domain-question-neutral-runner"
+    assert collector["callCount"] == 1
+    assert collector["allSuccess"] is expected_success
+    assert collector["toolName"] == expected["toolName"]
+    assert collector["springToolName"] == "dataset_query_model"
+    assert collector["arguments"] == expected["toolArguments"]
+    assert collector["success"] is expected_success
+    assert collector["durationMs"] == 0
+    assert collector["sequence"] == 0
+
+    result = collector["result"]
+    assert isinstance(result, dict)
+    if expected_success:
+        assert result["status"] == "ok"
+        assert result["rowCount"] == 1
+        assert collector["error"] is None
+    else:
+        assert result["status"] == "error"
+        assert result["errorCode"] == error_code
+        assert error_code in collector["error"]
 
 
 def _assert_payload_round_trips(

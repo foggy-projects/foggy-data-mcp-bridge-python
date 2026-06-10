@@ -310,10 +310,10 @@
         "warning markers",
         "neutral runner case-summary report metadata",
         "unsupported construct fail-closed cases for pivot+timeWindow, hidden axis functions, and cross-model join",
+        "ToolCallCollector-backed stable record envelope for every neutral case",
         "forbidden Odoo/LLM leakage markers"
       ],
       "plannedExtensions": [
-        "deterministic ToolCallCollector-backed Java export",
         "Odoo packs after registry/model drift is resolved"
       ],
       "verification": [
@@ -322,6 +322,7 @@
         "Python checks stable SQL/result/error/warning markers without LLM or Odoo models",
         "Python validates optional neutral runner report metadata against deterministic responses",
         "Python validates unsupported construct metadata on error details and case-summary reports",
+        "Python validates collector record envelope tool names, arguments, sequence, success/error state, and error codes",
         "Python script wrapper dry-runs fixture summary and invokes replay plus manifest by default"
       ]
     }

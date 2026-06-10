@@ -23,6 +23,7 @@ def test_domain_question_neutral_runner_script_dry_run_summary() -> None:
     assert summary["feature"] == "domainQuestionNeutralRunner"
     assert summary["contract"] == "normalized-tool-arguments-v1"
     assert summary["caseCount"] >= 6
+    assert summary["collectorRecordCount"] == summary["caseCount"]
     assert summary["unsupportedCaseCount"] >= 3
     assert "pivot-time-window-mutual-exclusion-unsupported" in summary[
         "unsupportedCaseIds"

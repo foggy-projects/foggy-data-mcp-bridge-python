@@ -51,6 +51,42 @@
         "errorCount" : 0,
         "warningMarkers" : [ "timeWindow:currentQuarter" ]
       } ],
+      "collectorRecord" : {
+        "sessionId" : "domain-question-neutral-runner",
+        "callCount" : 1,
+        "allSuccess" : true,
+        "toolName" : "dataset.query_model",
+        "springToolName" : "dataset_query_model",
+        "arguments" : {
+          "model" : "FactSalesModel",
+          "mode" : "execute",
+          "payload" : {
+            "columns" : [ "salesAmount" ],
+            "groupBy" : [ "orderStatus" ],
+            "orderBy" : [ {
+              "field" : "salesAmount",
+              "order" : "desc"
+            } ],
+            "slice" : [ ],
+            "calculatedFields" : [ ],
+            "start" : 0,
+            "limit" : 10,
+            "returnTotal" : false,
+            "timeWindow" : {
+              "field" : "orderDate",
+              "preset" : "currentQuarter"
+            }
+          }
+        },
+        "result" : {
+          "status" : "ok",
+          "rowCount" : 1
+        },
+        "error" : null,
+        "success" : true,
+        "durationMs" : 0,
+        "sequence" : 0
+      },
       "forbiddenMarkers" : [ "odoo", "res_partner", "res_users", "LLM" ]
     }
   }, {
@@ -101,6 +137,42 @@
         "errorCount" : 0,
         "warningMarkers" : [ "calculatedFields:grossMargin" ]
       } ],
+      "collectorRecord" : {
+        "sessionId" : "domain-question-neutral-runner",
+        "callCount" : 1,
+        "allSuccess" : true,
+        "toolName" : "dataset.query_model",
+        "springToolName" : "dataset_query_model",
+        "arguments" : {
+          "model" : "FactSalesModel",
+          "mode" : "execute",
+          "payload" : {
+            "columns" : [ "grossMargin" ],
+            "groupBy" : [ "orderMonth" ],
+            "orderBy" : [ ],
+            "slice" : [ {
+              "field" : "orderStatus",
+              "op" : "eq",
+              "value" : "closed"
+            } ],
+            "calculatedFields" : [ {
+              "name" : "grossMargin",
+              "expression" : "salesAmount - costAmount"
+            } ],
+            "start" : 0,
+            "limit" : 20,
+            "returnTotal" : false
+          }
+        },
+        "result" : {
+          "status" : "ok",
+          "rowCount" : 1
+        },
+        "error" : null,
+        "success" : true,
+        "durationMs" : 0,
+        "sequence" : 0
+      },
       "forbiddenMarkers" : [ "odoo", "res_partner", "res_users", "LLM" ]
     }
   }, {
@@ -150,6 +222,40 @@
         "warningMarkers" : [ "deniedColumns:customerEmail" ],
         "errorCode" : "governance/denied-field"
       } ],
+      "collectorRecord" : {
+        "sessionId" : "domain-question-neutral-runner",
+        "callCount" : 1,
+        "allSuccess" : false,
+        "toolName" : "dataset.query_model",
+        "springToolName" : "dataset_query_model",
+        "arguments" : {
+          "model" : "FactSalesModel",
+          "mode" : "validate",
+          "payload" : {
+            "columns" : [ "customerEmail" ],
+            "groupBy" : [ ],
+            "orderBy" : [ ],
+            "slice" : [ ],
+            "calculatedFields" : [ ],
+            "start" : 0,
+            "limit" : 50,
+            "returnTotal" : false,
+            "deniedColumns" : [ {
+              "table" : "fact_sales",
+              "field" : "customerEmail",
+              "column" : "customer_email"
+            } ]
+          }
+        },
+        "result" : {
+          "status" : "error",
+          "errorCode" : "governance/denied-field"
+        },
+        "error" : "[NEUTRAL_RUNNER_REJECTED] governance/denied-field",
+        "success" : false,
+        "durationMs" : 0,
+        "sequence" : 0
+      },
       "forbiddenMarkers" : [ "odoo", "res_partner", "res_users", "LLM" ]
     }
   }, {
@@ -206,6 +312,45 @@
         "errorCode" : "domain-question/unsupported-construct",
         "unsupportedConstructs" : [ "pivot+timeWindow" ]
       } ],
+      "collectorRecord" : {
+        "sessionId" : "domain-question-neutral-runner",
+        "callCount" : 1,
+        "allSuccess" : false,
+        "toolName" : "dataset.query_model",
+        "springToolName" : "dataset_query_model",
+        "arguments" : {
+          "model" : "FactSalesModel",
+          "mode" : "validate",
+          "payload" : {
+            "columns" : [ ],
+            "groupBy" : [ ],
+            "orderBy" : [ ],
+            "slice" : [ ],
+            "calculatedFields" : [ ],
+            "start" : 0,
+            "limit" : 50,
+            "returnTotal" : false,
+            "timeWindow" : {
+              "field" : "orderDate",
+              "preset" : "currentQuarter"
+            },
+            "pivot" : {
+              "columns" : [ "orderMonth" ],
+              "outputFormat" : "grid",
+              "rows" : [ "orderStatus" ],
+              "metrics" : [ "salesAmount" ]
+            }
+          }
+        },
+        "result" : {
+          "status" : "error",
+          "errorCode" : "domain-question/unsupported-construct"
+        },
+        "error" : "[NEUTRAL_RUNNER_REJECTED] domain-question/unsupported-construct",
+        "success" : false,
+        "durationMs" : 0,
+        "sequence" : 0
+      },
       "forbiddenMarkers" : [ "odoo", "res_partner", "res_users", "LLM" ]
     }
   }, {
@@ -255,6 +400,38 @@
         "errorCode" : "domain-question/unsupported-construct",
         "unsupportedConstructs" : [ "CELL_AT" ]
       } ],
+      "collectorRecord" : {
+        "sessionId" : "domain-question-neutral-runner",
+        "callCount" : 1,
+        "allSuccess" : false,
+        "toolName" : "dataset.query_model",
+        "springToolName" : "dataset_query_model",
+        "arguments" : {
+          "model" : "FactSalesModel",
+          "mode" : "validate",
+          "payload" : {
+            "columns" : [ "axisRatio" ],
+            "groupBy" : [ "orderStatus" ],
+            "orderBy" : [ ],
+            "slice" : [ ],
+            "calculatedFields" : [ {
+              "name" : "axisRatio",
+              "expression" : "CELL_AT('columns', 'first')"
+            } ],
+            "start" : 0,
+            "limit" : 50,
+            "returnTotal" : false
+          }
+        },
+        "result" : {
+          "status" : "error",
+          "errorCode" : "domain-question/unsupported-construct"
+        },
+        "error" : "[NEUTRAL_RUNNER_REJECTED] domain-question/unsupported-construct",
+        "success" : false,
+        "durationMs" : 0,
+        "sequence" : 0
+      },
       "forbiddenMarkers" : [ "odoo", "res_partner", "res_users", "LLM" ]
     }
   }, {
@@ -283,8 +460,8 @@
           "limit" : 50,
           "returnTotal" : false,
           "hints" : {
-            "recommendedTool" : "dataset.compose_script",
-            "requestedConstruct" : "crossModelJoin"
+            "requestedConstruct" : "crossModelJoin",
+            "recommendedTool" : "dataset.compose_script"
           }
         }
       },
@@ -305,6 +482,39 @@
         "errorCode" : "domain-question/unsupported-construct",
         "unsupportedConstructs" : [ "crossModelJoin" ]
       } ],
+      "collectorRecord" : {
+        "sessionId" : "domain-question-neutral-runner",
+        "callCount" : 1,
+        "allSuccess" : false,
+        "toolName" : "dataset.query_model",
+        "springToolName" : "dataset_query_model",
+        "arguments" : {
+          "model" : "FactSalesModel",
+          "mode" : "validate",
+          "payload" : {
+            "columns" : [ "salesAmount" ],
+            "groupBy" : [ "customerId" ],
+            "orderBy" : [ ],
+            "slice" : [ ],
+            "calculatedFields" : [ ],
+            "start" : 0,
+            "limit" : 50,
+            "returnTotal" : false,
+            "hints" : {
+              "requestedConstruct" : "crossModelJoin",
+              "recommendedTool" : "dataset.compose_script"
+            }
+          }
+        },
+        "result" : {
+          "status" : "error",
+          "errorCode" : "domain-question/unsupported-construct"
+        },
+        "error" : "[NEUTRAL_RUNNER_REJECTED] domain-question/unsupported-construct",
+        "success" : false,
+        "durationMs" : 0,
+        "sequence" : 0
+      },
       "forbiddenMarkers" : [ "odoo", "res_partner", "res_users", "LLM" ]
     }
   } ]

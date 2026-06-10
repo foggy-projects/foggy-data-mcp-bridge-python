@@ -38,12 +38,18 @@ def summarize_fixture(path: Path) -> dict[str, Any]:
         for case in cases
         if case.get("expected", {}).get("errorCode")
     ]
+    collector_record_cases = [
+        case
+        for case in cases
+        if case.get("expected", {}).get("collectorRecord")
+    ]
     return {
         "fixture": str(path),
         "schemaVersion": snapshot.get("schemaVersion"),
         "feature": snapshot.get("feature"),
         "contract": snapshot.get("contract"),
         "caseCount": len(cases),
+        "collectorRecordCount": len(collector_record_cases),
         "errorCaseCount": len(error_cases),
         "unsupportedCaseCount": len(unsupported_cases),
         "unsupportedCaseIds": [case.get("id") for case in unsupported_cases],

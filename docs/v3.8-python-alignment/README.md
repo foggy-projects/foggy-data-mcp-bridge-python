@@ -68,6 +68,7 @@ Current P0 execution records:
 - [P0-48-domain-question-neutral-runner-script-wrapper.md](workitems/P0-48-domain-question-neutral-runner-script-wrapper.md)
 - [P0-49-compose-derived-composed-root-wrapper-parity.md](workitems/P0-49-compose-derived-composed-root-wrapper-parity.md)
 - [P0-50-compose-success-shape-strict-closure.md](workitems/P0-50-compose-success-shape-strict-closure.md)
+- [P0-51-domain-question-toolcallcollector-envelope.md](workitems/P0-51-domain-question-toolcallcollector-envelope.md)
 
 Current P1/P2 planning records:
 
@@ -103,7 +104,8 @@ Current active snapshot lanes:
   fail-closed snapshots
 - Domain/question neutral runner normalized tool-argument snapshots, warning
   markers, neutral case-summary report metadata, unsupported construct
-  fail-closed metadata, and Python script wrapper
+  fail-closed metadata, ToolCallCollector-backed record envelopes, and Python
+  script wrapper
 - Semantic scale neutral snapshots for helper literals, SQL rewriting,
   metadata, and fail-closed carrier-column validation
 - Java-style explicit HAVING aggregate alias validation, while keeping Python
@@ -114,7 +116,7 @@ Current active snapshot lanes:
 - Java MCP focused verification uses the reactor `-am` baseline to avoid stale
   local dependency artifacts
 
-Latest P0-50 status:
+Latest P0-51 status:
 
 - P0-26 extends the active MCP compose-script error snapshot lane with
   `missing-user-id-header` and `missing-namespace-header`.
@@ -211,6 +213,11 @@ Latest P0-50 status:
 - P0-50 promotes the remaining successful compose snapshot cases to
   `strictSqlShape`, so all `16` current successful compose cases now replay
   full SQL-shape metadata, including root CTE/subquery flags.
+- P0-51 adds a deterministic `ToolCallCollector`-backed `collectorRecord`
+  envelope to every neutral domain/question runner case. Python replay now
+  validates collector session/call count, tool names, normalized arguments,
+  sequence/duration, success/error state, and error codes, and the local script
+  dry-run reports collector coverage.
 - P1-1 records the remaining semantic-scale choice: namespace opt-out parity or
   live DB/result parity.
 - P2-1 records the initial Python aggregate-join design boundary before any
@@ -259,6 +266,11 @@ Latest P0-50 status:
 - Python P0-50 focused replay and manifest passed:
   `6 passed in 0.49s`; strict coverage check reported
   `success 16 strict 16 non_strict 0`.
+- Python P0-51 dry-run plus focused replay and manifest passed:
+  `collectorRecordCount 6 / caseCount 6`; `7 passed in 0.27s`; focused ruff
+  passed.
+- Python P0-51 script default run passed:
+  `6 passed in 0.15s`.
 - Python P0-48 script default run passed:
   `6 passed in 0.15s`.
 - Full Python pytest after P0-48 passed:
@@ -286,6 +298,8 @@ Latest P0-50 status:
 - Java P0-50 focused exporter passed:
   `mvn test -pl foggy-dataset-model -Dtest=JavaComposeSnapshotTest`
   across the default, MySQL, and PostgreSQL executions.
+- Java P0-51 MCP reactor exporter passed:
+  `mvn -q -pl foggy-dataset-mcp -am -Dtest=JavaDomainQuestionNeutralRunnerSnapshotTest -Dsurefire.failIfNoSpecifiedTests=false test`.
 - Python full coverage after P0-43 passed:
   `4080 passed, 232 skipped, 53 warnings in 17.97s`.
 - Python full coverage after P0-44 passed:
@@ -327,5 +341,5 @@ Latest P0-50 status:
 - Full Python pytest and Java focused Maven status are recorded in the
   P0-26/P0-27 progress docs; P0-29/P0-30/P0-31 focused evidence is recorded in
   their progress docs. P0-32/P0-33/P0-34/P0-35/P0-36/P0-39/P0-40/P0-41/P0-42
-  /P0-43/P0-44/P0-45/P0-46/P0-47/P0-48/P0-49/P0-50 evidence is recorded in
-  their progress docs.
+  /P0-43/P0-44/P0-45/P0-46/P0-47/P0-48/P0-49/P0-50/P0-51 evidence is
+  recorded in their progress docs.
