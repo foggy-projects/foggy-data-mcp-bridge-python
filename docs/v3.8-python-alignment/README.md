@@ -70,6 +70,7 @@ Current P0 execution records:
 - [P0-50-compose-success-shape-strict-closure.md](workitems/P0-50-compose-success-shape-strict-closure.md)
 - [P0-51-domain-question-toolcallcollector-envelope.md](workitems/P0-51-domain-question-toolcallcollector-envelope.md)
 - [P0-52-compose-snapshot-coverage-inventory.md](workitems/P0-52-compose-snapshot-coverage-inventory.md)
+- [P0-53-compose-mysql8-join-snapshot-expansion.md](workitems/P0-53-compose-mysql8-join-snapshot-expansion.md)
 
 Current P1/P2 planning records:
 
@@ -89,8 +90,8 @@ Current active snapshot lanes:
   and compose-level SQL Server CTE capability parity, plus exported SQL shape
   manifest replay with strict root-wrapper checks for frozen fallback cases
   and derived-over-composed root-wrapper parity; current successful compose
-  snapshots are fully strict on SQL shape and have an executable
-  dialect/plan/status coverage inventory
+  snapshots are fully strict on SQL shape, include MySQL8 join success
+  evidence, and have an executable dialect/plan/status coverage inventory
 - Compose script tool/runtime neutral snapshots, including execute-mode rows
   envelope shape and MCP host-misconfig structured error payloads
 - Governance / permission visible-model neutral snapshots, including
@@ -118,7 +119,7 @@ Current active snapshot lanes:
 - Java MCP focused verification uses the reactor `-am` baseline to avoid stale
   local dependency artifacts
 
-Latest P0-52 status:
+Latest P0-53 status:
 
 - P0-26 extends the active MCP compose-script error snapshot lane with
   `missing-user-id-header` and `missing-namespace-header`.
@@ -224,6 +225,10 @@ Latest P0-52 status:
   inventory for the Java compose snapshot dialect/plan/status matrix. It keeps
   the `16/16` strict successful SQL-shape replay guarantee active and surfaces
   missing success cells for targeted future exporter expansion.
+- P0-53 closes the first P0-52 inventory gap by adding Java-exported
+  `join-mysql8-cte` coverage. The compose inventory now reports `17/17`
+  strict successful SQL-shape replay and no longer lists `mysql8/join` as a
+  missing success cell.
 - P1-1 records the remaining semantic-scale choice: namespace opt-out parity or
   live DB/result parity.
 - P2-1 records the initial Python aggregate-join design boundary before any
