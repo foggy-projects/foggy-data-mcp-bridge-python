@@ -71,6 +71,7 @@ Current P0 execution records:
 - [P0-51-domain-question-toolcallcollector-envelope.md](workitems/P0-51-domain-question-toolcallcollector-envelope.md)
 - [P0-52-compose-snapshot-coverage-inventory.md](workitems/P0-52-compose-snapshot-coverage-inventory.md)
 - [P0-53-compose-mysql8-join-snapshot-expansion.md](workitems/P0-53-compose-mysql8-join-snapshot-expansion.md)
+- [P0-54-registry-odoo-consumer-readonly-audit.md](workitems/P0-54-registry-odoo-consumer-readonly-audit.md)
 
 Current P1/P2 planning records:
 
@@ -118,8 +119,10 @@ Current active snapshot lanes:
 - Explicit HAVING aggregate alias field-collision fail-closed boundary
 - Java MCP focused verification uses the reactor `-am` baseline to avoid stale
   local dependency artifacts
+- Registry/Odoo consumer readonly temp-dir audit for current community/pro
+  `1.1.10` bundles, without refreshing committed generated Odoo models
 
-Latest P0-53 status:
+Latest P0-54 status:
 
 - P0-26 extends the active MCP compose-script error snapshot lane with
   `missing-user-id-header` and `missing-namespace-header`.
@@ -229,6 +232,11 @@ Latest P0-53 status:
   `join-mysql8-cte` coverage. The compose inventory now reports `17/17`
   strict successful SQL-shape replay and no longer lists `mysql8/join` as a
   missing success cell.
+- P0-54 proves registry/Odoo consumer compatibility without generated model
+  refresh: community/pro `1.1.10` bundles are pulled into temp directories,
+  pass drift checks, and load through the Python model loader with namespace
+  `odoo`. The committed demo Odoo directory remains `1.1.9` lock plus drift and
+  is intentionally not refreshed in this phase.
 - P1-1 records the remaining semantic-scale choice: namespace opt-out parity or
   live DB/result parity.
 - P2-1 records the initial Python aggregate-join design boundary before any
@@ -287,6 +295,11 @@ Latest P0-53 status:
   SQL-shape replay.
 - Python P0-53 focused ruff passed:
   `.venv/bin/ruff check scripts/summarize-compose-snapshot-coverage.py tests/integration/test_compose_snapshot_coverage_script.py tests/integration/test_java_compose_snapshot_parity.py tests/integration/test_java_snapshot_parity_manifest.py`.
+- Python P0-54 focused registry/Odoo readonly audit passed:
+  `.venv/bin/python -m pytest tests/integration/test_odoo_registry_consumer_readonly.py -q`
+  with `2 passed in 1.18s`.
+- Python P0-54 focused ruff passed:
+  `.venv/bin/ruff check tests/integration/test_odoo_registry_consumer_readonly.py`.
 - Python P0-48 script default run passed:
   `6 passed in 0.15s`.
 - Full Python pytest after P0-48 passed:
@@ -360,5 +373,5 @@ Latest P0-53 status:
 - Full Python pytest and Java focused Maven status are recorded in the
   P0-26/P0-27 progress docs; P0-29/P0-30/P0-31 focused evidence is recorded in
   their progress docs. P0-32/P0-33/P0-34/P0-35/P0-36/P0-39/P0-40/P0-41/P0-42
-  /P0-43/P0-44/P0-45/P0-46/P0-47/P0-48/P0-49/P0-50/P0-51/P0-53 evidence is
-  recorded in their progress docs.
+  /P0-43/P0-44/P0-45/P0-46/P0-47/P0-48/P0-49/P0-50/P0-51/P0-53/P0-54
+  evidence is recorded in their progress docs.
