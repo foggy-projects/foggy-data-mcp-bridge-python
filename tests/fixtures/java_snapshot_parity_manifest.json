@@ -74,6 +74,7 @@
         "MySQL8 join CTE success shape",
         "MySQL 5.7 derived subquery fallback shape",
         "MySQL 5.7 top-level union success shape",
+        "MySQL 5.7 join subquery fallback shape",
         "SQLite base CTE success shape",
         "PostgreSQL join CTE success shape",
         "PostgreSQL top-level union success shape",

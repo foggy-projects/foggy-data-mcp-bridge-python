@@ -327,6 +327,47 @@
       }
     }
   }, {
+    "id" : "join-mysql57-subquery",
+    "dialect" : "mysql",
+    "plan" : {
+      "type" : "join",
+      "left" : {
+        "type" : "base",
+        "model" : "FactSalesModel",
+        "columns" : [ "orderStatus$caption", "salesAmount" ]
+      },
+      "right" : {
+        "type" : "base",
+        "model" : "FactOrderModel",
+        "columns" : [ "orderStatus$caption", "totalAmount" ]
+      },
+      "joinType" : "inner",
+      "on" : [ {
+        "left" : "left.orderStatus$caption",
+        "op" : "=",
+        "right" : "right.orderStatus$caption"
+      } ]
+    },
+    "expected" : {
+      "sqlMarkers" : [ "SELECT", "FROM (", "INNER JOIN", "salesAmount", "totalAmount" ],
+      "forbiddenSqlMarkers" : [ "WITH ", "FROM (WITH" ],
+      "params" : [ ],
+      "strictSqlShape" : true,
+      "sqlShape" : {
+        "rootUsesCte" : false,
+        "rootUsesSubquery" : true,
+        "containsFromWith" : false,
+        "containsUnion" : false,
+        "containsUnionAll" : false,
+        "containsInnerJoin" : true,
+        "containsLeftJoin" : false,
+        "containsRightJoin" : false,
+        "containsFullOuterJoin" : false,
+        "containsWhere" : false,
+        "containsOrderBy" : false
+      }
+    }
+  }, {
     "id" : "join-postgres-cte",
     "dialect" : "postgres",
     "plan" : {
