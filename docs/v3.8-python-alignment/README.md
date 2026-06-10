@@ -67,6 +67,7 @@ Current P0 execution records:
 - [P0-47-domain-question-unsupported-construct-snapshot-replay.md](workitems/P0-47-domain-question-unsupported-construct-snapshot-replay.md)
 - [P0-48-domain-question-neutral-runner-script-wrapper.md](workitems/P0-48-domain-question-neutral-runner-script-wrapper.md)
 - [P0-49-compose-derived-composed-root-wrapper-parity.md](workitems/P0-49-compose-derived-composed-root-wrapper-parity.md)
+- [P0-50-compose-success-shape-strict-closure.md](workitems/P0-50-compose-success-shape-strict-closure.md)
 
 Current P1/P2 planning records:
 
@@ -85,7 +86,8 @@ Current active snapshot lanes:
   Server embedded composed-source fallback including union-as-derived fallback
   and compose-level SQL Server CTE capability parity, plus exported SQL shape
   manifest replay with strict root-wrapper checks for frozen fallback cases
-  and derived-over-composed root-wrapper parity
+  and derived-over-composed root-wrapper parity; current successful compose
+  snapshots are fully strict on SQL shape
 - Compose script tool/runtime neutral snapshots, including execute-mode rows
   envelope shape and MCP host-misconfig structured error payloads
 - Governance / permission visible-model neutral snapshots, including
@@ -112,7 +114,7 @@ Current active snapshot lanes:
 - Java MCP focused verification uses the reactor `-am` baseline to avoid stale
   local dependency artifacts
 
-Latest P0-49 status:
+Latest P0-50 status:
 
 - P0-26 extends the active MCP compose-script error snapshot lane with
   `missing-user-id-header` and `missing-namespace-header`.
@@ -206,6 +208,9 @@ Latest P0-49 status:
   `DerivedQueryPlan(source=JoinPlan|UnionPlan)`: Python now returns terminal
   `ComposedSql` for derived-over-composed sources, matching Java, and six
   formerly non-strict compose cases now carry strict SQL-shape checks.
+- P0-50 promotes the remaining successful compose snapshot cases to
+  `strictSqlShape`, so all `16` current successful compose cases now replay
+  full SQL-shape metadata, including root CTE/subquery flags.
 - P1-1 records the remaining semantic-scale choice: namespace opt-out parity or
   live DB/result parity.
 - P2-1 records the initial Python aggregate-join design boundary before any
@@ -251,6 +256,9 @@ Latest P0-49 status:
   `2 passed in 0.50s`.
 - Python P0-49 compose compilation regression passed:
   `85 passed in 0.33s`; focused `ruff --select F` passed.
+- Python P0-50 focused replay and manifest passed:
+  `6 passed in 0.49s`; strict coverage check reported
+  `success 16 strict 16 non_strict 0`.
 - Python P0-48 script default run passed:
   `6 passed in 0.15s`.
 - Full Python pytest after P0-48 passed:
@@ -273,6 +281,9 @@ Latest P0-49 status:
   `mvn test -pl foggy-dataset-model -Dtest=JavaComposeSnapshotTest`
   across the default, MySQL, and PostgreSQL executions.
 - Java P0-49 focused exporter passed:
+  `mvn test -pl foggy-dataset-model -Dtest=JavaComposeSnapshotTest`
+  across the default, MySQL, and PostgreSQL executions.
+- Java P0-50 focused exporter passed:
   `mvn test -pl foggy-dataset-model -Dtest=JavaComposeSnapshotTest`
   across the default, MySQL, and PostgreSQL executions.
 - Python full coverage after P0-43 passed:
@@ -316,5 +327,5 @@ Latest P0-49 status:
 - Full Python pytest and Java focused Maven status are recorded in the
   P0-26/P0-27 progress docs; P0-29/P0-30/P0-31 focused evidence is recorded in
   their progress docs. P0-32/P0-33/P0-34/P0-35/P0-36/P0-39/P0-40/P0-41/P0-42
-  /P0-43/P0-44/P0-45/P0-46/P0-47/P0-48/P0-49 evidence is recorded in their
-  progress docs.
+  /P0-43/P0-44/P0-45/P0-46/P0-47/P0-48/P0-49/P0-50 evidence is recorded in
+  their progress docs.

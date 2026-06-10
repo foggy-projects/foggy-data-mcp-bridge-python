@@ -133,6 +133,7 @@
       "sqlMarkers" : [ "WITH ", "WHERE", "ORDER BY", "LIMIT" ],
       "forbiddenSqlMarkers" : [ ],
       "params" : [ "COMPLETED" ],
+      "strictSqlShape" : true,
       "sqlShape" : {
         "rootUsesCte" : true,
         "rootUsesSubquery" : false,
@@ -168,6 +169,7 @@
       "sqlMarkers" : [ "UNION ALL", "order_status" ],
       "forbiddenSqlMarkers" : [ ],
       "params" : [ ],
+      "strictSqlShape" : true,
       "sqlShape" : {
         "rootUsesCte" : false,
         "rootUsesSubquery" : false,
@@ -415,6 +417,7 @@
       "sqlMarkers" : [ "INNER JOIN", "WHERE", "ORDER BY", "salesAmount", "totalAmount" ],
       "forbiddenSqlMarkers" : [ "sales.salesAmount", "orders.totalAmount" ],
       "params" : [ 0 ],
+      "strictSqlShape" : true,
       "sqlShape" : {
         "rootUsesCte" : false,
         "rootUsesSubquery" : true,
