@@ -84,6 +84,33 @@
       }
     }
   }, {
+    "id" : "base-sqlite-cte",
+    "dialect" : "sqlite",
+    "plan" : {
+      "type" : "base",
+      "model" : "FactSalesModel",
+      "columns" : [ "orderStatus$caption", "salesAmount" ]
+    },
+    "expected" : {
+      "sqlMarkers" : [ "WITH ", "cte_0 AS", "salesAmount" ],
+      "forbiddenSqlMarkers" : [ " AS t0" ],
+      "params" : [ ],
+      "strictSqlShape" : true,
+      "sqlShape" : {
+        "rootUsesCte" : true,
+        "rootUsesSubquery" : false,
+        "containsFromWith" : false,
+        "containsUnion" : false,
+        "containsUnionAll" : false,
+        "containsInnerJoin" : false,
+        "containsLeftJoin" : false,
+        "containsRightJoin" : false,
+        "containsFullOuterJoin" : false,
+        "containsWhere" : false,
+        "containsOrderBy" : false
+      }
+    }
+  }, {
     "id" : "base-sqlserver-subquery",
     "dialect" : "sqlserver",
     "plan" : {
@@ -206,6 +233,42 @@
     "expected" : {
       "sqlMarkers" : [ "UNION ALL", "order_status" ],
       "forbiddenSqlMarkers" : [ ],
+      "params" : [ ],
+      "strictSqlShape" : true,
+      "sqlShape" : {
+        "rootUsesCte" : false,
+        "rootUsesSubquery" : false,
+        "containsFromWith" : false,
+        "containsUnion" : true,
+        "containsUnionAll" : true,
+        "containsInnerJoin" : false,
+        "containsLeftJoin" : false,
+        "containsRightJoin" : false,
+        "containsFullOuterJoin" : false,
+        "containsWhere" : false,
+        "containsOrderBy" : false
+      }
+    }
+  }, {
+    "id" : "union-all-sales-orders-mysql57",
+    "dialect" : "mysql",
+    "plan" : {
+      "type" : "union",
+      "left" : {
+        "type" : "base",
+        "model" : "FactSalesModel",
+        "columns" : [ "orderStatus$caption AS bucket", "salesAmount AS amount" ]
+      },
+      "right" : {
+        "type" : "base",
+        "model" : "FactOrderModel",
+        "columns" : [ "orderStatus$caption AS bucket", "totalAmount AS amount" ]
+      },
+      "all" : true
+    },
+    "expected" : {
+      "sqlMarkers" : [ "UNION ALL", "order_status" ],
+      "forbiddenSqlMarkers" : [ "WITH ", "FROM (WITH" ],
       "params" : [ ],
       "strictSqlShape" : true,
       "sqlShape" : {

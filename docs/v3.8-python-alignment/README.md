@@ -77,6 +77,8 @@ Current P0 execution records:
 - [P0-57-compose-sqlserver-union-snapshot-expansion.md](workitems/P0-57-compose-sqlserver-union-snapshot-expansion.md)
 - [P0-58-compose-sqlite-lane-evaluation.md](workitems/P0-58-compose-sqlite-lane-evaluation.md)
 - [P0-59-compose-mysql57-derived-snapshot-expansion.md](workitems/P0-59-compose-mysql57-derived-snapshot-expansion.md)
+- [P0-60-compose-mysql57-union-snapshot-expansion.md](workitems/P0-60-compose-mysql57-union-snapshot-expansion.md)
+- [P0-61-compose-sqlite-base-snapshot-expansion.md](workitems/P0-61-compose-sqlite-base-snapshot-expansion.md)
 
 Current P1/P2 planning records:
 
@@ -97,9 +99,9 @@ Current active snapshot lanes:
   manifest replay with strict root-wrapper checks for frozen fallback cases
   and derived-over-composed root-wrapper parity; current successful compose
   snapshots are fully strict on SQL shape, include MySQL8 join success
-  evidence, MySQL 5.7 derived fallback evidence, PostgreSQL join/union success
-  evidence, SQL Server top-level union success evidence, and have an
-  executable dialect/plan/status coverage inventory
+  evidence, MySQL 5.7 derived/union fallback evidence, PostgreSQL join/union
+  success evidence, SQL Server top-level union success evidence, SQLite base
+  CTE evidence, and have an executable dialect/plan/status coverage inventory
 - Compose script tool/runtime neutral snapshots, including execute-mode rows
   envelope shape and MCP host-misconfig structured error payloads
 - Governance / permission visible-model neutral snapshots, including
@@ -129,7 +131,7 @@ Current active snapshot lanes:
 - Registry/Odoo consumer readonly temp-dir audit for current community/pro
   `1.1.10` bundles, without refreshing committed generated Odoo models
 
-Latest P0-59 status:
+Latest P0-61 status:
 
 - P0-26 extends the active MCP compose-script error snapshot lane with
   `missing-user-id-header` and `missing-namespace-header`.
@@ -259,6 +261,13 @@ Latest P0-59 status:
   coverage. The compose inventory now reports `25` total cases and `21/21`
   strict successful SQL-shape replay. Remaining missing success cells are
   MySQL non-CTE `union/join` and SQLite `base/derived/union/join`.
+- P0-60 adds Java-exported MySQL 5.7 top-level union coverage. The compose
+  inventory reports `26` total cases and `22/22` strict successful SQL-shape
+  replay before the SQLite base expansion.
+- P0-61 opens the staged SQLite compose lane with Java-exported
+  `base-sqlite-cte` coverage. The compose inventory now reports `27` total
+  cases and `23/23` strict successful SQL-shape replay. Remaining missing
+  success cells are MySQL non-CTE `join` and SQLite `derived/union/join`.
 - P1-1 records the remaining semantic-scale choice: namespace opt-out parity or
   live DB/result parity.
 - P2-1 records the initial Python aggregate-join design boundary before any
@@ -326,6 +335,10 @@ Latest P0-59 status:
   `mvn test -P!multi-db -pl foggy-dataset-model -Dtest=JavaComposeSnapshotTest`.
 - Python P0-59 coverage inventory reported:
   `25` cases and `21/21` strict successful SQL-shape replay.
+- Java P0-60 focused exporter passed:
+  `mvn test -P!multi-db -pl foggy-dataset-model -Dtest=JavaComposeSnapshotTest`.
+- Python P0-60 coverage inventory reported:
+  `26` cases and `22/22` strict successful SQL-shape replay.
 - Python P0-48 script default run passed:
   `6 passed in 0.15s`.
 - Full Python pytest after P0-48 passed:

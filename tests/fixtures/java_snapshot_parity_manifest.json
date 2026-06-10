@@ -73,6 +73,8 @@
         "cross-dialect base CTE/subquery shape for MySQL 5.7, PostgreSQL, and SQL Server",
         "MySQL8 join CTE success shape",
         "MySQL 5.7 derived subquery fallback shape",
+        "MySQL 5.7 top-level union success shape",
+        "SQLite base CTE success shape",
         "PostgreSQL join CTE success shape",
         "PostgreSQL top-level union success shape",
         "SQL Server join subquery fallback shape",
