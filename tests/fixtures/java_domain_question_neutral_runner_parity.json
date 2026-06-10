@@ -7,12 +7,12 @@
     "id" : "sales-by-status-current-quarter",
     "question" : "sales by status this quarter",
     "context" : {
-      "namespace" : "demo",
       "principal" : {
-        "tenantId" : "demo",
         "roles" : [ "analyst" ],
-        "userId" : "snapshot-user"
-      }
+        "userId" : "snapshot-user",
+        "tenantId" : "demo"
+      },
+      "namespace" : "demo"
     },
     "expected" : {
       "toolName" : "dataset.query_model",
@@ -23,8 +23,8 @@
           "columns" : [ "salesAmount" ],
           "groupBy" : [ "orderStatus" ],
           "orderBy" : [ {
-            "order" : "desc",
-            "field" : "salesAmount"
+            "field" : "salesAmount",
+            "order" : "desc"
           } ],
           "slice" : [ ],
           "calculatedFields" : [ ],
@@ -32,8 +32,8 @@
           "limit" : 10,
           "returnTotal" : false,
           "timeWindow" : {
-            "preset" : "currentQuarter",
-            "field" : "orderDate"
+            "field" : "orderDate",
+            "preset" : "currentQuarter"
           }
         }
       },
@@ -57,12 +57,12 @@
     "id" : "gross-margin-by-month-calculated",
     "question" : "gross margin by month for closed orders",
     "context" : {
-      "namespace" : "demo",
       "principal" : {
-        "tenantId" : "demo",
         "roles" : [ "analyst" ],
-        "userId" : "snapshot-user"
-      }
+        "userId" : "snapshot-user",
+        "tenantId" : "demo"
+      },
+      "namespace" : "demo"
     },
     "expected" : {
       "toolName" : "dataset.query_model",
@@ -107,12 +107,12 @@
     "id" : "denied-customer-email-fail-closed",
     "question" : "show customer emails for recent sales",
     "context" : {
-      "namespace" : "demo",
       "principal" : {
-        "tenantId" : "demo",
         "roles" : [ "analyst" ],
-        "userId" : "snapshot-user"
-      }
+        "userId" : "snapshot-user",
+        "tenantId" : "demo"
+      },
+      "namespace" : "demo"
     },
     "expected" : {
       "toolName" : "dataset.query_model",
@@ -129,9 +129,9 @@
           "limit" : 50,
           "returnTotal" : false,
           "deniedColumns" : [ {
+            "table" : "fact_sales",
             "field" : "customerEmail",
-            "column" : "customer_email",
-            "table" : "fact_sales"
+            "column" : "customer_email"
           } ]
         }
       },
@@ -156,12 +156,12 @@
     "id" : "pivot-time-window-mutual-exclusion-unsupported",
     "question" : "pivot sales by status and also compare this quarter year over year",
     "context" : {
-      "namespace" : "demo",
       "principal" : {
-        "tenantId" : "demo",
         "roles" : [ "analyst" ],
-        "userId" : "snapshot-user"
-      }
+        "userId" : "snapshot-user",
+        "tenantId" : "demo"
+      },
+      "namespace" : "demo"
     },
     "expected" : {
       "toolName" : "dataset.query_model",
@@ -178,14 +178,14 @@
           "limit" : 50,
           "returnTotal" : false,
           "timeWindow" : {
-            "preset" : "currentQuarter",
-            "field" : "orderDate"
+            "field" : "orderDate",
+            "preset" : "currentQuarter"
           },
           "pivot" : {
             "columns" : [ "orderMonth" ],
             "outputFormat" : "grid",
-            "metrics" : [ "salesAmount" ],
-            "rows" : [ "orderStatus" ]
+            "rows" : [ "orderStatus" ],
+            "metrics" : [ "salesAmount" ]
           }
         }
       },
@@ -212,12 +212,12 @@
     "id" : "hidden-axis-function-calculated-field-unsupported",
     "question" : "show sales ratio against the first pivot column",
     "context" : {
-      "namespace" : "demo",
       "principal" : {
-        "tenantId" : "demo",
         "roles" : [ "analyst" ],
-        "userId" : "snapshot-user"
-      }
+        "userId" : "snapshot-user",
+        "tenantId" : "demo"
+      },
+      "namespace" : "demo"
     },
     "expected" : {
       "toolName" : "dataset.query_model",
@@ -261,12 +261,12 @@
     "id" : "cross-model-join-needs-compose-script-unsupported",
     "question" : "join sales with support tickets by customer",
     "context" : {
-      "namespace" : "demo",
       "principal" : {
-        "tenantId" : "demo",
         "roles" : [ "analyst" ],
-        "userId" : "snapshot-user"
-      }
+        "userId" : "snapshot-user",
+        "tenantId" : "demo"
+      },
+      "namespace" : "demo"
     },
     "expected" : {
       "toolName" : "dataset.query_model",

@@ -33,3 +33,8 @@ Status:
   presence.
 - Broader SQL golden coverage and PostgreSQL derived-over-join root-wrapper
   convergence remain separate follow-ups.
+
+Follow-up:
+
+- P0-49 closes the derived-over-composed root-wrapper convergence follow-up and
+  promotes the affected cases to strict SQL-shape replay.

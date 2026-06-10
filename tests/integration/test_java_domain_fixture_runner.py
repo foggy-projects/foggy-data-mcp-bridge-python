@@ -8,6 +8,7 @@ deterministic semantic boundary so the engine request contract is executable.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -16,10 +17,13 @@ import pytest
 from foggy.mcp_spi import SemanticQueryRequest, SemanticQueryResponse
 from foggy.mcp_spi.accessor import build_query_request
 
-SNAPSHOT_PATH = (
+DEFAULT_SNAPSHOT_PATH = (
     Path(__file__).resolve().parents[1]
     / "fixtures"
     / "java_domain_question_neutral_runner_parity.json"
+)
+SNAPSHOT_PATH = Path(
+    os.environ.get("FOGGY_DOMAIN_QUESTION_NEUTRAL_FIXTURE", DEFAULT_SNAPSHOT_PATH)
 )
 
 

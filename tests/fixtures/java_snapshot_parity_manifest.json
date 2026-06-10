@@ -299,6 +299,7 @@
         "tests/fixtures/java_domain_question_neutral_runner_parity.json"
       ],
       "pythonTests": [
+        "tests/integration/test_domain_question_neutral_runner_script.py",
         "tests/integration/test_java_domain_fixture_runner.py"
       ],
       "javaExported": [
@@ -313,7 +314,6 @@
       ],
       "plannedExtensions": [
         "deterministic ToolCallCollector-backed Java export",
-        "optional script runner wrapper",
         "Odoo packs after registry/model drift is resolved"
       ],
       "verification": [
@@ -321,7 +321,8 @@
         "Python replays normalized dataset.query_model arguments through a deterministic semantic boundary",
         "Python checks stable SQL/result/error/warning markers without LLM or Odoo models",
         "Python validates optional neutral runner report metadata against deterministic responses",
-        "Python validates unsupported construct metadata on error details and case-summary reports"
+        "Python validates unsupported construct metadata on error details and case-summary reports",
+        "Python script wrapper dry-runs fixture summary and invokes replay plus manifest by default"
       ]
     }
   ]

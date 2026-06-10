@@ -52,9 +52,7 @@ Required checks:
 
 ## Follow-Ups
 
-- Restore Java exporter execution once unrelated Java test compile drift is
-  cleared.
 - Add a deterministic `ToolCallCollector`-backed export when a non-LLM planner
   path is available.
 - Add an optional script runner wrapper after the neutral request contract is
-  stable.
+  stable. P0-48 covers the first lightweight Python wrapper.

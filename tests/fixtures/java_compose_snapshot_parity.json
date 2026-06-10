@@ -215,6 +215,7 @@
       "sqlMarkers" : [ "INNER JOIN", "salesAmount", "totalAmount", "ORDER BY" ],
       "forbiddenSqlMarkers" : [ "sales.salesAmount", "orders.totalAmount" ],
       "params" : [ ],
+      "strictSqlShape" : true,
       "sqlShape" : {
         "rootUsesCte" : false,
         "rootUsesSubquery" : true,
@@ -308,6 +309,7 @@
       "sqlMarkers" : [ "INNER JOIN", "WHERE", "ORDER BY", "salesAmount", "totalAmount" ],
       "forbiddenSqlMarkers" : [ "sales.salesAmount", "orders.totalAmount" ],
       "params" : [ 0 ],
+      "strictSqlShape" : true,
       "sqlShape" : {
         "rootUsesCte" : false,
         "rootUsesSubquery" : true,
@@ -360,6 +362,7 @@
       "sqlMarkers" : [ "INNER JOIN", "WHERE", "ORDER BY", "salesAmount", "totalAmount" ],
       "forbiddenSqlMarkers" : [ "sales.salesAmount", "orders.totalAmount" ],
       "params" : [ 0 ],
+      "strictSqlShape" : true,
       "sqlShape" : {
         "rootUsesCte" : false,
         "rootUsesSubquery" : true,
@@ -468,6 +471,7 @@
       "sqlMarkers" : [ "LEFT JOIN", "ORDER BY", "salesAmount", "totalAmount" ],
       "forbiddenSqlMarkers" : [ "sales.salesAmount", "orders.totalAmount" ],
       "params" : [ 0 ],
+      "strictSqlShape" : true,
       "sqlShape" : {
         "rootUsesCte" : false,
         "rootUsesSubquery" : true,
@@ -624,6 +628,7 @@
       "sqlMarkers" : [ "UNION ALL", "WHERE", "ORDER BY", "amount" ],
       "forbiddenSqlMarkers" : [ "combined.amount", "sales.amount", "orders.amount" ],
       "params" : [ 0 ],
+      "strictSqlShape" : true,
       "sqlShape" : {
         "rootUsesCte" : false,
         "rootUsesSubquery" : true,
@@ -686,6 +691,7 @@
       "sqlMarkers" : [ "INNER JOIN", "WHERE", "ORDER BY", "amountLeft", "amountRight" ],
       "forbiddenSqlMarkers" : [ "left.amountLeft", "right.amountRight" ],
       "params" : [ 0 ],
+      "strictSqlShape" : true,
       "sqlShape" : {
         "rootUsesCte" : false,
         "rootUsesSubquery" : true,

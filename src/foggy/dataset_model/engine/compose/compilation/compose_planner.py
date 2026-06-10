@@ -306,7 +306,7 @@ def compile_to_composed_sql(
     if state.g10_enabled:
         _run_plan_aware_permission_check(plan, bindings)
     result = _compile_any(plan, state)
-    
+
     if state.prerequisite_ctes and not dialect_supports_cte(dialect):
         raise ComposeCompileError(
             code=error_codes.RELATION_CTE_HOIST_UNSUPPORTED,
@@ -316,10 +316,10 @@ def compile_to_composed_sql(
                 f"multi-stage CTE hoisting for window functions or calculations."
             ),
         )
-        
+
     if isinstance(result, ComposedSql):
         return _prepend_prerequisite_ctes(result, state.prerequisite_ctes)
-    
+
     # Top-level CteUnit (base / derived) — wrap for dialect-consistent output.
     # When prerequisite CTEs are present (from CTE-wrapped window CFs),
     # the root unit is the LAST in the chain (the outer window stage),
@@ -350,22 +350,22 @@ def _prepend_prerequisite_ctes(composed: ComposedSql, prereqs: List[CteUnit]) ->
     """Prepend hoisted prerequisite CTEs to an already-composed SQL."""
     if not prereqs:
         return composed
-        
+
     cte_parts = []
     all_params = []
     for unit in prereqs:
         cte_parts.append(f"{unit.alias} AS (\n{unit.sql}\n)")
         all_params.extend(unit.params)
-        
+
     with_block = "WITH " + ",\n".join(cte_parts)
-    
+
     sql = composed.sql
     if sql.upper().startswith("WITH "):
         sql = sql[4:].lstrip()
         final_sql = f"{with_block},\n{sql}"
     else:
         final_sql = f"{with_block}\n{sql}"
-        
+
     return ComposedSql(sql=final_sql, params=all_params + composed.params)
 
 
@@ -420,7 +420,10 @@ def _compile_any(plan: QueryPlan, state: _CompileState) -> Any:
         if isinstance(plan, BaseModelPlan):
             unit = _compile_base(plan, state)
         elif isinstance(plan, DerivedQueryPlan):
-            unit = _compile_derived(plan, state)
+            derived_result = _compile_derived(plan, state)
+            if isinstance(derived_result, ComposedSql):
+                return derived_result
+            unit = derived_result
         else:
             raise ComposeCompileError(
                 code=error_codes.UNSUPPORTED_PLAN_SHAPE,
@@ -584,7 +587,10 @@ def _collect_plan_bindings(
         _collect_plan_bindings(plan.right, bindings, plan_ctx, visited)
 
 
-def _compile_derived(plan: DerivedQueryPlan, state: _CompileState) -> CteUnit:
+def _compile_derived(
+    plan: DerivedQueryPlan,
+    state: _CompileState,
+) -> CteUnit | ComposedSql:
     """Lower ``DerivedQueryPlan`` via string-template nesting.
 
     Emits ``SELECT <cols> FROM (<source_sql>) AS <alias> WHERE <slice>
@@ -602,15 +608,11 @@ def _compile_derived(plan: DerivedQueryPlan, state: _CompileState) -> CteUnit:
         inner = _compile_any(plan.source, state)
     finally:
         state.exit_embedded_composed()
-    if isinstance(inner, ComposedSql):
-        # Union source → synthesise a CteUnit wrapper so the outer
-        # SELECT has a stable inner alias to embed under.
-        inner = CteUnit(
-            alias=state.next_alias(),
-            sql=inner.sql,
-            params=list(inner.params or []),
-            select_columns=None,
-        )
+    inner_was_composed = isinstance(inner, ComposedSql)
+    if inner_was_composed:
+        # Join/union sources are already self-contained SQL. Wrap them only
+        # long enough to render this derived SELECT, then return terminal SQL.
+        inner = _wrap_composed_as_unit(inner, state)
     assert isinstance(inner, CteUnit)
     source_scope = _source_column_scope_for_derived(plan.source, inner)
     _validate_derived_slice_not_same_stage_alias(plan, source_scope)
@@ -624,6 +626,11 @@ def _compile_derived(plan: DerivedQueryPlan, state: _CompileState) -> CteUnit:
         source_scope=source_scope,
         state=state,
     )
+    if inner_was_composed:
+        return ComposedSql(
+            sql=outer_sql,
+            params=list(inner.params) + list(outer_params),
+        )
     derived_alias = state.next_alias()
     _register_plan_alias(state, plan, derived_alias)
     return CteUnit(

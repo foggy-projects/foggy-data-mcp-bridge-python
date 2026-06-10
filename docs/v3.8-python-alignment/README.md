@@ -64,6 +64,9 @@ Current P0 execution records:
 - [P0-44-compose-sqlserver-union-derived-fallback-snapshot-replay.md](workitems/P0-44-compose-sqlserver-union-derived-fallback-snapshot-replay.md)
 - [P0-45-compose-sqlserver-cte-capability-parity.md](workitems/P0-45-compose-sqlserver-cte-capability-parity.md)
 - [P0-46-compose-sql-shape-manifest.md](workitems/P0-46-compose-sql-shape-manifest.md)
+- [P0-47-domain-question-unsupported-construct-snapshot-replay.md](workitems/P0-47-domain-question-unsupported-construct-snapshot-replay.md)
+- [P0-48-domain-question-neutral-runner-script-wrapper.md](workitems/P0-48-domain-question-neutral-runner-script-wrapper.md)
+- [P0-49-compose-derived-composed-root-wrapper-parity.md](workitems/P0-49-compose-derived-composed-root-wrapper-parity.md)
 
 Current P1/P2 planning records:
 
@@ -82,6 +85,7 @@ Current active snapshot lanes:
   Server embedded composed-source fallback including union-as-derived fallback
   and compose-level SQL Server CTE capability parity, plus exported SQL shape
   manifest replay with strict root-wrapper checks for frozen fallback cases
+  and derived-over-composed root-wrapper parity
 - Compose script tool/runtime neutral snapshots, including execute-mode rows
   envelope shape and MCP host-misconfig structured error payloads
 - Governance / permission visible-model neutral snapshots, including
@@ -96,7 +100,8 @@ Current active snapshot lanes:
 - Pivot domain transport large-domain threshold and SQLite bind-limit
   fail-closed snapshots
 - Domain/question neutral runner normalized tool-argument snapshots, warning
-  markers, and neutral case-summary report metadata
+  markers, neutral case-summary report metadata, unsupported construct
+  fail-closed metadata, and Python script wrapper
 - Semantic scale neutral snapshots for helper literals, SQL rewriting,
   metadata, and fail-closed carrier-column validation
 - Java-style explicit HAVING aggregate alias validation, while keeping Python
@@ -107,7 +112,7 @@ Current active snapshot lanes:
 - Java MCP focused verification uses the reactor `-am` baseline to avoid stale
   local dependency artifacts
 
-Latest P0-46 status:
+Latest P0-49 status:
 
 - P0-26 extends the active MCP compose-script error snapshot lane with
   `missing-user-id-header` and `missing-namespace-header`.
@@ -189,6 +194,18 @@ Latest P0-46 status:
   validates stable join/union/where/order/fallback structure for every
   successful compose snapshot and validates root CTE/subquery wrapping for
   explicit strict cases.
+- P0-47 expands the neutral domain/question runner fixture with unsupported
+  construct cases for pivot+timeWindow, hidden axis functions, and cross-model
+  join intent, including error-detail and case-summary report metadata replay.
+- P0-48 adds `scripts/run-domain-question-neutral-runner.py` as the local
+  entrypoint for the neutral domain/question runner lane. It supports dry-run
+  fixture summaries, fixture override through
+  `FOGGY_DOMAIN_QUESTION_NEUTRAL_FIXTURE`, and default pytest replay plus
+  manifest validation.
+- P0-49 closes the P0-46 root-wrapper follow-up for
+  `DerivedQueryPlan(source=JoinPlan|UnionPlan)`: Python now returns terminal
+  `ComposedSql` for derived-over-composed sources, matching Java, and six
+  formerly non-strict compose cases now carry strict SQL-shape checks.
 - P1-1 records the remaining semantic-scale choice: namespace opt-out parity or
   live DB/result parity.
 - P2-1 records the initial Python aggregate-join design boundary before any
@@ -226,6 +243,18 @@ Latest P0-46 status:
   `275 passed in 0.68s`.
 - Python P0-46 focused compose replay and manifest passed:
   `6 passed in 0.49s`.
+- Python P0-47 focused replay and manifest passed:
+  `6 passed in 0.17s`.
+- Python P0-48 script dry-run plus focused replay and manifest passed:
+  `7 passed in 0.33s`.
+- Python P0-49 focused compose replay passed:
+  `2 passed in 0.50s`.
+- Python P0-49 compose compilation regression passed:
+  `85 passed in 0.33s`; focused `ruff --select F` passed.
+- Python P0-48 script default run passed:
+  `6 passed in 0.15s`.
+- Full Python pytest after P0-48 passed:
+  `4083 passed, 232 skipped, 53 warnings in 17.66s`.
 - Java P0-42 focused exporter passed:
   `mvn test -P!multi-db -pl foggy-dataset-model -Dtest=JavaComposeSnapshotTest,JoinCompileTest`
   with `22` tests passed.
@@ -238,7 +267,12 @@ Latest P0-46 status:
 - Java P0-45 focused exporter passed:
   `mvn test -pl foggy-dataset-model -Dtest=JavaComposeSnapshotTest`
   across the default, MySQL, and PostgreSQL executions.
+- Java P0-47 MCP reactor exporter passed:
+  `mvn -q -pl foggy-dataset-mcp -am -Dtest=JavaDomainQuestionNeutralRunnerSnapshotTest -Dsurefire.failIfNoSpecifiedTests=false test`.
 - Java P0-46 focused exporter passed:
+  `mvn test -pl foggy-dataset-model -Dtest=JavaComposeSnapshotTest`
+  across the default, MySQL, and PostgreSQL executions.
+- Java P0-49 focused exporter passed:
   `mvn test -pl foggy-dataset-model -Dtest=JavaComposeSnapshotTest`
   across the default, MySQL, and PostgreSQL executions.
 - Python full coverage after P0-43 passed:
@@ -282,4 +316,5 @@ Latest P0-46 status:
 - Full Python pytest and Java focused Maven status are recorded in the
   P0-26/P0-27 progress docs; P0-29/P0-30/P0-31 focused evidence is recorded in
   their progress docs. P0-32/P0-33/P0-34/P0-35/P0-36/P0-39/P0-40/P0-41/P0-42
-  /P0-43/P0-44/P0-45/P0-46 evidence is recorded in their progress docs.
+  /P0-43/P0-44/P0-45/P0-46/P0-47/P0-48/P0-49 evidence is recorded in their
+  progress docs.
