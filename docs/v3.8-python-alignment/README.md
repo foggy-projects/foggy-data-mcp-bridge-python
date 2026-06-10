@@ -69,6 +69,7 @@ Current P0 execution records:
 - [P0-49-compose-derived-composed-root-wrapper-parity.md](workitems/P0-49-compose-derived-composed-root-wrapper-parity.md)
 - [P0-50-compose-success-shape-strict-closure.md](workitems/P0-50-compose-success-shape-strict-closure.md)
 - [P0-51-domain-question-toolcallcollector-envelope.md](workitems/P0-51-domain-question-toolcallcollector-envelope.md)
+- [P0-52-compose-snapshot-coverage-inventory.md](workitems/P0-52-compose-snapshot-coverage-inventory.md)
 
 Current P1/P2 planning records:
 
@@ -88,7 +89,8 @@ Current active snapshot lanes:
   and compose-level SQL Server CTE capability parity, plus exported SQL shape
   manifest replay with strict root-wrapper checks for frozen fallback cases
   and derived-over-composed root-wrapper parity; current successful compose
-  snapshots are fully strict on SQL shape
+  snapshots are fully strict on SQL shape and have an executable
+  dialect/plan/status coverage inventory
 - Compose script tool/runtime neutral snapshots, including execute-mode rows
   envelope shape and MCP host-misconfig structured error payloads
 - Governance / permission visible-model neutral snapshots, including
@@ -116,7 +118,7 @@ Current active snapshot lanes:
 - Java MCP focused verification uses the reactor `-am` baseline to avoid stale
   local dependency artifacts
 
-Latest P0-51 status:
+Latest P0-52 status:
 
 - P0-26 extends the active MCP compose-script error snapshot lane with
   `missing-user-id-header` and `missing-namespace-header`.
@@ -218,6 +220,10 @@ Latest P0-51 status:
   validates collector session/call count, tool names, normalized arguments,
   sequence/duration, success/error state, and error codes, and the local script
   dry-run reports collector coverage.
+- P0-52 adds `scripts/summarize-compose-snapshot-coverage.py` as an executable
+  inventory for the Java compose snapshot dialect/plan/status matrix. It keeps
+  the `16/16` strict successful SQL-shape replay guarantee active and surfaces
+  missing success cells for targeted future exporter expansion.
 - P1-1 records the remaining semantic-scale choice: namespace opt-out parity or
   live DB/result parity.
 - P2-1 records the initial Python aggregate-join design boundary before any

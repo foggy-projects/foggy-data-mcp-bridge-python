@@ -59,7 +59,8 @@
         "tests/fixtures/java_compose_snapshot_parity.json"
       ],
       "pythonTests": [
-        "tests/integration/test_java_compose_snapshot_parity.py"
+        "tests/integration/test_java_compose_snapshot_parity.py",
+        "tests/integration/test_compose_snapshot_coverage_script.py"
       ],
       "javaExported": [
         "base/derived/union/join SQL and params",
@@ -76,7 +77,8 @@
       ],
       "verification": [
         "Python compiles JSON plans through compile_plan_to_sql",
-        "SQL markers, forbidden markers, params, and expected error codes are checked"
+        "SQL markers, forbidden markers, params, and expected error codes are checked",
+        "Python summarizes dialect/plan/status coverage and requires every successful case to remain strict on SQL shape"
       ]
     },
     {
