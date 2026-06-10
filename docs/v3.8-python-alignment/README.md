@@ -282,6 +282,11 @@ Latest P0-53 status:
   passed.
 - Python P0-51 script default run passed:
   `6 passed in 0.15s`.
+- Python P0-53 focused compose replay, coverage inventory, and manifest passed:
+  `7 passed in 0.66s`; coverage inventory reported `17/17` strict successful
+  SQL-shape replay.
+- Python P0-53 focused ruff passed:
+  `.venv/bin/ruff check scripts/summarize-compose-snapshot-coverage.py tests/integration/test_compose_snapshot_coverage_script.py tests/integration/test_java_compose_snapshot_parity.py tests/integration/test_java_snapshot_parity_manifest.py`.
 - Python P0-48 script default run passed:
   `6 passed in 0.15s`.
 - Full Python pytest after P0-48 passed:
@@ -311,6 +316,9 @@ Latest P0-53 status:
   across the default, MySQL, and PostgreSQL executions.
 - Java P0-51 MCP reactor exporter passed:
   `mvn -q -pl foggy-dataset-mcp -am -Dtest=JavaDomainQuestionNeutralRunnerSnapshotTest -Dsurefire.failIfNoSpecifiedTests=false test`.
+- Java P0-53 focused exporter passed with SQLite-only profile:
+  `mvn test -P!multi-db -pl foggy-dataset-model -Dtest=JavaComposeSnapshotTest`
+  with `1` test passed.
 - Python full coverage after P0-43 passed:
   `4080 passed, 232 skipped, 53 warnings in 17.97s`.
 - Python full coverage after P0-44 passed:
@@ -352,5 +360,5 @@ Latest P0-53 status:
 - Full Python pytest and Java focused Maven status are recorded in the
   P0-26/P0-27 progress docs; P0-29/P0-30/P0-31 focused evidence is recorded in
   their progress docs. P0-32/P0-33/P0-34/P0-35/P0-36/P0-39/P0-40/P0-41/P0-42
-  /P0-43/P0-44/P0-45/P0-46/P0-47/P0-48/P0-49/P0-50/P0-51 evidence is
+  /P0-43/P0-44/P0-45/P0-46/P0-47/P0-48/P0-49/P0-50/P0-51/P0-53 evidence is
   recorded in their progress docs.

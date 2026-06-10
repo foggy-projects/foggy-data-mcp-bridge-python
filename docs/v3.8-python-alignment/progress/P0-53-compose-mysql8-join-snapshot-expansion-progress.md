@@ -15,15 +15,21 @@ Changes:
 Evidence:
 
 - Java exporter passed:
-  `mvn test -pl foggy-dataset-model -Dtest=JavaComposeSnapshotTest`.
+  `mvn test -P!multi-db -pl foggy-dataset-model -Dtest=JavaComposeSnapshotTest`
+  with `1` test passed.
 - Coverage inventory reported `caseCount 21`, `successCaseCount 17`,
   `strictSuccessCaseCount 17`, and `successStrictCoverage 17/17`.
 - Focused Python replay and manifest passed:
   `.venv/bin/python -m pytest tests/integration/test_compose_snapshot_coverage_script.py tests/integration/test_java_compose_snapshot_parity.py tests/integration/test_java_snapshot_parity_manifest.py -q`
-  with `7 passed in 0.88s`.
+  with `7 passed in 0.66s`.
 - Ruff passed:
   `.venv/bin/ruff check scripts/summarize-compose-snapshot-coverage.py tests/integration/test_compose_snapshot_coverage_script.py tests/integration/test_java_compose_snapshot_parity.py tests/integration/test_java_snapshot_parity_manifest.py`.
 - `git diff --check` passed in both Java and Python worktrees.
+- Note: the unprofiled Java command
+  `mvn test -pl foggy-dataset-model -Dtest=JavaComposeSnapshotTest` failed
+  before executing tests with Surefire `ClassNotFoundException` while creating
+  `JavaComposeSnapshotTest`. The project-stable `-P!multi-db` focused command
+  above passed and is the recorded exporter evidence.
 
 Follow-up:
 
