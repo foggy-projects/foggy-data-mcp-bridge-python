@@ -152,5 +152,160 @@
       } ],
       "forbiddenMarkers" : [ "odoo", "res_partner", "res_users", "LLM" ]
     }
+  }, {
+    "id" : "pivot-time-window-mutual-exclusion-unsupported",
+    "question" : "pivot sales by status and also compare this quarter year over year",
+    "context" : {
+      "namespace" : "demo",
+      "principal" : {
+        "tenantId" : "demo",
+        "roles" : [ "analyst" ],
+        "userId" : "snapshot-user"
+      }
+    },
+    "expected" : {
+      "toolName" : "dataset.query_model",
+      "toolArguments" : {
+        "model" : "FactSalesModel",
+        "mode" : "validate",
+        "payload" : {
+          "columns" : [ ],
+          "groupBy" : [ ],
+          "orderBy" : [ ],
+          "slice" : [ ],
+          "calculatedFields" : [ ],
+          "start" : 0,
+          "limit" : 50,
+          "returnTotal" : false,
+          "timeWindow" : {
+            "preset" : "currentQuarter",
+            "field" : "orderDate"
+          },
+          "pivot" : {
+            "columns" : [ "orderMonth" ],
+            "outputFormat" : "grid",
+            "metrics" : [ "salesAmount" ],
+            "rows" : [ "orderStatus" ]
+          }
+        }
+      },
+      "sqlMarkers" : [ ],
+      "resultMarkers" : [ ],
+      "warnings" : [ "unsupported:pivot+timeWindow" ],
+      "errorCode" : "domain-question/unsupported-construct",
+      "unsupportedConstructs" : [ "pivot+timeWindow" ],
+      "reports" : [ {
+        "reportType" : "neutral-runner-case-summary",
+        "toolName" : "dataset.query_model",
+        "model" : "FactSalesModel",
+        "mode" : "validate",
+        "status" : "error",
+        "warningCount" : 1,
+        "errorCount" : 1,
+        "warningMarkers" : [ "unsupported:pivot+timeWindow" ],
+        "errorCode" : "domain-question/unsupported-construct",
+        "unsupportedConstructs" : [ "pivot+timeWindow" ]
+      } ],
+      "forbiddenMarkers" : [ "odoo", "res_partner", "res_users", "LLM" ]
+    }
+  }, {
+    "id" : "hidden-axis-function-calculated-field-unsupported",
+    "question" : "show sales ratio against the first pivot column",
+    "context" : {
+      "namespace" : "demo",
+      "principal" : {
+        "tenantId" : "demo",
+        "roles" : [ "analyst" ],
+        "userId" : "snapshot-user"
+      }
+    },
+    "expected" : {
+      "toolName" : "dataset.query_model",
+      "toolArguments" : {
+        "model" : "FactSalesModel",
+        "mode" : "validate",
+        "payload" : {
+          "columns" : [ "axisRatio" ],
+          "groupBy" : [ "orderStatus" ],
+          "orderBy" : [ ],
+          "slice" : [ ],
+          "calculatedFields" : [ {
+            "name" : "axisRatio",
+            "expression" : "CELL_AT('columns', 'first')"
+          } ],
+          "start" : 0,
+          "limit" : 50,
+          "returnTotal" : false
+        }
+      },
+      "sqlMarkers" : [ ],
+      "resultMarkers" : [ ],
+      "warnings" : [ "unsupported:hidden-axis-function" ],
+      "errorCode" : "domain-question/unsupported-construct",
+      "unsupportedConstructs" : [ "CELL_AT" ],
+      "reports" : [ {
+        "reportType" : "neutral-runner-case-summary",
+        "toolName" : "dataset.query_model",
+        "model" : "FactSalesModel",
+        "mode" : "validate",
+        "status" : "error",
+        "warningCount" : 1,
+        "errorCount" : 1,
+        "warningMarkers" : [ "unsupported:hidden-axis-function" ],
+        "errorCode" : "domain-question/unsupported-construct",
+        "unsupportedConstructs" : [ "CELL_AT" ]
+      } ],
+      "forbiddenMarkers" : [ "odoo", "res_partner", "res_users", "LLM" ]
+    }
+  }, {
+    "id" : "cross-model-join-needs-compose-script-unsupported",
+    "question" : "join sales with support tickets by customer",
+    "context" : {
+      "namespace" : "demo",
+      "principal" : {
+        "tenantId" : "demo",
+        "roles" : [ "analyst" ],
+        "userId" : "snapshot-user"
+      }
+    },
+    "expected" : {
+      "toolName" : "dataset.query_model",
+      "toolArguments" : {
+        "model" : "FactSalesModel",
+        "mode" : "validate",
+        "payload" : {
+          "columns" : [ "salesAmount" ],
+          "groupBy" : [ "customerId" ],
+          "orderBy" : [ ],
+          "slice" : [ ],
+          "calculatedFields" : [ ],
+          "start" : 0,
+          "limit" : 50,
+          "returnTotal" : false,
+          "hints" : {
+            "recommendedTool" : "dataset.compose_script",
+            "requestedConstruct" : "crossModelJoin"
+          }
+        }
+      },
+      "sqlMarkers" : [ ],
+      "resultMarkers" : [ ],
+      "warnings" : [ "unsupported:cross-model-join" ],
+      "errorCode" : "domain-question/unsupported-construct",
+      "unsupportedConstructs" : [ "crossModelJoin" ],
+      "reports" : [ {
+        "reportType" : "neutral-runner-case-summary",
+        "toolName" : "dataset.query_model",
+        "model" : "FactSalesModel",
+        "mode" : "validate",
+        "status" : "error",
+        "warningCount" : 1,
+        "errorCount" : 1,
+        "warningMarkers" : [ "unsupported:cross-model-join" ],
+        "errorCode" : "domain-question/unsupported-construct",
+        "unsupportedConstructs" : [ "crossModelJoin" ]
+      } ],
+      "forbiddenMarkers" : [ "odoo", "res_partner", "res_users", "LLM" ]
+    }
   } ]
 }

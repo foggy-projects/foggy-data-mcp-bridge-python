@@ -75,6 +75,7 @@ def _assert_case_replays(
         assert response.error is not None
         assert response.error_detail is not None
         assert response.error_detail["code"] == error_code
+        _assert_unsupported_constructs(expected, response)
         for marker in expected.get("warnings", []):
             assert marker in (response.warnings or [])
         _assert_reports_metadata(expected, response)
@@ -116,6 +117,14 @@ def _assert_payload_round_trips(
     assert request.limit == payload.get("limit")
     assert request.return_total is payload.get("returnTotal", False)
     assert request.time_window == payload.get("timeWindow")
+    assert request.hints == payload.get("hints")
+    if "pivot" in payload:
+        assert request.pivot is not None
+        pivot = request.pivot.model_dump(by_alias=True, exclude_none=True)
+        assert pivot["rows"] == payload["pivot"].get("rows", [])
+        assert pivot["columns"] == payload["pivot"].get("columns", [])
+        assert pivot["metrics"] == payload["pivot"].get("metrics", [])
+        assert pivot["outputFormat"] == payload["pivot"].get("outputFormat", "tree")
     if "deniedColumns" in payload:
         assert request.denied_columns is not None
         assert [
@@ -129,6 +138,18 @@ def _assert_payload_round_trips(
             }
             for item in payload["deniedColumns"]
         ]
+
+
+def _assert_unsupported_constructs(
+    expected: dict[str, Any],
+    response: SemanticQueryResponse,
+) -> None:
+    unsupported = expected.get("unsupportedConstructs")
+    if unsupported is None:
+        return
+
+    assert response.error_detail is not None
+    assert response.error_detail.get("unsupportedConstructs") == unsupported
 
 
 def _assert_forbidden_markers_absent(
@@ -163,6 +184,10 @@ def _assert_reports_metadata(
     assert report["warningCount"] == len(warnings)
     assert report["errorCount"] == (1 if error_code else 0)
     assert report.get("warningMarkers", []) == expected.get("warnings", [])
+    if "unsupportedConstructs" in expected:
+        assert report["unsupportedConstructs"] == expected["unsupportedConstructs"]
+    else:
+        assert "unsupportedConstructs" not in report
     if error_code:
         assert report["errorCode"] == error_code
         assert response.error is not None
@@ -191,6 +216,9 @@ class _NeutralSemanticBoundary:
                 error_detail={
                     "code": expected["errorCode"],
                     "phase": "permission-resolve",
+                    "unsupportedConstructs": list(
+                        expected.get("unsupportedConstructs", [])
+                    ),
                 },
             )
 
