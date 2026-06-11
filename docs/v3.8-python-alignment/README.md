@@ -92,6 +92,7 @@ Current P0 execution records:
 - [P0-72-querymodel-aggregate-join-python-gap-audit.md](workitems/P0-72-querymodel-aggregate-join-python-gap-audit.md)
 - [P0-73-querymodel-aggregate-join-neutral-snapshot-contract.md](workitems/P0-73-querymodel-aggregate-join-neutral-snapshot-contract.md)
 - [P0-74-querymodel-aggregate-join-python-replay-skeleton.md](workitems/P0-74-querymodel-aggregate-join-python-replay-skeleton.md)
+- [P0-75-querymodel-aggregate-join-java-snapshot-exporter.md](workitems/P0-75-querymodel-aggregate-join-java-snapshot-exporter.md)
 
 Current P1/P2 planning records:
 
@@ -155,9 +156,10 @@ Current active snapshot lanes:
   `1.1.10` bundles, without refreshing committed generated Odoo models
 - QueryModel aggregate join audit and planned snapshot lane, with Java 9.2
   capability, Python landing points, required neutral export contract, manifest
-  replay skeleton, and loader fail-closed guard before implementation
+  replay skeleton, Java snapshot exporter, and loader fail-closed guard before
+  implementation
 
-Latest P0-74 / P1-2 status:
+Latest P0-75 / P1-2 status:
 
 - P0-26 extends the active MCP compose-script error snapshot lane with
   `missing-user-id-header` and `missing-namespace-header`.
@@ -343,6 +345,10 @@ Latest P0-74 / P1-2 status:
 - P0-74 adds the Python contract replay skeleton and makes
   `queryModelAggregateJoin` part of the always-on manifest feature matrix while
   keeping production aggregate-join SQL unimplemented.
+- P0-75 adds the Java QueryModel aggregate join neutral snapshot exporter. It
+  writes `target/parity/_querymodel_aggregate_join_snapshot.json` with the 10
+  contract cases from P0-73, giving Python a concrete replay source while
+  production SQL lowering remains unimplemented.
 - P1-2 adds the first bounded engine guard: Python now recognizes explicit
   aggregate join declarations and Java-style `leftJoinAggregate(...)` DSL
   sentinels, then fails closed with `QUERYMODEL_AGGREGATE_JOIN_UNSUPPORTED`

@@ -87,5 +87,13 @@ def test_manifest_tracks_aggregate_join_as_planned_lane() -> None:
     assert entry["contractFixture"] == (
         "tests/fixtures/java_querymodel_aggregate_join_snapshot_contract.json"
     )
+    assert entry["javaExporter"] == (
+        "foggy-dataset-model/src/test/java/com/foggyframework/dataset/db/model/parity/"
+        "JavaQueryModelAggregateJoinSnapshotTest.java"
+    )
+    assert entry["javaExporterStatus"] == "ready"
+    assert entry["javaSnapshotOutput"] == (
+        "foggy-dataset-model/target/parity/_querymodel_aggregate_join_snapshot.json"
+    )
     assert entry["javaExportNeeded"]
     assert entry["plannedPythonTests"]
