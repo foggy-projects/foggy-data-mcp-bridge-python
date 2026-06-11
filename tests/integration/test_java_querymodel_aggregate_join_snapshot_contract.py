@@ -1,4 +1,4 @@
-"""Validate the planned Java QueryModel aggregate-join snapshot contract."""
+"""Validate the Java QueryModel aggregate-join snapshot contract lane."""
 
 from __future__ import annotations
 
@@ -74,7 +74,7 @@ def test_contract_pins_diagnostics_and_metadata_lineage() -> None:
     }.issubset(set(contract["metadataLineageRequiredKeys"]))
 
 
-def test_manifest_tracks_aggregate_join_as_planned_lane() -> None:
+def test_manifest_tracks_aggregate_join_as_active_snapshot_lane() -> None:
     manifest = _load_json(MANIFEST_PATH)
     entries = {
         entry["id"]: entry
@@ -83,7 +83,7 @@ def test_manifest_tracks_aggregate_join_as_planned_lane() -> None:
     entry = entries["querymodel-aggregate-join-neutral-snapshots"]
 
     assert entry["feature"] == "queryModelAggregateJoin"
-    assert entry["status"] == "planned"
+    assert entry["status"] == "active"
     assert entry["contractFixture"] == (
         "tests/fixtures/java_querymodel_aggregate_join_snapshot_contract.json"
     )
@@ -95,5 +95,13 @@ def test_manifest_tracks_aggregate_join_as_planned_lane() -> None:
     assert entry["javaSnapshotOutput"] == (
         "foggy-dataset-model/target/parity/_querymodel_aggregate_join_snapshot.json"
     )
-    assert entry["javaExportNeeded"]
-    assert entry["plannedPythonTests"]
+    assert entry["pythonFixtures"] == [
+        "tests/fixtures/java_querymodel_aggregate_join_snapshot_contract.json",
+        "tests/fixtures/java_querymodel_aggregate_join_snapshot_parity.json",
+    ]
+    assert entry["pythonTests"] == [
+        "tests/integration/test_java_querymodel_aggregate_join_snapshot_contract.py",
+        "tests/integration/test_java_querymodel_aggregate_join_snapshot_parity.py",
+    ]
+    assert entry["javaExported"]
+    assert entry["plannedExtensions"]

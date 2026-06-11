@@ -1,0 +1,442 @@
+{
+    "schemaVersion": 1,
+    "feature": "queryModelAggregateJoin",
+    "source": "JavaQueryModelAggregateJoinSnapshotTest",
+    "contractVersion": "querymodel-aggregate-join-1",
+    "generatedAt": "2026-06-11T16:27:20",
+    "dialect": "sqlite",
+    "cases": [
+        {
+            "id": "aggregate-join-left-measure-not-multiplied",
+            "type": "result",
+            "model": "OrderSalesAggregateJoinQueryModel",
+            "request": {
+                "queryModel": "OrderSalesAggregateJoinQueryModel",
+                "columns": [
+                    "orderId",
+                    "amount",
+                    "salesAggAmount",
+                    "salesLineCount"
+                ],
+                "slice": [
+                    {
+                        "field": "orderId",
+                        "op": "=",
+                        "value": "ORD20240101000001"
+                    }
+                ]
+            },
+            "expected": {
+                "rows": [
+                    {
+                        "orderId": "ORD20240101000001",
+                        "amount": 10998.0,
+                        "salesAggAmount": 9898.2,
+                        "salesLineCount": 2
+                    }
+                ],
+                "nativeOrderAmount": 10998.0,
+                "nativeSalesAmount": 9898.2,
+                "nativeLineCount": 2,
+                "leftMeasureNonMultiplicationField": "amount",
+                "aggregateOutputFields": [
+                    "salesAggAmount",
+                    "salesLineCount"
+                ],
+                "params": [
+                    "COMPLETED",
+                    "ORD20240101000001",
+                    "ORD20240101000001"
+                ],
+                "sqlMarkers": [
+                    "left join",
+                    "(select",
+                    "sum(",
+                    "count(*)",
+                    "group by"
+                ]
+            }
+        },
+        {
+            "id": "aggregate-join-sql-shape-sqlite",
+            "type": "sql",
+            "model": "OrderSalesAggregateJoinQueryModel",
+            "request": {
+                "queryModel": "OrderSalesAggregateJoinQueryModel",
+                "columns": [
+                    "orderId",
+                    "amount",
+                    "salesAggAmount",
+                    "salesLineCount"
+                ],
+                "slice": []
+            },
+            "expected": {
+                "sql": "select\tt1.order_id \"orderId\",\tt1.total_amount \"amount\",\tt2.salesAggAmount \"salesAggAmount\",\tt2.salesLineCount \"salesLineCount\"\tfrom fact_order t1\t left join (select agg_src.order_id orderId, sum(agg_src.sales_amount) salesAggAmount, count(*) salesLineCount from fact_sales agg_src where agg_src.order_status = ? group by agg_src.order_id) t2  on t1.order_id = t2.orderId\t",
+                "normalizedSql": "select t1.order_id \"orderid\", t1.total_amount \"amount\", t2.salesaggamount \"salesaggamount\", t2.saleslinecount \"saleslinecount\" from fact_order t1 left join (select agg_src.order_id orderid, sum(agg_src.sales_amount) salesaggamount, count(*) saleslinecount from fact_sales agg_src where agg_src.order_status = ? group by agg_src.order_id) t2 on t1.order_id = t2.orderid",
+                "params": [
+                    "COMPLETED"
+                ],
+                "sqlMarkers": [
+                    "left join",
+                    "(select",
+                    "sum(",
+                    "count(*)",
+                    "group by",
+                    "fact_sales"
+                ],
+                "forbiddenSqlMarkers": [
+                    "count(distinct",
+                    ".salesAmount"
+                ]
+            }
+        },
+        {
+            "id": "aggregate-join-missing-right-key-groupby-refusal",
+            "type": "error",
+            "model": "OrderSalesAggregateJoinQueryModel",
+            "request": {
+                "joinKey": "orderId",
+                "invalidGroupBy": [
+                    "orderLineNo"
+                ]
+            },
+            "expected": {
+                "errorCode": "QUERYMODEL_AGGREGATE_JOIN_GROUPBY_MISSING_RIGHT_KEY",
+                "message": "aggregate relation groupBy \u5fc5\u987b\u8986\u76d6\u53f3\u4fa7 join key: orderId",
+                "messageMarkers": [
+                    "groupBy",
+                    "orderId"
+                ]
+            }
+        },
+        {
+            "id": "aggregate-join-fixed-rhs-filter",
+            "type": "sql",
+            "model": "OrderSalesAggregateRelationQueryModel",
+            "request": {
+                "queryModel": "OrderSalesAggregateRelationQueryModel",
+                "columns": [
+                    "orderId",
+                    "amount",
+                    "salesAmount",
+                    "uniqueCustomers"
+                ],
+                "slice": []
+            },
+            "expected": {
+                "sql": "select\tt1.order_id \"orderId\",\tt1.total_amount \"amount\",\tfsByOrder.salesAmount \"salesAmount\",\tfsByOrder.uniqueCustomers \"uniqueCustomers\"\tfrom fact_order t1\t left join (select agg_src.order_id orderId, sum(agg_src.sales_amount) salesAmount, count(distinct agg_src.customer_key) uniqueCustomers from fact_sales agg_src where agg_src.order_status = ? group by agg_src.order_id) fsByOrder  on t1.order_id = fsByOrder.orderId\t",
+                "normalizedSql": "select t1.order_id \"orderId\", t1.total_amount \"amount\", fsByOrder.salesAmount \"salesAmount\", fsByOrder.uniqueCustomers \"uniqueCustomers\" from fact_order t1 left join (select agg_src.order_id orderId, sum(agg_src.sales_amount) salesAmount, count(distinct agg_src.customer_key) uniqueCustomers from fact_sales agg_src where agg_src.order_status = ? group by agg_src.order_id) fsByOrder on t1.order_id = fsByOrder.orderId",
+                "params": [
+                    "COMPLETED"
+                ],
+                "sqlMarkers": [
+                    "fsByOrder",
+                    "agg_src.order_status = ?",
+                    "group by",
+                    "sum(agg_src.sales_amount)"
+                ],
+                "forbiddenSqlMarkers": [
+                    "sum(agg_src.quantity) quantity"
+                ],
+                "diagnostics": []
+            }
+        },
+        {
+            "id": "aggregate-join-runtime-extdata-filter",
+            "type": "sql",
+            "model": "OrderSalesAggregateRelationRuntimeFilterQueryModel",
+            "request": {
+                "queryModel": "OrderSalesAggregateRelationRuntimeFilterQueryModel",
+                "columns": [
+                    "orderId",
+                    "amount",
+                    "salesAmount",
+                    "uniqueCustomers"
+                ],
+                "slice": [
+                    {
+                        "field": "orderId",
+                        "op": "=",
+                        "value": "ORD20240101000001"
+                    }
+                ]
+            },
+            "expected": {
+                "sql": "select\tt1.order_id \"orderId\",\tt1.total_amount \"amount\",\tfsByRuntimeOrder.salesAmount \"salesAmount\",\tfsByRuntimeOrder.uniqueCustomers \"uniqueCustomers\"\tfrom fact_order t1\t left join (select agg_src.order_id orderId, sum(agg_src.sales_amount) salesAmount, count(distinct agg_src.customer_key) uniqueCustomers from fact_sales agg_src where agg_src.order_status = ? and agg_src.order_id = ? and agg_src.order_id = ? group by agg_src.order_id) fsByRuntimeOrder  on t1.order_id = fsByRuntimeOrder.orderId\t where  1=1  and \tt1.order_id =? ",
+                "normalizedSql": "select t1.order_id \"orderId\", t1.total_amount \"amount\", fsByRuntimeOrder.salesAmount \"salesAmount\", fsByRuntimeOrder.uniqueCustomers \"uniqueCustomers\" from fact_order t1 left join (select agg_src.order_id orderId, sum(agg_src.sales_amount) salesAmount, count(distinct agg_src.customer_key) uniqueCustomers from fact_sales agg_src where agg_src.order_status = ? and agg_src.order_id = ? and agg_src.order_id = ? group by agg_src.order_id) fsByRuntimeOrder on t1.order_id = fsByRuntimeOrder.orderId where 1=1 and t1.order_id =?",
+                "params": [
+                    "COMPLETED",
+                    "ORD20240101000001",
+                    "ORD20240101000001",
+                    "ORD20240101000001"
+                ],
+                "sqlMarkers": [
+                    "agg_src.order_id = ?",
+                    "agg_src.order_status = ?",
+                    "group by"
+                ],
+                "forbiddenSqlMarkers": [
+                    "ctx.extData"
+                ],
+                "rows": [
+                    {
+                        "orderId": "ORD20240101000001",
+                        "amount": 10998.0,
+                        "salesAmount": 9898.2,
+                        "uniqueCustomers": 1
+                    }
+                ],
+                "diagnostics": [
+                    {
+                        "decision": "pushed",
+                        "field": "orderId",
+                        "op": "=",
+                        "target": "where",
+                        "reasonCode": null,
+                        "expression": "agg_src.order_id = ?"
+                    }
+                ]
+            }
+        },
+        {
+            "id": "aggregate-join-runtime-extdata-missing-refusal",
+            "type": "error",
+            "model": "OrderSalesAggregateRelationRuntimeFilterQueryModel",
+            "request": {
+                "queryModel": "OrderSalesAggregateRelationRuntimeFilterQueryModel",
+                "columns": [
+                    "orderId",
+                    "amount",
+                    "salesAmount",
+                    "uniqueCustomers"
+                ],
+                "slice": []
+            },
+            "expected": {
+                "errorCode": "QUERYMODEL_AGGREGATE_JOIN_RUNTIME_FILTER_MISSING",
+                "message": "aggregate relation runtime filter \u503c\u4e0d\u80fd\u4e3a\u7a7a",
+                "messageMarkers": [
+                    "runtime filter"
+                ]
+            }
+        },
+        {
+            "id": "aggregate-join-and-pushdown-diagnostics",
+            "type": "sql",
+            "model": "OrderSalesAggregateRelationQueryModel",
+            "request": {
+                "queryModel": "OrderSalesAggregateRelationQueryModel",
+                "columns": [
+                    "orderId",
+                    "amount",
+                    "salesAmount",
+                    "uniqueCustomers"
+                ],
+                "slice": [
+                    {
+                        "field": "orderId",
+                        "op": "in",
+                        "value": [
+                            "ORD20240101000001",
+                            "ORD20240102000004"
+                        ]
+                    },
+                    {
+                        "field": "salesAmount",
+                        "op": "[]",
+                        "value": [
+                            0,
+                            999999999
+                        ]
+                    }
+                ]
+            },
+            "expected": {
+                "sql": "select\tt1.order_id \"orderId\",\tt1.total_amount \"amount\",\tfsByOrder.salesAmount \"salesAmount\",\tfsByOrder.uniqueCustomers \"uniqueCustomers\"\tfrom fact_order t1\t left join (select agg_src.order_id orderId, sum(agg_src.sales_amount) salesAmount, count(distinct agg_src.customer_key) uniqueCustomers from fact_sales agg_src where agg_src.order_status = ? and agg_src.order_id in (?, ?) group by agg_src.order_id having sum(agg_src.sales_amount) >= ? and sum(agg_src.sales_amount) <= ?) fsByOrder  on t1.order_id = fsByOrder.orderId\t where  1=1  and \tt1.order_id  in (?,?)  and \tfsByOrder.salesAmount >=?  and \tfsByOrder.salesAmount <=? ",
+                "normalizedSql": "select t1.order_id \"orderId\", t1.total_amount \"amount\", fsByOrder.salesAmount \"salesAmount\", fsByOrder.uniqueCustomers \"uniqueCustomers\" from fact_order t1 left join (select agg_src.order_id orderId, sum(agg_src.sales_amount) salesAmount, count(distinct agg_src.customer_key) uniqueCustomers from fact_sales agg_src where agg_src.order_status = ? and agg_src.order_id in (?, ?) group by agg_src.order_id having sum(agg_src.sales_amount) >= ? and sum(agg_src.sales_amount) <= ?) fsByOrder on t1.order_id = fsByOrder.orderId where 1=1 and t1.order_id in (?,?) and fsByOrder.salesAmount >=? and fsByOrder.salesAmount <=?",
+                "params": [
+                    "COMPLETED",
+                    "ORD20240101000001",
+                    "ORD20240102000004",
+                    0,
+                    999999999,
+                    "ORD20240101000001",
+                    "ORD20240102000004",
+                    0.0,
+                    1000000000.0
+                ],
+                "sqlMarkers": [
+                    "agg_src.order_id in (?, ?)",
+                    "having sum(agg_src.sales_amount) >= ?"
+                ],
+                "forbiddenSqlMarkers": [],
+                "diagnostics": [
+                    {
+                        "decision": "pushed",
+                        "field": "orderId",
+                        "op": "in",
+                        "target": "where",
+                        "reasonCode": null,
+                        "expression": "agg_src.order_id in (?, ?)"
+                    },
+                    {
+                        "decision": "pushed",
+                        "field": "salesAmount",
+                        "op": "[]",
+                        "target": "having",
+                        "reasonCode": null,
+                        "expression": "sum(agg_src.sales_amount) >= ?"
+                    },
+                    {
+                        "decision": "pushed",
+                        "field": "salesAmount",
+                        "op": "[]",
+                        "target": "having",
+                        "reasonCode": null,
+                        "expression": "sum(agg_src.sales_amount) <= ?"
+                    }
+                ]
+            }
+        },
+        {
+            "id": "aggregate-join-or-outer-only-diagnostics",
+            "type": "sql",
+            "model": "OrderSalesAggregateRelationQueryModel",
+            "request": {
+                "queryModel": "OrderSalesAggregateRelationQueryModel",
+                "sliceShape": "OR(orderId, orderId)"
+            },
+            "expected": {
+                "sql": "select\tt1.order_id \"orderId\",\tt1.total_amount \"amount\",\tfsByOrder.salesAmount \"salesAmount\",\tfsByOrder.uniqueCustomers \"uniqueCustomers\"\tfrom fact_order t1\t left join (select agg_src.order_id orderId, sum(agg_src.sales_amount) salesAmount, count(distinct agg_src.customer_key) uniqueCustomers from fact_sales agg_src where agg_src.order_status = ? group by agg_src.order_id) fsByOrder  on t1.order_id = fsByOrder.orderId\t where  1=1   \tand  ( 1=0  or \tt1.order_id =?  or \tt1.order_id =? )",
+                "normalizedSql": "select t1.order_id \"orderId\", t1.total_amount \"amount\", fsByOrder.salesAmount \"salesAmount\", fsByOrder.uniqueCustomers \"uniqueCustomers\" from fact_order t1 left join (select agg_src.order_id orderId, sum(agg_src.sales_amount) salesAmount, count(distinct agg_src.customer_key) uniqueCustomers from fact_sales agg_src where agg_src.order_status = ? group by agg_src.order_id) fsByOrder on t1.order_id = fsByOrder.orderId where 1=1 and ( 1=0 or t1.order_id =? or t1.order_id =? )",
+                "params": [
+                    "COMPLETED",
+                    "ORD20240101000001",
+                    "ORD20240102000004"
+                ],
+                "sqlMarkers": [
+                    " or ",
+                    "t1.order_id ="
+                ],
+                "forbiddenSqlMarkers": [
+                    "agg_src.order_id = ?"
+                ],
+                "diagnostics": [
+                    {
+                        "decision": "retained",
+                        "field": "orderId",
+                        "op": "=",
+                        "target": "outer",
+                        "reasonCode": "OR_CONDITION_OUTER_ONLY",
+                        "expression": null
+                    },
+                    {
+                        "decision": "retained",
+                        "field": "orderId",
+                        "op": "=",
+                        "target": "outer",
+                        "reasonCode": "OR_CONDITION_OUTER_ONLY",
+                        "expression": null
+                    }
+                ]
+            }
+        },
+        {
+            "id": "aggregate-join-denied-source-column-refusal",
+            "type": "error",
+            "model": "OrderSalesAggregateRelationQueryModel",
+            "request": {
+                "queryModel": "OrderSalesAggregateRelationQueryModel",
+                "columns": [
+                    "orderId",
+                    "amount",
+                    "salesAmount",
+                    "uniqueCustomers"
+                ],
+                "slice": [
+                    {
+                        "field": "orderId",
+                        "op": "=",
+                        "value": "ORD20240101000001"
+                    }
+                ]
+            },
+            "expected": {
+                "errorCode": "QUERYMODEL_AGGREGATE_JOIN_DENIED_SOURCE_COLUMN",
+                "message": "\u5b57\u6bb5\u8bbf\u95ee\u88ab\u62d2\u7edd: columns \u4e2d\u5b57\u6bb5 'salesAmount' \u5bf9\u5e94\u7684\u7269\u7406\u5217\u5728\u53d7\u9650\u5217\u9ed1\u540d\u5355\u4e2d",
+                "calculatedFieldMessage": "\u5b57\u6bb5\u8bbf\u95ee\u88ab\u62d2\u7edd: calculatedFields \u4e2d\u5b57\u6bb5 'salesAmount' \u5bf9\u5e94\u7684\u7269\u7406\u5217\u5728\u53d7\u9650\u5217\u9ed1\u540d\u5355\u4e2d",
+                "messageMarkers": [
+                    "salesAmount",
+                    "fact_sales",
+                    "sales_amount"
+                ]
+            }
+        },
+        {
+            "id": "aggregate-join-metadata-lineage",
+            "type": "metadata",
+            "model": "OrderSalesAggregateRelationQueryModel",
+            "request": {
+                "queryModel": "OrderSalesAggregateRelationQueryModel",
+                "fields": [
+                    "salesAmount",
+                    "uniqueCustomers"
+                ]
+            },
+            "expected": {
+                "fields": {
+                    "salesAmount": {
+                        "caption": "\u9500\u552e\u660e\u7ec6\u91d1\u989d",
+                        "type": "MONEY",
+                        "isGroupKey": false,
+                        "isMeasure": true,
+                        "sourceExpression": "agg_src.sales_amount",
+                        "aggregateExpression": "sum(agg_src.sales_amount)",
+                        "aggregateRelation": {
+                            "aggregation": "SUM",
+                            "sourceColumn": "salesAmount",
+                            "sourceAlias": "salesAmount",
+                            "sourceCaption": "\u9500\u552e\u91d1\u989d",
+                            "sourceMeasure": "salesAmount",
+                            "semanticScaleFactor": null,
+                            "semanticUnit": null,
+                            "semanticUnitLabel": null,
+                            "sourceExpression": "agg_src.sales_amount",
+                            "aggregateExpression": "sum(agg_src.sales_amount)"
+                        }
+                    },
+                    "uniqueCustomers": {
+                        "caption": "\u72ec\u7acb\u5ba2\u6237\u6570",
+                        "type": "BIGINT",
+                        "isGroupKey": false,
+                        "isMeasure": true,
+                        "sourceExpression": "agg_src.customer_key",
+                        "aggregateExpression": "count(distinct agg_src.customer_key)",
+                        "aggregateRelation": {
+                            "aggregation": "COUNT_DISTINCT",
+                            "sourceColumn": "uniqueCustomers",
+                            "sourceAlias": "uniqueCustomers",
+                            "sourceCaption": "\u72ec\u7acb\u5ba2\u6237\u6570",
+                            "sourceMeasure": "uniqueCustomers",
+                            "semanticScaleFactor": null,
+                            "semanticUnit": null,
+                            "semanticUnitLabel": null,
+                            "sourceExpression": "agg_src.customer_key",
+                            "aggregateExpression": "count(distinct agg_src.customer_key)"
+                        }
+                    }
+                },
+                "aggregateRelation": [
+                    "aggregation",
+                    "sourceCaption",
+                    "sourceMeasure",
+                    "sourceAlias",
+                    "sourceExpression",
+                    "aggregateExpression",
+                    "sourceColumn"
+                ]
+            }
+        }
+    ]
+}

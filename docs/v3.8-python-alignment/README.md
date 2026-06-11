@@ -93,6 +93,7 @@ Current P0 execution records:
 - [P0-73-querymodel-aggregate-join-neutral-snapshot-contract.md](workitems/P0-73-querymodel-aggregate-join-neutral-snapshot-contract.md)
 - [P0-74-querymodel-aggregate-join-python-replay-skeleton.md](workitems/P0-74-querymodel-aggregate-join-python-replay-skeleton.md)
 - [P0-75-querymodel-aggregate-join-java-snapshot-exporter.md](workitems/P0-75-querymodel-aggregate-join-java-snapshot-exporter.md)
+- [P0-76-querymodel-aggregate-join-python-snapshot-replay.md](workitems/P0-76-querymodel-aggregate-join-python-snapshot-replay.md)
 
 Current P1/P2 planning records:
 
@@ -154,12 +155,12 @@ Current active snapshot lanes:
   local dependency artifacts
 - Registry/Odoo consumer readonly temp-dir audit for current community/pro
   `1.1.10` bundles, without refreshing committed generated Odoo models
-- QueryModel aggregate join audit and planned snapshot lane, with Java 9.2
+- QueryModel aggregate join audit and active snapshot replay lane, with Java 9.2
   capability, Python landing points, required neutral export contract, manifest
-  replay skeleton, Java snapshot exporter, and loader fail-closed guard before
-  implementation
+  replay skeleton, Java snapshot exporter, committed Java fixture replay, and
+  loader fail-closed guard before implementation
 
-Latest P0-75 / P1-2 status:
+Latest P0-76 / P1-2 status:
 
 - P0-26 extends the active MCP compose-script error snapshot lane with
   `missing-user-id-header` and `missing-namespace-header`.
@@ -349,6 +350,11 @@ Latest P0-75 / P1-2 status:
   writes `target/parity/_querymodel_aggregate_join_snapshot.json` with the 10
   contract cases from P0-73, giving Python a concrete replay source while
   production SQL lowering remains unimplemented.
+- P0-76 promotes the Java aggregate-join snapshot into a committed Python
+  fixture and activates offline replay for SQL markers, Java result evidence,
+  fail-closed errors, diagnostics, and metadata lineage. Python runtime
+  aggregate join remains fail-closed until a dedicated carrier and SQL lowering
+  land.
 - P1-2 adds the first bounded engine guard: Python now recognizes explicit
   aggregate join declarations and Java-style `leftJoinAggregate(...)` DSL
   sentinels, then fails closed with `QUERYMODEL_AGGREGATE_JOIN_UNSUPPORTED`
