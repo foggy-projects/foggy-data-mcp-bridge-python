@@ -136,6 +136,69 @@ class ExplicitJoinDef(BaseModel):
         return self.right_table_name
 
 
+class AggregateRelationConditionDef(BaseModel):
+    """ON condition between a QueryModel source and an aggregate relation."""
+
+    left_model: str = Field(..., description="Left/source model name")
+    left_field: str = Field(..., description="Left/source semantic field name")
+    right_model: str = Field(..., description="Right/aggregate model name")
+    right_field: str = Field(..., description="Right/aggregate semantic field name")
+    op: str = Field(default="=", description="Condition operator")
+
+    model_config = {"extra": "allow"}
+
+
+class AggregateRelationFilterDef(BaseModel):
+    """Filter captured on the RHS aggregate relation before preaggregation."""
+
+    model: str = Field(..., description="Model name owning the filtered field")
+    field: str = Field(..., description="Semantic field name")
+    op: str = Field(..., description="Filter operator")
+    value: Optional[Any] = Field(default=None, description="Literal or runtime value")
+
+    model_config = {"extra": "allow"}
+
+
+class AggregateRelationMeasureDef(BaseModel):
+    """Measure projected by an aggregate relation."""
+
+    aggregation: str = Field(..., description="Aggregation function")
+    alias: str = Field(..., description="Output field alias")
+    field: Optional[str] = Field(default=None, description="Source semantic field name")
+    model: Optional[str] = Field(default=None, description="Source model name")
+    distinct: bool = Field(default=False, description="Whether the aggregation is distinct")
+
+    model_config = {"extra": "allow"}
+
+
+class AggregateRelationDef(BaseModel):
+    """Captured QueryModel aggregate relation.
+
+    This is a structural carrier only. SQL lowering and runtime execution remain
+    fail-closed until the aggregate-join compiler path is implemented.
+    """
+
+    join_type: str = Field(default="LEFT", description="Join type (LEFT/INNER/RIGHT)")
+    left_model: Optional[str] = Field(default=None, description="Left/source model name")
+    right_model: str = Field(..., description="Right/aggregate source model name")
+    alias: Optional[str] = Field(default=None, description="Aggregate relation alias")
+    group_by: List[str] = Field(default_factory=list, description="RHS grouping fields")
+    filters: List[AggregateRelationFilterDef] = Field(
+        default_factory=list,
+        description="RHS filters applied before preaggregation",
+    )
+    measures: List[AggregateRelationMeasureDef] = Field(
+        default_factory=list,
+        description="Projected aggregate measures",
+    )
+    conditions: List[AggregateRelationConditionDef] = Field(
+        default_factory=list,
+        description="Join conditions from source model to aggregate relation",
+    )
+
+    model_config = {"extra": "allow"}
+
+
 class DbModelDimensionImpl(BaseModel):
     """Dimension implementation for semantic models.
 
@@ -529,6 +592,11 @@ class DbTableModelImpl(BaseModel):
     explicit_joins: List[ExplicitJoinDef] = Field(
         default_factory=list,
         description="Explicit multi-model joins declared by a QM",
+    )
+
+    aggregate_relations: List[AggregateRelationDef] = Field(
+        default_factory=list,
+        description="Captured aggregate relations declared by a QM; not lowered to SQL yet",
     )
 
     field_model_map: Dict[str, str] = Field(

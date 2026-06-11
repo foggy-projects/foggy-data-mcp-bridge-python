@@ -7,7 +7,9 @@ from foggy.dataset_model.proxy import (
     DimensionProxy,
     JoinBuilder,
     TableModelProxy,
+    UnsupportedAggregateJoinBuilder,
 )
+from foggy.dataset_model.impl.model import DbTableModelImpl
 
 
 # ---------------------------------------------------------------------------
@@ -177,6 +179,97 @@ class TestTableModelProxy:
         assert p1.leftJoin(p2).join_type == "LEFT"
         assert p1.innerJoin(p2).join_type == "INNER"
         assert p1.rightJoin(p2).join_type == "RIGHT"
+
+    def test_left_join_aggregate_captures_relation_carrier(self):
+        fo = TableModelProxy("FactOrderModel")
+        fs = TableModelProxy("FactSalesModel")
+
+        builder = (
+            fo.leftJoinAggregate(fs)
+            .filterEq(fs.orderStatus, "COMPLETED")
+            .groupBy(fs.orderId)
+            .sum(fs.salesAmount, "salesAmount")
+            .countDistinct(fs.customerKey, "uniqueCustomers")
+            .on(fo.orderId, fs.orderId)
+        )
+
+        assert isinstance(builder, UnsupportedAggregateJoinBuilder)
+        assert builder.aggregate_join_unsupported is True
+        assert builder.group_by == [
+            {"model": "FactSalesModel", "field": "orderId"},
+        ]
+        assert builder.filters == [
+            {
+                "model": "FactSalesModel",
+                "field": "orderStatus",
+                "op": "=",
+                "value": "COMPLETED",
+            },
+        ]
+        assert [
+            (m["aggregation"], m["field"], m["alias"], m["distinct"])
+            for m in builder.measures
+        ] == [
+            ("SUM", "salesAmount", "salesAmount", False),
+            ("COUNT_DISTINCT", "customerKey", "uniqueCustomers", True),
+        ]
+        assert [(c.left_field_ref, c.right_field_ref) for c in builder.on_conditions] == [
+            ("orderId", "orderId"),
+        ]
+
+        carrier = builder.to_carrier()
+        assert carrier.join_type == "LEFT"
+        assert carrier.left_model == "FactOrderModel"
+        assert carrier.right_model == "FactSalesModel"
+        assert carrier.group_by == ["orderId"]
+        assert carrier.filters[0].field == "orderStatus"
+        assert carrier.measures[0].aggregation == "SUM"
+        assert carrier.measures[1].distinct is True
+        assert carrier.conditions[0].left_field == "orderId"
+        assert carrier.conditions[0].right_field == "orderId"
+
+    def test_aggregate_relation_alias_preserves_captured_operations(self):
+        fs = TableModelProxy("FactSalesModel")
+
+        relation = (
+            fs.filterEq(fs.orderStatus, "COMPLETED")
+            .groupBy(fs.orderId)
+            .sum(fs.salesAmount, "salesAmount")
+            .as_("salesByOrder")
+        )
+
+        assert relation.aggregate_join_unsupported is True
+        assert relation.alias == "salesByOrder"
+        assert relation.group_by == [
+            {"model": "FactSalesModel", "field": "orderId"},
+        ]
+        assert relation.measures[0]["alias"] == "salesAmount"
+
+        carrier = relation.to_carrier()
+        assert carrier.alias == "salesByOrder"
+        assert carrier.right_model == "FactSalesModel"
+        assert carrier.group_by == ["orderId"]
+
+    def test_table_model_can_hold_aggregate_relation_carrier(self):
+        fo = TableModelProxy("FactOrderModel")
+        fs = TableModelProxy("FactSalesModel")
+        carrier = (
+            fo.leftJoinAggregate(fs)
+            .groupBy(fs.orderId)
+            .sum(fs.salesAmount, "salesAmount")
+            .on(fo.orderId, fs.orderId)
+            .to_carrier()
+        )
+
+        model = DbTableModelImpl(
+            name="OrderWithSalesQueryModel",
+            source_table="fact_order",
+            aggregate_relations=[carrier],
+        )
+
+        assert model.aggregate_relations[0].right_model == "FactSalesModel"
+        dumped = model.model_dump()
+        assert dumped["aggregate_relations"][0]["measures"][0]["alias"] == "salesAmount"
 
     def test_join_on(self):
         p1 = TableModelProxy("A")

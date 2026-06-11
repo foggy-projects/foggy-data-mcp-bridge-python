@@ -359,6 +359,9 @@ Latest P0-76 / P1-2 status:
   aggregate join declarations and Java-style `leftJoinAggregate(...)` DSL
   sentinels, then fails closed with `QUERYMODEL_AGGREGATE_JOIN_UNSUPPORTED`
   instead of loading them as ordinary joins.
+- P0-77 adds the minimal Python aggregate relation carrier: proxy DSL calls now
+  preserve RHS filters, group keys, measures, aliases, and join conditions in a
+  structural carrier while keeping runtime aggregate join fail-closed.
 - P1-1 records the remaining semantic-scale choice: namespace opt-out parity or
   live DB/result parity.
 - P2-1 records the initial Python aggregate-join design boundary before any

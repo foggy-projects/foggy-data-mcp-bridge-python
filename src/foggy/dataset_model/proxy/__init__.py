@@ -6,7 +6,7 @@ Aligned with Java TableModelProxy + DimensionProxy + ColumnRef.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 
 @dataclass(frozen=True)
@@ -235,59 +235,186 @@ class JoinBuilder:
 
 
 class UnsupportedAggregateRelationProxy:
-    """Sentinel for Java aggregate relation DSL not implemented in Python yet."""
+    """Carrier for Java aggregate relation DSL not implemented in Python yet.
+
+    The object deliberately keeps ``aggregate_join_unsupported=True`` so the
+    loader/compiler continue to fail closed while tests and future loader work
+    can inspect the captured aggregate relation contract.
+    """
 
     aggregate_join_unsupported = True
 
-    def __init__(self, model_name: str, alias: Optional[str] = None):
+    def __init__(
+        self,
+        model_name: str,
+        alias: Optional[str] = None,
+        filters: Optional[List[dict]] = None,
+        group_by: Optional[List[dict]] = None,
+        measures: Optional[List[dict]] = None,
+    ):
         self._model_name = model_name
         self._alias = alias
+        self._filters = list(filters or [])
+        self._group_by = list(group_by or [])
+        self._measures = list(measures or [])
 
     @property
     def model_name(self) -> str:
         return self._model_name
 
-    def filterEq(self, *args, **kwargs) -> UnsupportedAggregateRelationProxy:
+    @property
+    def alias(self) -> Optional[str]:
+        return self._alias
+
+    @property
+    def filters(self) -> List[dict]:
+        return list(self._filters)
+
+    @property
+    def group_by(self) -> List[dict]:
+        return list(self._group_by)
+
+    @property
+    def measures(self) -> List[dict]:
+        return list(self._measures)
+
+    @staticmethod
+    def _normalize_ref(ref: Any, default_model_name: str) -> Tuple[str, str]:
+        if isinstance(ref, ColumnRef):
+            return ref.model_name, ref.field_ref
+        if isinstance(ref, DimensionProxy):
+            return ref.model_name, ref.field_ref
+        return default_model_name, str(ref)
+
+    def _clone(self, alias: Optional[str] = None) -> UnsupportedAggregateRelationProxy:
+        return UnsupportedAggregateRelationProxy(
+            self._model_name,
+            alias=self._alias if alias is None else alias,
+            filters=self._filters,
+            group_by=self._group_by,
+            measures=self._measures,
+        )
+
+    def _append_filter(self, op: str, *args, **kwargs) -> UnsupportedAggregateRelationProxy:
+        if not args:
+            return self
+        model_name, field_ref = self._normalize_ref(args[0], self._model_name)
+        value = kwargs.get("value")
+        if len(args) > 1:
+            value = args[1]
+        self._filters.append(
+            {
+                "model": model_name,
+                "field": field_ref,
+                "op": op,
+                "value": value,
+            }
+        )
         return self
+
+    def filterEq(self, *args, **kwargs) -> UnsupportedAggregateRelationProxy:
+        return self._append_filter("=", *args, **kwargs)
 
     def filterIn(self, *args, **kwargs) -> UnsupportedAggregateRelationProxy:
-        return self
+        return self._append_filter("IN", *args, **kwargs)
 
     def filterGt(self, *args, **kwargs) -> UnsupportedAggregateRelationProxy:
-        return self
+        return self._append_filter(">", *args, **kwargs)
 
     def filterGte(self, *args, **kwargs) -> UnsupportedAggregateRelationProxy:
-        return self
+        return self._append_filter(">=", *args, **kwargs)
 
     def filterLt(self, *args, **kwargs) -> UnsupportedAggregateRelationProxy:
-        return self
+        return self._append_filter("<", *args, **kwargs)
 
     def filterLte(self, *args, **kwargs) -> UnsupportedAggregateRelationProxy:
-        return self
+        return self._append_filter("<=", *args, **kwargs)
 
     def groupBy(self, *args, **kwargs) -> UnsupportedAggregateRelationProxy:
+        for ref in args:
+            model_name, field_ref = self._normalize_ref(ref, self._model_name)
+            self._group_by.append({"model": model_name, "field": field_ref})
+        return self
+
+    def _append_measure(
+        self,
+        aggregation: str,
+        *args,
+        distinct: bool = False,
+        **kwargs,
+    ) -> UnsupportedAggregateRelationProxy:
+        field_ref: Optional[str] = None
+        model_name: Optional[str] = None
+        if args:
+            model_name, field_ref = self._normalize_ref(args[0], self._model_name)
+        alias = kwargs.get("alias") or kwargs.get("name")
+        if len(args) > 1 and isinstance(args[1], str):
+            alias = args[1]
+        if alias is None:
+            alias = field_ref or aggregation.lower()
+        self._measures.append(
+            {
+                "aggregation": aggregation,
+                "field": field_ref,
+                "model": model_name,
+                "alias": alias,
+                "distinct": distinct,
+            }
+        )
         return self
 
     def sum(self, *args, **kwargs) -> UnsupportedAggregateRelationProxy:
-        return self
+        return self._append_measure("SUM", *args, **kwargs)
 
     def avg(self, *args, **kwargs) -> UnsupportedAggregateRelationProxy:
-        return self
+        return self._append_measure("AVG", *args, **kwargs)
 
     def min(self, *args, **kwargs) -> UnsupportedAggregateRelationProxy:
-        return self
+        return self._append_measure("MIN", *args, **kwargs)
 
     def max(self, *args, **kwargs) -> UnsupportedAggregateRelationProxy:
-        return self
+        return self._append_measure("MAX", *args, **kwargs)
 
     def count(self, *args, **kwargs) -> UnsupportedAggregateRelationProxy:
-        return self
+        return self._append_measure("COUNT", *args, **kwargs)
 
     def countDistinct(self, *args, **kwargs) -> UnsupportedAggregateRelationProxy:
-        return self
+        return self._append_measure("COUNT_DISTINCT", *args, distinct=True, **kwargs)
 
     def as_(self, alias: str) -> UnsupportedAggregateRelationProxy:
-        return UnsupportedAggregateRelationProxy(self._model_name, alias=alias)
+        return self._clone(alias=alias)
+
+    def to_carrier(self):
+        from foggy.dataset_model.impl.model import (
+            AggregateRelationDef,
+            AggregateRelationFilterDef,
+            AggregateRelationMeasureDef,
+        )
+
+        return AggregateRelationDef(
+            right_model=self._model_name,
+            alias=self._alias,
+            group_by=[item["field"] for item in self._group_by],
+            filters=[
+                AggregateRelationFilterDef(
+                    model=item["model"],
+                    field=item["field"],
+                    op=item["op"],
+                    value=item.get("value"),
+                )
+                for item in self._filters
+            ],
+            measures=[
+                AggregateRelationMeasureDef(
+                    aggregation=item["aggregation"],
+                    field=item.get("field"),
+                    model=item.get("model"),
+                    alias=item["alias"],
+                    distinct=item.get("distinct", False),
+                )
+                for item in self._measures
+            ],
+        )
 
     def __getattr__(self, name: str):
         if name == "as":
@@ -304,9 +431,94 @@ class UnsupportedAggregateJoinBuilder(UnsupportedAggregateRelationProxy):
         super().__init__(right.model_name)
         self.left = left
         self.right = right
+        self.join_type = "LEFT"
+        self.conditions: List[JoinConditionRef] = []
 
-    def on(self, *args, **kwargs) -> UnsupportedAggregateJoinBuilder:
+    @property
+    def on_conditions(self) -> List[JoinConditionRef]:
+        return list(self.conditions)
+
+    def _clone(self, alias: Optional[str] = None) -> UnsupportedAggregateJoinBuilder:
+        cloned = UnsupportedAggregateJoinBuilder(self.left, self.right)
+        cloned._alias = self.alias if alias is None else alias
+        cloned._filters = list(self._filters)
+        cloned._group_by = list(self._group_by)
+        cloned._measures = list(self._measures)
+        cloned.conditions = list(self.conditions)
+        return cloned
+
+    def _append_condition(self, left_ref: Any, right_ref: Any) -> None:
+        left_model_name, left_field_ref = self._normalize_ref(left_ref, self.left.model_name)
+        right_model_name, right_field_ref = self._normalize_ref(right_ref, self.right.model_name)
+        self.conditions.append(
+            JoinConditionRef(
+                left_model_name=left_model_name,
+                left_field_ref=left_field_ref,
+                right_model_name=right_model_name,
+                right_field_ref=right_field_ref,
+            )
+        )
+
+    def on(self, left_ref, right_ref) -> UnsupportedAggregateJoinBuilder:
+        self.conditions = []
+        self._append_condition(left_ref, right_ref)
         return self
+
+    def and_(self, left_ref, right_ref) -> UnsupportedAggregateJoinBuilder:
+        self._append_condition(left_ref, right_ref)
+        return self
+
+    def andAlso(self, left_ref, right_ref) -> UnsupportedAggregateJoinBuilder:
+        return self.and_(left_ref, right_ref)
+
+    def __getattr__(self, name: str):
+        if name == "and":
+            return self.and_
+        return super().__getattr__(name)
+
+    def to_carrier(self):
+        from foggy.dataset_model.impl.model import (
+            AggregateRelationConditionDef,
+            AggregateRelationDef,
+            AggregateRelationFilterDef,
+            AggregateRelationMeasureDef,
+        )
+
+        return AggregateRelationDef(
+            join_type=self.join_type,
+            left_model=self.left.model_name,
+            right_model=self.right.model_name,
+            alias=self.alias,
+            group_by=[item["field"] for item in self._group_by],
+            filters=[
+                AggregateRelationFilterDef(
+                    model=item["model"],
+                    field=item["field"],
+                    op=item["op"],
+                    value=item.get("value"),
+                )
+                for item in self._filters
+            ],
+            measures=[
+                AggregateRelationMeasureDef(
+                    aggregation=item["aggregation"],
+                    field=item.get("field"),
+                    model=item.get("model"),
+                    alias=item["alias"],
+                    distinct=item.get("distinct", False),
+                )
+                for item in self._measures
+            ],
+            conditions=[
+                AggregateRelationConditionDef(
+                    left_model=condition.left_model_name,
+                    left_field=condition.left_field_ref,
+                    right_model=condition.right_model_name,
+                    right_field=condition.right_field_ref,
+                )
+                for condition in self.conditions
+            ],
+        )
 
 
 class TableModelProxy:
