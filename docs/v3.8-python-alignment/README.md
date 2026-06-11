@@ -160,7 +160,7 @@ Current active snapshot lanes:
   replay skeleton, Java snapshot exporter, committed Java fixture replay, and
   loader fail-closed guard before implementation
 
-Latest P0-76 / P1-2 status:
+Latest P0-78 / P1-2 status:
 
 - P0-26 extends the active MCP compose-script error snapshot lane with
   `missing-user-id-header` and `missing-namespace-header`.
@@ -362,6 +362,9 @@ Latest P0-76 / P1-2 status:
 - P0-77 adds the minimal Python aggregate relation carrier: proxy DSL calls now
   preserve RHS filters, group keys, measures, aliases, and join conditions in a
   structural carrier while keeping runtime aggregate join fail-closed.
+- P0-78 adds loader-side carrier extraction for explicit aggregate relation
+  dicts and Java-style `leftJoinAggregate(...)` DSL objects. The loader now
+  reports `carrier_count=N` before rejecting unsupported aggregate joins.
 - P1-1 records the remaining semantic-scale choice: namespace opt-out parity or
   live DB/result parity.
 - P2-1 records the initial Python aggregate-join design boundary before any

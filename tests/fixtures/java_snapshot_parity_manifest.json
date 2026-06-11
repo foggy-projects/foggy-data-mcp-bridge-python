@@ -372,7 +372,7 @@
         "V3 metadata aggregateRelation lineage fields"
       ],
       "plannedExtensions": [
-        "Python loader attachment for aggregate relation carriers",
+        "Python compiler/runtime refusal for aggregate relation carriers before SQL lowering",
         "Python production SQL lowering for aggregate relations",
         "SQLite live-result parity after Python implementation",
         "MySQL/PostgreSQL aggregate join replay expansion after SQLite closure"
@@ -383,6 +383,7 @@
         "Python replay validates SQL/result/error/metadata/diagnostics markers without production SQL lowering",
         "Python loader refuses aggregate join declarations instead of loading them as ordinary explicit joins",
         "Python proxy/model layer preserves aggregate relation carrier structure while runtime remains fail-closed",
+        "Python loader extracts aggregate relation carriers and reports carrier_count before fail-closed rejection",
         "Python production SQL lowering remains unimplemented until the dedicated compiler path lands"
       ]
     }

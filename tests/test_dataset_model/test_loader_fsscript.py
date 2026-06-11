@@ -16,9 +16,11 @@ from foggy.dataset_model.impl.loader import (
     _adapt_fsscript_tm,
     _TmRefProxy,
     _extract_allowed_fields,
+    _extract_aggregate_relation_carriers,
     _apply_column_group_filter,
     load_models_from_directory,
 )
+from foggy.dataset_model.proxy import TableModelProxy
 
 
 # ==================== _snake_to_camel ====================
@@ -970,6 +972,72 @@ export const queryModel = {
             ("orderLineNo", "orderLineNo"),
         ]
 
+    def test_extract_aggregate_relation_carrier_from_contract_dict(self):
+        fo = TableModelProxy("FactOrderModel")
+        carriers = _extract_aggregate_relation_carriers(
+            {
+                "name": "OrderAggregateJoinQueryModel",
+                "model": fo,
+                "aggregateJoins": [
+                    {
+                        "rightModel": "FactSalesModel",
+                        "alias": "salesByOrder",
+                        "groupBy": ["orderId"],
+                        "filters": [
+                            {"field": "orderStatus", "op": "=", "value": "COMPLETED"},
+                        ],
+                        "measures": [
+                            {
+                                "field": "salesAmount",
+                                "aggregation": "SUM",
+                                "alias": "salesAmount",
+                            },
+                        ],
+                        "conditions": [
+                            {"leftField": "orderId", "rightField": "orderId"},
+                        ],
+                    },
+                ],
+            }
+        )
+
+        assert len(carriers) == 1
+        carrier = carriers[0]
+        assert carrier.left_model == "FactOrderModel"
+        assert carrier.right_model == "FactSalesModel"
+        assert carrier.alias == "salesByOrder"
+        assert carrier.group_by == ["orderId"]
+        assert carrier.filters[0].field == "orderStatus"
+        assert carrier.measures[0].aggregation == "SUM"
+        assert carrier.conditions[0].left_field == "orderId"
+        assert carrier.conditions[0].right_field == "orderId"
+
+    def test_extract_aggregate_relation_carrier_from_dsl_join(self):
+        fo = TableModelProxy("FactOrderModel")
+        fs = TableModelProxy("FactSalesModel")
+        carriers = _extract_aggregate_relation_carriers(
+            {
+                "name": "OrderAggregateJoinDslQueryModel",
+                "model": fo,
+                "joins": [
+                    fo.leftJoinAggregate(fs)
+                    .filterEq(fs.orderStatus, "COMPLETED")
+                    .groupBy(fs.orderId)
+                    .sum(fs.salesAmount, "salesAmount")
+                    .on(fo.orderId, fs.orderId),
+                ],
+            }
+        )
+
+        assert len(carriers) == 1
+        carrier = carriers[0]
+        assert carrier.left_model == "FactOrderModel"
+        assert carrier.right_model == "FactSalesModel"
+        assert carrier.group_by == ["orderId"]
+        assert carrier.filters[0].value == "COMPLETED"
+        assert carrier.measures[0].alias == "salesAmount"
+        assert carrier.conditions[0].right_field == "orderId"
+
     def test_aggregate_join_explicit_contract_fails_closed(self, caplog):
         """Aggregate join declarations must not silently load as ordinary joins."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1022,6 +1090,7 @@ export const queryModel = {
 
         assert {m.name for m in models} == {"FactOrderModel"}
         assert AGGREGATE_JOIN_UNSUPPORTED_CODE in caplog.text
+        assert "carrier_count=1" in caplog.text
         assert "OrderAggregateJoinQueryModel.qm" in caplog.text
 
     def test_left_join_aggregate_dsl_fails_closed(self, caplog):
@@ -1094,4 +1163,5 @@ export const queryModel = {
 
         assert {m.name for m in models} == {"FactOrderModel", "FactSalesModel"}
         assert AGGREGATE_JOIN_UNSUPPORTED_CODE in caplog.text
+        assert "carrier_count=1" in caplog.text
         assert "ordinary explicit join" in caplog.text

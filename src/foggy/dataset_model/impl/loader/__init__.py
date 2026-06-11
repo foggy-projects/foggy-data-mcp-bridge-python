@@ -25,6 +25,10 @@ from foggy.dataset_model.definitions.measure import DbMeasureDef, MeasureType
 from foggy.dataset_model.definitions.dict_def import DbDictionaryDiscoveryDef
 from foggy.dataset_model.definitions.query_model import DbQueryModelDef
 from foggy.dataset_model.impl.model import (
+    AggregateRelationConditionDef,
+    AggregateRelationDef,
+    AggregateRelationFilterDef,
+    AggregateRelationMeasureDef,
     DbTableModelImpl,
     DbModelDimensionImpl,
     DbModelMeasureImpl,
@@ -76,12 +80,13 @@ def _is_unsupported_aggregate_join_value(value: Any) -> bool:
 
 def _reject_unsupported_aggregate_join_contract(qm_def: Dict[str, Any], qm_source: Any) -> None:
     if _is_unsupported_aggregate_join_value(qm_def):
+        carriers = _extract_aggregate_relation_carriers(qm_def)
         raise ValueError(
             f"{AGGREGATE_JOIN_UNSUPPORTED_CODE}: QueryModel aggregate join is "
             "not implemented in the Python engine yet. Export a Java neutral "
             "snapshot first, then implement a dedicated aggregate relation "
             "carrier instead of loading it as an ordinary explicit join. "
-            f"source={qm_source}"
+            f"carrier_count={len(carriers)} source={qm_source}"
         )
 
 
@@ -138,6 +143,161 @@ class _TmRefProxy(dict):
     def get(self, key: str, default=None):  # type: ignore[override]
         # Always return the key name itself as a column/field reference.
         return key
+
+
+def _resolve_qm_model_ref_name(model_ref: Any) -> Optional[str]:
+    if isinstance(model_ref, TableModelProxy):
+        return model_ref.model_name
+    if isinstance(model_ref, _TmRefProxy):
+        return model_ref._internal_get("__tm_ref__") or model_ref._internal_get("name")
+    if isinstance(model_ref, dict):
+        return model_ref.get("__tm_ref__") or model_ref.get("name")
+    if isinstance(model_ref, str):
+        return model_ref
+    return None
+
+
+def _aggregate_ref_model_field(ref: Any, default_model: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    if isinstance(ref, (ColumnRef, DimensionProxy)):
+        return ref.model_name, ref.field_ref
+    if isinstance(ref, dict):
+        model_name = (
+            ref.get("model")
+            or ref.get("modelName")
+            or ref.get("model_name")
+            or default_model
+        )
+        field_name = (
+            ref.get("field")
+            or ref.get("fieldName")
+            or ref.get("field_ref")
+            or ref.get("ref")
+            or ref.get("name")
+        )
+        return model_name, field_name
+    if ref is None:
+        return default_model, None
+    return default_model, str(ref)
+
+
+def _aggregate_relation_from_dict(
+    raw: Dict[str, Any],
+    left_model: Optional[str],
+) -> Optional[AggregateRelationDef]:
+    right_model = (
+        raw.get("rightModel")
+        or raw.get("right_model")
+        or raw.get("rightRelation")
+        or raw.get("model")
+        or raw.get("modelName")
+    )
+    if not right_model:
+        return None
+
+    group_by: List[str] = []
+    for item in raw.get("groupBy") or raw.get("group_by") or []:
+        _, field_name = _aggregate_ref_model_field(item, right_model)
+        if field_name:
+            group_by.append(field_name)
+
+    filters: List[AggregateRelationFilterDef] = []
+    for item in raw.get("filters") or raw.get("where") or []:
+        if not isinstance(item, dict):
+            continue
+        model_name, field_name = _aggregate_ref_model_field(
+            item.get("field") or item.get("ref") or item,
+            right_model,
+        )
+        if not model_name or not field_name:
+            continue
+        filters.append(
+            AggregateRelationFilterDef(
+                model=model_name,
+                field=field_name,
+                op=item.get("op") or item.get("operator") or "=",
+                value=item.get("value"),
+            )
+        )
+
+    measures: List[AggregateRelationMeasureDef] = []
+    for item in raw.get("measures") or []:
+        if not isinstance(item, dict):
+            continue
+        aggregation = str(item.get("aggregation") or item.get("agg") or item.get("type") or "").upper()
+        model_name, field_name = _aggregate_ref_model_field(
+            item.get("field") or item.get("ref") or item.get("column"),
+            right_model,
+        )
+        if not aggregation:
+            aggregation = "COUNT" if field_name is None else "SUM"
+        alias = item.get("alias") or item.get("name") or field_name or aggregation.lower()
+        measures.append(
+            AggregateRelationMeasureDef(
+                aggregation=aggregation,
+                field=field_name,
+                model=model_name,
+                alias=alias,
+                distinct=bool(item.get("distinct") or aggregation == "COUNT_DISTINCT"),
+            )
+        )
+
+    conditions: List[AggregateRelationConditionDef] = []
+    for item in raw.get("conditions") or raw.get("on") or []:
+        if not isinstance(item, dict):
+            continue
+        left_ref = item.get("left") or item.get("leftField") or item.get("left_field")
+        right_ref = item.get("right") or item.get("rightField") or item.get("right_field")
+        left_model_name, left_field = _aggregate_ref_model_field(left_ref, left_model)
+        right_model_name, right_field = _aggregate_ref_model_field(right_ref, right_model)
+        if not left_model_name or not left_field or not right_model_name or not right_field:
+            continue
+        conditions.append(
+            AggregateRelationConditionDef(
+                left_model=left_model_name,
+                left_field=left_field,
+                right_model=right_model_name,
+                right_field=right_field,
+                op=item.get("op") or "=",
+            )
+        )
+
+    return AggregateRelationDef(
+        join_type=raw.get("joinType") or raw.get("join_type") or "LEFT",
+        left_model=left_model,
+        right_model=str(right_model),
+        alias=raw.get("alias") or raw.get("name") or raw.get("aggregateRelationAlias"),
+        group_by=group_by,
+        filters=filters,
+        measures=measures,
+        conditions=conditions,
+    )
+
+
+def _extract_aggregate_relation_carriers(qm_def: Dict[str, Any]) -> List[AggregateRelationDef]:
+    """Extract aggregate relation carriers without enabling runtime support."""
+    carriers: List[AggregateRelationDef] = []
+    left_model = _resolve_qm_model_ref_name(qm_def.get("model")) or qm_def.get("tableModel")
+
+    for key in ("aggregateJoin", "aggregateJoins", "aggregateRelation", "aggregateRelations", "aggregateRelationJoins"):
+        raw_value = qm_def.get(key)
+        if raw_value is None:
+            continue
+        raw_items = raw_value if isinstance(raw_value, list) else [raw_value]
+        for item in raw_items:
+            if hasattr(item, "to_carrier"):
+                carriers.append(item.to_carrier())
+            elif isinstance(item, dict):
+                carrier = _aggregate_relation_from_dict(item, left_model)
+                if carrier is not None:
+                    carriers.append(carrier)
+
+    joins = qm_def.get("joins")
+    if isinstance(joins, list):
+        for join in joins:
+            if getattr(type(join), "aggregate_join_unsupported", False) and hasattr(join, "to_carrier"):
+                carriers.append(join.to_carrier())
+
+    return carriers
 
 
 def _extract_allowed_fields(column_groups: List[Dict[str, Any]]) -> set:
@@ -938,15 +1098,7 @@ def load_models_from_directory(model_dir: str, namespace: Optional[str] = None) 
 
             # Resolve the referenced TM
             model_ref = qm_def.get("model", {})
-            tm_ref_name = None
-            if isinstance(model_ref, TableModelProxy):
-                tm_ref_name = model_ref.model_name
-            elif isinstance(model_ref, _TmRefProxy):
-                tm_ref_name = model_ref._internal_get("__tm_ref__") or model_ref._internal_get("name")
-            elif isinstance(model_ref, dict):
-                tm_ref_name = model_ref.get("__tm_ref__") or model_ref.get("name")
-            elif isinstance(model_ref, str):
-                tm_ref_name = model_ref
+            tm_ref_name = _resolve_qm_model_ref_name(model_ref)
             # Also check 'tableModel' field (YAML-style QM)
             if not tm_ref_name:
                 tm_ref_name = qm_def.get("tableModel")
