@@ -89,6 +89,7 @@ Current P0 execution records:
 - [P0-69-pivot-timewindow-refusal-stability.md](workitems/P0-69-pivot-timewindow-refusal-stability.md)
 - [P0-70-domain-transport-refusal-replay-hardening.md](workitems/P0-70-domain-transport-refusal-replay-hardening.md)
 - [P0-71-domain-transport-sqlite-live-result-replay.md](workitems/P0-71-domain-transport-sqlite-live-result-replay.md)
+- [P0-72-querymodel-aggregate-join-python-gap-audit.md](workitems/P0-72-querymodel-aggregate-join-python-gap-audit.md)
 
 Current P1/P2 planning records:
 
@@ -149,8 +150,11 @@ Current active snapshot lanes:
   local dependency artifacts
 - Registry/Odoo consumer readonly temp-dir audit for current community/pro
   `1.1.10` bundles, without refreshing committed generated Odoo models
+- QueryModel aggregate join audit lane, with Java 9.2 capability, Python
+  landing points, gap matrix, and snapshot-first follow-up split frozen before
+  implementation
 
-Latest P0-71 status:
+Latest P0-72 status:
 
 - P0-26 extends the active MCP compose-script error snapshot lane with
   `missing-user-id-header` and `missing-namespace-header`.
@@ -325,6 +329,11 @@ Latest P0-71 status:
   transport: the two-field NULL-safe case and the 501-member CTE transport
   case now execute assembled Python SQL against SQLite and match independent
   oracle SQL.
+- P0-72 audits Java 9.2 QueryModel aggregate join against Python
+  QueryModel/ordinary join/governance/metadata landing points. It freezes the
+  conclusion that Python needs a separate aggregate relation carrier and
+  neutral Java snapshot contract before implementation, instead of extending
+  ordinary explicit joins or touching Odoo models first.
 - P1-1 records the remaining semantic-scale choice: namespace opt-out parity or
   live DB/result parity.
 - P2-1 records the initial Python aggregate-join design boundary before any

@@ -914,6 +914,11 @@ P0-46 follow-up:
   derived-table gap.
 - P0-71 later added Java-fixture-driven SQLite live-result replay for the
   two-field NULL-safe and 501-member CTE transport domain plans.
+- P0-72 later audited Java 9.2 QueryModel aggregate join against Python
+  QueryModel, ordinary explicit join, governance, metadata, and compose
+  landing points. The landing decision is to introduce a separate aggregate
+  relation carrier after neutral snapshots exist, not to mutate ordinary
+  explicit joins or start from Odoo business models.
 
 Odoo registry consumer baseline:
 
@@ -959,7 +964,7 @@ Priorities:
 | Domain fixtures and question runner | Java 9.1 has domain fixture packs, `scripts/run-ai-domain-direct.sh`, Odoo direct baseline suites, report/warning collection, tool argument rule warnings, and model registry promotion evidence. P0-31 adds a Java neutral exporter for normalized `dataset.query_model` tool arguments. P0-41 extends that neutral fixture with case-summary report metadata. P0-47 adds unsupported construct fail-closed cases. P0-51 adds deterministic `ToolCallCollector`-backed record envelopes. | Python has unit/integration tests, Odoo demo models, P0-31 replay for Java-exported neutral grouped, calculated/time-window, and denied-field fail-closed cases, P0-41 replay for optional report metadata, P0-47 replay for unsupported construct metadata, P0-48 `scripts/run-domain-question-neutral-runner.py` wrapper for dry-run summary plus default replay/manifest validation, and P0-51 replay for collector envelope fields. It still has no full AI domain direct runner. | Neutral replay is active, so Python can now prove normalized request/tool-argument compatibility, warning/report metadata, unsupported construct fail-closed metadata, local runner ergonomics, and deterministic collector envelope compatibility without LLM or Odoo. Remaining gaps are later Odoo packs and full direct runner coverage after registry/model drift is resolved. | High | P0/P1 | Keep P0-31/P0-41/P0-47/P0-48/P0-51 fixture replay and script wrapper active. P2: add Odoo packs only after registry/model drift is resolved. |
 | Runtime dictionary discovery metadata | Java has `DbDictionaryDiscoveryDef`, runtime `DictionaryDiscoveryService`, metadata/markdown exposure, sensitive/hidden/error fail-closed handling, and model-level tests. | P0-29 adds the Python contract, loader parsing, V3 JSON/markdown exposure, context-scoped cache isolation, and focused regression tests. | Core metadata behavior is aligned. Remaining gap is whether to add this to the neutral Java/Python snapshot catalog. | Medium | P0/P1 | Keep P0-29 focused tests active; add neutral fixtures only if dictionary discovery becomes part of the shared snapshot catalog. |
 | Semantic scale / money units | Java v3.0 introduces `semanticScaleFactor` for monetary/unit semantics and rejects arbitrary SQL fragment shortcuts. P0-32 adds Java snapshot evidence for helper literals, SQL rewriting, metadata, and carrier-column refusal. | P0-30 adds Python helper validation, field carriers, loader parsing, formulaDef/dialectFormulaDef value resolution, scaled query SQL, calculated-field reuse, and V3 metadata exposure. P0-32 replays Java semantic-scale snapshots, P0-33 aligns explicit HAVING to the selected aggregate-alias path, and P0-35 prevents explicit HAVING from using aggregate aliases that shadow existing fields. | Core engine behavior and neutral snapshot evidence are active. Remaining gaps are namespace-level opt-out config parity and live DB/result parity. | High | P1 | Keep P0-30/P0-32/P0-33/P0-35 focused tests active; add namespace opt-out or live DB evidence only when product/runtime needs it. |
-| QueryModel aggregate join | Java 9.2 accepted Java-only aggregate join: RHS preaggregation before LEFT JOIN, same datasource, fixed slice, permissions/system slice preserved, AND-only runtime pushdown, real SQLite/MySQL evidence. | No Python implementation evidence found in this audit. | Full feature gap. It is engine-level but not low risk, so it should not be phase-one implementation work. | High | P2 | New Python design doc and tests: AST/API contract, RHS aggregate plan, SQL generation, permission propagation, pushdown/refusal matrix, SQLite/MySQL/Postgres parity. |
+| QueryModel aggregate join | Java 9.2 accepted Java-only aggregate join: RHS preaggregation before LEFT JOIN, same datasource, fixed/runtime RHS filters, permission/system slice preservation, source physical deniedColumns mapping, calculatedFields dependency propagation, metadata lineage, pushdown diagnostics, and real SQLite/MySQL 5.7 evidence. Java still carries PostgreSQL and production TMS DB evidence as follow-up risks. | P0-72 confirms Python has ordinary explicit QM joins, compose derived/join SQL, metadata v3, and governance lanes, but no aggregate relation carrier, RHS preaggregation lowering, aggregate output source lineage, pushdown diagnostics, aggregateRelation metadata, or Java neutral aggregate-join fixture replay. | Full feature gap remains, but the Python landing point is now frozen: do not extend ordinary explicit joins directly; introduce a separate aggregate relation contract after neutral snapshots exist. | High | P0/P1 for snapshot contract and harness, P2 for implementation | P0-73/P0-74: Java neutral aggregate-join snapshot contract and Python replay skeleton. P1: parser/fail-closed validation. P2: SQL lowering, permission propagation, pushdown/refusal matrix, metadata diagnostics, and SQLite live-result parity before MySQL/Postgres expansion. |
 
 ## Phase One Recommendation
 
@@ -1012,6 +1017,14 @@ Recommended first three work items:
      P2.
    - Acceptance: Java producer and Python replay agree on structured error codes
      and governance request/context payloads.
+
+5. **Aggregate join snapshot contract, not implementation**
+   - P0-72 freezes the gap audit and Python landing points.
+   - Next work should define/export Java neutral aggregate-join fixtures and add
+     Python manifest/replay scaffolding before production SQL generation.
+   - Acceptance: aggregate join is visible as an explicit missing parity lane
+     with fixture requirements for SQL/result, metadata, diagnostics, and
+     fail-closed governance cases.
 
 ## Executable Plan
 
@@ -1122,6 +1135,8 @@ Expected modules/files:
 Tasks:
 
 1. Implement QueryModel aggregate join in Python if required:
+   - Start from the P0-72 landing-point decision: use a separate aggregate
+     relation carrier rather than ordinary explicit join mutation.
    - RHS preaggregation, fixed slice, group-key validation, permission/system
      slice preservation, runtime pushdown/refusal matrix.
 2. Add semantic scale namespace opt-out parity or live DB result evidence only
