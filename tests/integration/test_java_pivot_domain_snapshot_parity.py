@@ -31,6 +31,13 @@ SNAPSHOT_PATH = (
     / "java_pivot_domain_snapshot_parity.json"
 )
 
+DOMAIN_TRANSPORT_BOUNDARY_CASE_IDS = (
+    "domain-sqlite-large-501-transport",
+    "domain-sqlite-python-bind-limit-gap",
+    "domain-empty-columns-refused",
+    "domain-mysql57-derived-table-java-only-gap",
+)
+
 
 def _load_snapshot() -> dict[str, Any]:
     if not SNAPSHOT_PATH.exists():
@@ -56,6 +63,21 @@ def test_java_pivot_domain_snapshot_replays_in_python() -> None:
         _assert_case_replays(case)
 
 
+def test_snapshot_contains_domain_transport_boundary_cases() -> None:
+    snapshot = _load_snapshot()
+    case_ids = {case["id"] for case in snapshot.get("cases", [])}
+
+    assert set(DOMAIN_TRANSPORT_BOUNDARY_CASE_IDS).issubset(case_ids)
+
+
+@pytest.mark.parametrize("case_id", DOMAIN_TRANSPORT_BOUNDARY_CASE_IDS)
+def test_java_pivot_domain_boundary_case_replays_in_python(case_id: str) -> None:
+    snapshot = _load_snapshot()
+    case = _case_by_id(snapshot, case_id)
+
+    _assert_case_replays(case)
+
+
 def _assert_case_replays(case: dict[str, Any]) -> None:
     case_type = case["type"]
     if case_type == "pivot-request-contract":
@@ -70,6 +92,13 @@ def _assert_case_replays(case: dict[str, Any]) -> None:
         _assert_documented_gap(case)
     else:
         raise AssertionError(f"Unsupported pivot/domain case type: {case_type!r}")
+
+
+def _case_by_id(snapshot: dict[str, Any], case_id: str) -> dict[str, Any]:
+    for case in snapshot.get("cases", []):
+        if case.get("id") == case_id:
+            return case
+    raise AssertionError(f"Missing Java pivot/domain snapshot case: {case_id}")
 
 
 def _assert_pivot_request_contract(case: dict[str, Any]) -> None:
