@@ -86,6 +86,7 @@ Current P0 execution records:
 - [P0-66-timewindow-current-java-snapshot-refresh.md](workitems/P0-66-timewindow-current-java-snapshot-refresh.md)
 - [P0-67-timewindow-wow-week-model-alignment.md](workitems/P0-67-timewindow-wow-week-model-alignment.md)
 - [P0-68-timewindow-sqlite-live-result-parity.md](workitems/P0-68-timewindow-sqlite-live-result-parity.md)
+- [P0-69-pivot-timewindow-refusal-stability.md](workitems/P0-69-pivot-timewindow-refusal-stability.md)
 
 Current P1/P2 planning records:
 
@@ -124,6 +125,9 @@ Current active snapshot lanes:
 - Pivot real flat/grid SQLite output snapshots, including grandTotal,
   rowSubtotals, parentShare, baselineRatio output, and ordinary flat
   non-additive subtotal/grandTotal output
+- Pivot + timeWindow fail-closed boundary evidence, including direct
+  validate/execute/governance tests and Java neutral fixture real-service
+  replay
 - Pivot domain transport large-domain threshold and SQLite bind-limit
   fail-closed snapshots
 - Domain/question neutral runner normalized tool-argument snapshots, warning
@@ -142,7 +146,7 @@ Current active snapshot lanes:
 - Registry/Odoo consumer readonly temp-dir audit for current community/pro
   `1.1.10` bundles, without refreshing committed generated Odoo models
 
-Latest P0-68 status:
+Latest P0-69 status:
 
 - P0-26 extends the active MCP compose-script error snapshot lane with
   `missing-user-id-header` and `missing-namespace-header`.
@@ -305,6 +309,10 @@ Latest P0-68 status:
   timeWindow happy cases, with deterministic execution-only range overrides
   and result checks for comparative arithmetic, cumulative first rows, rolling
   materialization, and post-calculated aliases.
+- P0-69 hardens the Java-aligned `pivot + timeWindow` unsupported boundary:
+  Python now checks request-builder preservation, validate/execute fail-closed
+  order before timeWindow field validation, governance build failure, and
+  real-service replay of the Java neutral runner unsupported case.
 - P1-1 records the remaining semantic-scale choice: namespace opt-out parity or
   live DB/result parity.
 - P2-1 records the initial Python aggregate-join design boundary before any

@@ -3,14 +3,15 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from foggy.dataset_model.semantic.pivot.flat_executor import (
+    PIVOT_FEATURE_NOT_IMPLEMENTED_IN_PYTHON,
+)
 from foggy.dataset_model.semantic.service import SemanticQueryService
 from foggy.demo.models.ecommerce_models import create_fact_sales_model
 from foggy.mcp.schemas.tool_config_loader import get_tool_config_loader
-from foggy.dataset_model.semantic.pivot.flat_executor import PIVOT_FEATURE_NOT_IMPLEMENTED_IN_PYTHON
 from foggy.mcp_spi import SemanticQueryRequest
 from foggy.mcp_spi.accessor import build_query_request
 from foggy.mcp_spi.semantic import PivotMetricItem
-
 
 _SCHEMA_DESC_DIR = (
     Path(__file__).resolve().parents[2]
@@ -59,6 +60,23 @@ def _pivot_payload() -> dict:
     }
 
 
+def _flat_pivot_payload() -> dict:
+    return {
+        "outputFormat": "flat",
+        "rows": ["product$categoryName"],
+        "metrics": ["salesAmount"],
+    }
+
+
+def _time_window_payload() -> dict:
+    return {
+        "field": "salesDate$id",
+        "grain": "month",
+        "comparison": "yoy",
+        "targetMetrics": ["salesAmount"],
+    }
+
+
 def test_pivot_request_parses_string_and_object_metrics() -> None:
     request = SemanticQueryRequest(pivot=_pivot_payload())
 
@@ -101,6 +119,19 @@ def test_build_query_request_transfers_pivot_payload() -> None:
     assert request.pivot.metrics[1].name == "categoryShare"
 
 
+def test_build_query_request_preserves_pivot_time_window_for_boundary_check() -> None:
+    request = build_query_request(
+        {
+            "pivot": _flat_pivot_payload(),
+            "timeWindow": _time_window_payload(),
+        }
+    )
+
+    assert request.pivot is not None
+    assert request.pivot.metrics == ["salesAmount"]
+    assert request.time_window == _time_window_payload()
+
+
 def test_query_model_pivot_fails_closed_before_sql_generation() -> None:
     service = SemanticQueryService()
     service.register_model(create_fact_sales_model())
@@ -109,6 +140,31 @@ def test_query_model_pivot_fails_closed_before_sql_generation() -> None:
     response = service.query_model("FactSalesModel", request, mode="validate")
 
     assert PIVOT_FEATURE_NOT_IMPLEMENTED_IN_PYTHON in response.error
+
+
+@pytest.mark.parametrize("mode", ["validate", "execute"])
+def test_query_model_pivot_time_window_fails_closed_before_field_validation(
+    mode: str,
+) -> None:
+    service = SemanticQueryService()
+    service.register_model(create_fact_sales_model())
+    request = SemanticQueryRequest(
+        pivot=_flat_pivot_payload(),
+        time_window={
+            "field": "notAField",
+            "grain": "month",
+            "comparison": "yoy",
+            "targetMetrics": ["salesAmount"],
+        },
+    )
+
+    response = service.query_model("FactSalesModel", request, mode=mode)
+
+    assert response.error is not None
+    assert PIVOT_FEATURE_NOT_IMPLEMENTED_IN_PYTHON in response.error
+    assert "pivot + timeWindow" in response.error
+    assert "TIMEWINDOW_FIELD_NOT_FOUND" not in response.error
+    assert "notAField" not in response.error
 
 
 def test_build_query_with_governance_pivot_fails_closed() -> None:
@@ -122,6 +178,21 @@ def test_build_query_with_governance_pivot_fails_closed() -> None:
     assert PIVOT_FEATURE_NOT_IMPLEMENTED_IN_PYTHON in str(exc_info.value)
 
 
+def test_build_query_with_governance_pivot_time_window_fails_closed() -> None:
+    service = SemanticQueryService()
+    service.register_model(create_fact_sales_model())
+    request = SemanticQueryRequest(
+        pivot=_flat_pivot_payload(),
+        time_window=_time_window_payload(),
+    )
+
+    with pytest.raises(NotImplementedError) as exc_info:
+        service.build_query_with_governance("FactSalesModel", request)
+
+    assert PIVOT_FEATURE_NOT_IMPLEMENTED_IN_PYTHON in str(exc_info.value)
+    assert "pivot + timeWindow" in str(exc_info.value)
+
+
 def test_query_model_v3_schema_exposes_pivot_contract_and_guards() -> None:
     tool = get_tool_config_loader().get_tool("dataset.query_model")
     assert tool is not None
@@ -131,17 +202,12 @@ def test_query_model_v3_schema_exposes_pivot_contract_and_guards() -> None:
     pivot_schema = payload_schema["properties"]["pivot"]
     metrics_items_schema = pivot_schema["properties"]["metrics"]["items"]["oneOf"][1]
     parent_share_schema = metrics_items_schema["oneOf"][0]
-    pivot_desc = pivot_schema["description"]
 
     assert "metrics" in pivot_schema["required"]
     assert parent_share_schema["required"] == ["name", "type", "of"]
     assert parent_share_schema["properties"]["type"]["enum"] == ["parentShare"]
     assert parent_share_schema["properties"]["axis"]["enum"] == ["rows"]
     assert "expr" not in parent_share_schema["properties"]
-
-
-
-
 def test_query_model_description_variants_keep_python_pivot_boundaries() -> None:
     for file_name in [
         "query_model_v3.md",

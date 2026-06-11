@@ -14,6 +14,11 @@ from typing import Any
 
 import pytest
 
+from foggy.dataset_model.semantic.pivot.flat_executor import (
+    PIVOT_FEATURE_NOT_IMPLEMENTED_IN_PYTHON,
+)
+from foggy.dataset_model.semantic.service import SemanticQueryService
+from foggy.demo.models.ecommerce_models import create_fact_sales_model
 from foggy.mcp_spi import SemanticQueryRequest, SemanticQueryResponse
 from foggy.mcp_spi.accessor import build_query_request
 
@@ -51,6 +56,34 @@ def test_java_domain_question_neutral_runner_replays_in_python() -> None:
     boundary = _NeutralSemanticBoundary()
     for case in snapshot.get("cases", []):
         _assert_case_replays(case, boundary)
+
+
+def test_pivot_time_window_unsupported_fixture_fails_closed_in_python_service() -> None:
+    snapshot = _load_snapshot()
+    case = _case_by_id(snapshot, "pivot-time-window-mutual-exclusion-unsupported")
+    tool_arguments = case["expected"]["toolArguments"]
+    request = build_query_request(tool_arguments["payload"])
+
+    service = SemanticQueryService()
+    service.register_model(create_fact_sales_model())
+    response = service.query_model(
+        tool_arguments["model"],
+        request,
+        mode=tool_arguments["mode"],
+    )
+
+    assert response.error is not None
+    assert PIVOT_FEATURE_NOT_IMPLEMENTED_IN_PYTHON in response.error
+    assert "pivot + timeWindow" in response.error
+    assert "FIELD_NOT_FOUND" not in response.error
+    assert "orderDate" not in response.error
+
+
+def _case_by_id(snapshot: dict[str, Any], case_id: str) -> dict[str, Any]:
+    for case in snapshot.get("cases", []):
+        if case.get("id") == case_id:
+            return case
+    pytest.fail(f"Missing case {case_id!r} in {SNAPSHOT_PATH}")
 
 
 def _assert_case_replays(
