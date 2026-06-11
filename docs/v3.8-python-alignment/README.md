@@ -88,6 +88,7 @@ Current P0 execution records:
 - [P0-68-timewindow-sqlite-live-result-parity.md](workitems/P0-68-timewindow-sqlite-live-result-parity.md)
 - [P0-69-pivot-timewindow-refusal-stability.md](workitems/P0-69-pivot-timewindow-refusal-stability.md)
 - [P0-70-domain-transport-refusal-replay-hardening.md](workitems/P0-70-domain-transport-refusal-replay-hardening.md)
+- [P0-71-domain-transport-sqlite-live-result-replay.md](workitems/P0-71-domain-transport-sqlite-live-result-replay.md)
 
 Current P1/P2 planning records:
 
@@ -131,7 +132,8 @@ Current active snapshot lanes:
   replay
 - Pivot domain transport large-domain threshold, SQLite bind-limit
   fail-closed snapshots, empty-column refusal, and MySQL5.7 documented gap
-  replay
+  replay, plus Java-fixture-driven SQLite live-result replay for two-field
+  NULL-safe and 501-member CTE transport cases
 - Domain/question neutral runner normalized tool-argument snapshots, warning
   markers, neutral case-summary report metadata, unsupported construct
   fail-closed metadata, ToolCallCollector-backed record envelopes, and Python
@@ -148,7 +150,7 @@ Current active snapshot lanes:
 - Registry/Odoo consumer readonly temp-dir audit for current community/pro
   `1.1.10` bundles, without refreshing committed generated Odoo models
 
-Latest P0-70 status:
+Latest P0-71 status:
 
 - P0-26 extends the active MCP compose-script error snapshot lane with
   `missing-user-id-header` and `missing-namespace-header`.
@@ -319,6 +321,10 @@ Latest P0-70 status:
   fixture-presence and parameterized replay for SQLite 501 transport, SQLite
   1000-bind fail-closed, empty-column refusal, and the MySQL 5.7 Java-only
   derived-table gap.
+- P0-71 adds Java-fixture-driven SQLite live-result replay for domain
+  transport: the two-field NULL-safe case and the 501-member CTE transport
+  case now execute assembled Python SQL against SQLite and match independent
+  oracle SQL.
 - P1-1 records the remaining semantic-scale choice: namespace opt-out parity or
   live DB/result parity.
 - P2-1 records the initial Python aggregate-join design boundary before any

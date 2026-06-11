@@ -7,6 +7,7 @@ transport renderer contracts are checked without Odoo models or live DBs.
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,7 @@ from foggy.dataset_model.semantic.pivot.domain_transport import (
     Mysql8DomainRenderer,
     PostgresCteDomainRenderer,
     SqliteCteDomainRenderer,
+    assemble_domain_transport_sql,
     build_join_predicate,
     resolve_renderer,
 )
@@ -76,6 +78,95 @@ def test_java_pivot_domain_boundary_case_replays_in_python(case_id: str) -> None
     case = _case_by_id(snapshot, case_id)
 
     _assert_case_replays(case)
+
+
+def test_java_sqlite_two_field_domain_snapshot_executes_live_result() -> None:
+    snapshot = _load_snapshot()
+    case = _case_by_id(snapshot, "domain-sqlite-two-field-null-safe")
+    plan = _plan_from(case["plan"])
+    rows = [
+        ("A", "p1", 10.0),
+        ("A", "p1", 2.0),
+        ("A", None, 7.0),
+        ("B", "p2", 5.0),
+        ("B", None, 100.0),
+        ("C", "p3", 99.0),
+    ]
+
+    result = _execute_sqlite_domain_transport(
+        plan=plan,
+        seed_rows=rows,
+        select_sql=(
+            'SELECT f."category", f."product", SUM(f."amount") AS "metric"\n'
+            'FROM "fact_sales" AS f\n'
+            'GROUP BY f."category", f."product"'
+        ),
+        field_sql_map={
+            "category": 'f."category"',
+            "product": 'f."product"',
+        },
+    )
+    oracle = _execute_sqlite_oracle(
+        seed_rows=rows,
+        sql=(
+            'SELECT f."category", f."product", SUM(f."amount") AS "metric"\n'
+            'FROM "fact_sales" AS f\n'
+            "WHERE (f.\"category\" = ? AND f.\"product\" = ?)\n"
+            "   OR (f.\"category\" = ? AND f.\"product\" IS NULL)\n"
+            "   OR (f.\"category\" = ? AND f.\"product\" = ?)\n"
+            'GROUP BY f."category", f."product"'
+        ),
+        params=["A", "p1", "A", "B", "p2"],
+    )
+
+    assert _normalize_sqlite_rows(result) == _normalize_sqlite_rows(oracle)
+    assert _normalize_sqlite_rows(result) == [
+        {"category": "A", "product": "p1", "metric": 12.0},
+        {"category": "A", "product": None, "metric": 7.0},
+        {"category": "B", "product": "p2", "metric": 5.0},
+    ]
+
+
+def test_java_sqlite_large_501_domain_snapshot_executes_live_result() -> None:
+    snapshot = _load_snapshot()
+    case = _case_by_id(snapshot, "domain-sqlite-large-501-transport")
+    plan = _plan_from(case["plan"])
+    rows = [
+        ("Category-0", None, 1.0),
+        ("Category-42", None, 2.0),
+        ("Category-42", None, 3.0),
+        ("Category-500", None, 4.0),
+        ("Category-outside", None, 99.0),
+    ]
+
+    result = _execute_sqlite_domain_transport(
+        plan=plan,
+        seed_rows=rows,
+        select_sql=(
+            'SELECT f."category", SUM(f."amount") AS "metric"\n'
+            'FROM "fact_sales" AS f\n'
+            'GROUP BY f."category"'
+        ),
+        field_sql_map={"category": 'f."category"'},
+    )
+    in_placeholders = ", ".join("?" for _ in plan.tuples)
+    oracle = _execute_sqlite_oracle(
+        seed_rows=rows,
+        sql=(
+            'SELECT f."category", SUM(f."amount") AS "metric"\n'
+            'FROM "fact_sales" AS f\n'
+            f'WHERE f."category" IN ({in_placeholders})\n'
+            'GROUP BY f."category"'
+        ),
+        params=[row[0] for row in plan.tuples],
+    )
+
+    assert _normalize_sqlite_rows(result) == _normalize_sqlite_rows(oracle)
+    assert _normalize_sqlite_rows(result) == [
+        {"category": "Category-0", "product": None, "metric": 1.0},
+        {"category": "Category-42", "product": None, "metric": 5.0},
+        {"category": "Category-500", "product": None, "metric": 4.0},
+    ]
 
 
 def _assert_case_replays(case: dict[str, Any]) -> None:
@@ -271,3 +362,71 @@ def _field_sql_map(case: dict[str, Any]) -> dict[str, str]:
     if case["dialect"] == "mysql":
         return {field: f"_base.`{field}`" for field in case["plan"]["fields"]}
     return {field: f'_base."{field}"' for field in case["plan"]["fields"]}
+
+
+def _execute_sqlite_domain_transport(
+    *,
+    plan: DomainTransportPlan,
+    seed_rows: list[tuple[str | None, str | None, float]],
+    select_sql: str,
+    field_sql_map: dict[str, str],
+) -> list[dict[str, Any]]:
+    renderer = SqliteCteDomainRenderer()
+    fragment = renderer.render(plan)
+    sql, params = assemble_domain_transport_sql(
+        select_sql,
+        [],
+        fragment,
+        field_sql_map,
+        renderer,
+    )
+    return _execute_sqlite_oracle(seed_rows=seed_rows, sql=sql, params=params)
+
+
+def _execute_sqlite_oracle(
+    *,
+    seed_rows: list[tuple[str | None, str | None, float]],
+    sql: str,
+    params: list[Any] | tuple[Any, ...] | None = None,
+) -> list[dict[str, Any]]:
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute(
+            """
+            CREATE TABLE fact_sales (
+                category TEXT,
+                product TEXT,
+                amount REAL
+            )
+            """
+        )
+        conn.executemany(
+            "INSERT INTO fact_sales(category, product, amount) VALUES (?, ?, ?)",
+            seed_rows,
+        )
+        cursor = conn.execute(sql, list(params or []))
+        return [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+
+def _normalize_sqlite_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for row in rows:
+        normalized.append(
+            {
+                "category": row.get("category"),
+                "product": row.get("product"),
+                "metric": float(row["metric"]) if row.get("metric") is not None else None,
+            }
+        )
+    return sorted(
+        normalized,
+        key=lambda item: (
+            item["category"] is None,
+            "" if item["category"] is None else item["category"],
+            item["product"] is None,
+            "" if item["product"] is None else item["product"],
+        ),
+    )
