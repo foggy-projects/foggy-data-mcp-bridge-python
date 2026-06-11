@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
+from copy import deepcopy
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -11,6 +15,12 @@ from foggy.dataset_model.semantic.service import SemanticQueryService
 from foggy.demo.models.ecommerce_models import create_fact_sales_model
 from foggy.mcp_spi import SemanticQueryRequest
 from foggy.mcp_spi.semantic import DeniedColumn, FieldAccessDef
+
+_CATALOG_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "fixtures"
+    / "java_time_window_parity_catalog.json"
+)
 
 
 @pytest.fixture()
@@ -25,6 +35,176 @@ def sqlite_time_window_service(tmp_path):
     yield service
 
     service._run_async_in_sync(executor.close())
+
+
+def _load_java_time_window_happy_cases() -> list[dict[str, Any]]:
+    if not _CATALOG_PATH.exists():
+        pytest.skip(f"timeWindow catalog missing: {_CATALOG_PATH}")
+    catalog = json.loads(_CATALOG_PATH.read_text(encoding="utf-8"))
+    return [case for case in catalog["cases"] if "expectedError" not in case]
+
+
+def _unique(values: list[str]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        if value not in result:
+            result.append(value)
+    return result
+
+
+def _catalog_query_shape(case: dict[str, Any]) -> tuple[list[str], list[str]]:
+    comparison = case["comparison"]
+    expected_columns = list(case.get("expectedColumns", ()))
+    request_columns = case.get("requestColumns")
+
+    if comparison.startswith("rolling_"):
+        columns = request_columns or ["salesDate$id", "salesAmount", *expected_columns]
+        return _unique(list(columns)), ["salesDate$id"]
+
+    if comparison == "yoy":
+        group_by = ["salesDate$year", "salesDate$month"]
+        columns = request_columns or expected_columns
+        return _unique(list(columns)), group_by
+
+    if comparison == "mom":
+        group_by = ["salesDate$month", "salesDate$id"]
+        columns = request_columns or expected_columns
+        return _unique(list(columns)), group_by
+
+    if comparison == "mtd":
+        group_by = ["salesDate$year", "salesDate$month", "salesDate$id"]
+        columns = request_columns or [*group_by, "salesAmount", *expected_columns]
+        return _unique(list(columns)), group_by
+
+    if comparison == "ytd":
+        group_by = ["salesDate$year", "salesDate$id"]
+        columns = request_columns or [*group_by, "salesAmount", *expected_columns]
+        return _unique(list(columns)), group_by
+
+    if comparison == "wow":
+        group_by = ["salesDate$week", "salesDate$dayOfWeek"]
+        columns = request_columns or expected_columns
+        return _unique(list(columns)), group_by
+
+    columns = request_columns or ["salesDate$id", "salesAmount", *expected_columns]
+    return _unique(list(columns)), ["salesDate$id"]
+
+
+def _execution_time_window(case: dict[str, Any]) -> dict[str, Any]:
+    """Clone Java catalog timeWindow and pin ranges for deterministic SQLite data."""
+    time_window = deepcopy(case["timeWindow"])
+    comparison = case["comparison"]
+    if comparison in {"yoy", "mom"}:
+        time_window["value"] = ["20230101", "20250101"]
+    elif comparison == "wow":
+        time_window["value"] = ["20240201", "20240209"]
+    elif comparison == "ytd":
+        time_window["value"] = ["20240101", "20240202"]
+    else:
+        time_window["value"] = ["20240101", "20240109"]
+    return time_window
+
+
+@pytest.mark.parametrize(
+    "case",
+    _load_java_time_window_happy_cases(),
+    ids=lambda case: case["name"],
+)
+def test_java_time_window_catalog_happy_cases_execute_on_sqlite(
+    sqlite_time_window_service,
+    case: dict[str, Any],
+):
+    columns, group_by = _catalog_query_shape(case)
+    response = sqlite_time_window_service.query_model(
+        "FactSalesModel",
+        SemanticQueryRequest(
+            columns=columns,
+            group_by=group_by,
+            time_window=_execution_time_window(case),
+            calculated_fields=case.get("calculatedFields", []),
+        ),
+        mode="execute",
+    )
+
+    assert response.error is None, (
+        f"[{case['name']}] Python execution failed: {response.error}"
+    )
+    assert response.items, f"[{case['name']}] expected non-empty SQLite result"
+
+    produced_columns = {column["name"] for column in response.columns}
+    expected_columns = set(case["expectedColumns"])
+    assert expected_columns.issubset(produced_columns), (
+        f"[{case['name']}] missing columns: {expected_columns - produced_columns}"
+    )
+    for expected in expected_columns:
+        assert expected in response.items[0], (
+            f"[{case['name']}] result row missing expected field {expected}"
+        )
+
+    _assert_catalog_live_result_semantics(case, response.items)
+
+
+def _assert_catalog_live_result_semantics(
+    case: dict[str, Any],
+    rows: list[dict[str, Any]],
+) -> None:
+    comparison = case["comparison"]
+    if comparison in {"yoy", "mom", "wow"}:
+        _assert_comparative_math(case["name"], rows)
+    if comparison in {"mtd", "ytd"}:
+        alias = f"salesAmount__{comparison}"
+        assert all(row[alias] is not None for row in rows)
+        first_by_partition = _first_cumulative_rows(comparison, rows)
+        assert first_by_partition
+        for row in first_by_partition:
+            assert row[alias] == pytest.approx(row["salesAmount"])
+    if comparison.startswith("rolling_"):
+        alias = f"salesAmount__{comparison}"
+        assert all(row[alias] is not None for row in rows)
+        if case["name"] == "rolling_7d-post-calc-gap-happy":
+            for row in rows:
+                assert row["rollingGap"] == pytest.approx(
+                    row["salesAmount"] - row[alias]
+                )
+    if case["name"] == "yoy-month-post-calc-growth-happy":
+        matching_rows = [row for row in rows if row["salesAmount__ratio"] is not None]
+        assert matching_rows
+        for row in matching_rows:
+            assert row["growthPercent"] == pytest.approx(
+                row["salesAmount__ratio"] * 100
+            )
+
+
+def _assert_comparative_math(case_name: str, rows: list[dict[str, Any]]) -> None:
+    rows_with_prior = [row for row in rows if row["salesAmount__prior"] is not None]
+    assert rows_with_prior, f"[{case_name}] expected at least one prior-period match"
+    for row in rows:
+        prior = row["salesAmount__prior"]
+        if prior is None:
+            assert row["salesAmount__diff"] is None
+            assert row["salesAmount__ratio"] is None
+            continue
+        expected_diff = row["salesAmount"] - prior
+        assert row["salesAmount__diff"] == pytest.approx(expected_diff)
+        if prior == 0:
+            assert row["salesAmount__ratio"] is None
+        else:
+            assert row["salesAmount__ratio"] == pytest.approx(expected_diff / prior)
+
+
+def _first_cumulative_rows(
+    comparison: str,
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    sorted_rows = sorted(rows, key=lambda row: row["salesDate$id"])
+    first_by_partition: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for row in sorted_rows:
+        if comparison == "mtd":
+            key = (row["salesDate$year"], row["salesDate$month"])
+        else:
+            key = (row["salesDate$year"],)
+        first_by_partition.setdefault(key, row)
+    return list(first_by_partition.values())
 
 
 def test_rolling_range_executes_on_sqlite(sqlite_time_window_service):
@@ -342,6 +522,7 @@ def _seed_time_window_db(db_path) -> None:
                 (20240102, "2024-01-02", 2024, 1, 1, 1, "Jan", 2, 0),
                 (20240103, "2024-01-03", 2024, 1, 1, 1, "Jan", 3, 0),
                 (20240201, "2024-02-01", 2024, 1, 2, 5, "Feb", 4, 0),
+                (20240208, "2024-02-08", 2024, 1, 2, 6, "Feb", 4, 0),
             ],
         )
         conn.executemany(
@@ -353,6 +534,7 @@ def _seed_time_window_db(db_path) -> None:
                 (20240102, 20.0),
                 (20240103, 30.0),
                 (20240201, 90.0),
+                (20240208, 40.0),
             ],
         )
         conn.commit()

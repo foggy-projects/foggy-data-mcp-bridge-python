@@ -85,6 +85,7 @@ Current P0 execution records:
 - [P0-65-compose-sqlite-join-snapshot-expansion.md](workitems/P0-65-compose-sqlite-join-snapshot-expansion.md)
 - [P0-66-timewindow-current-java-snapshot-refresh.md](workitems/P0-66-timewindow-current-java-snapshot-refresh.md)
 - [P0-67-timewindow-wow-week-model-alignment.md](workitems/P0-67-timewindow-wow-week-model-alignment.md)
+- [P0-68-timewindow-sqlite-live-result-parity.md](workitems/P0-68-timewindow-sqlite-live-result-parity.md)
 
 Current P1/P2 planning records:
 
@@ -95,7 +96,8 @@ Current active snapshot lanes:
 
 - Formula compiler catalog and QM formula audit
 - Time window catalog, including the current Java-produced SQL snapshot with
-  9 successful happy cases and no documented Java generation drift
+  9 successful happy cases and no documented Java generation drift, plus
+  Python SQLite live-result execution for the same Java happy-case catalog
 - Compose query neutral snapshots, including current source-alias and
   qualified-ref fixture coverage plus P0-37 projection/slice/orderBy and
   derived-inheritance expansion, duplicate source-alias fail-closed coverage,
@@ -140,7 +142,7 @@ Current active snapshot lanes:
 - Registry/Odoo consumer readonly temp-dir audit for current community/pro
   `1.1.10` bundles, without refreshing committed generated Odoo models
 
-Latest P0-67 status:
+Latest P0-68 status:
 
 - P0-26 extends the active MCP compose-script error snapshot lane with
   `missing-user-id-header` and `missing-namespace-header`.
@@ -299,6 +301,10 @@ Latest P0-67 status:
   `salesDate$week` in the Java ecommerce demo/query model, refreshing the Java
   snapshot to 9 SQL success cases with no generation errors, and updating
   Python replay to require all 9 success cases.
+- P0-68 adds Python SQLite live-result execution for all 9 current Java
+  timeWindow happy cases, with deterministic execution-only range overrides
+  and result checks for comparative arithmetic, cumulative first rows, rolling
+  materialization, and post-calculated aliases.
 - P1-1 records the remaining semantic-scale choice: namespace opt-out parity or
   live DB/result parity.
 - P2-1 records the initial Python aggregate-join design boundary before any
