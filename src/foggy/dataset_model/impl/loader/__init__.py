@@ -37,6 +37,53 @@ from foggy.dataset_model.proxy import ColumnRef, DimensionProxy, JoinBuilder, Ta
 
 logger = logging.getLogger(__name__)
 
+AGGREGATE_JOIN_UNSUPPORTED_CODE = "QUERYMODEL_AGGREGATE_JOIN_UNSUPPORTED"
+_AGGREGATE_JOIN_CONTRACT_KEYS = {
+    "aggregateJoin",
+    "aggregateJoins",
+    "aggregateRelation",
+    "aggregateRelations",
+    "aggregateRelationJoins",
+    "leftJoinAggregate",
+}
+_AGGREGATE_JOIN_MARKER_KEYS = {
+    "aggregate",
+    "aggregateRelation",
+    "aggregateRelationAlias",
+    "aggregateRelationName",
+    "groupBy",
+    "measures",
+}
+
+
+def _is_unsupported_aggregate_join_value(value: Any) -> bool:
+    if getattr(type(value), "aggregate_join_unsupported", False):
+        return True
+    if isinstance(value, dict):
+        if _AGGREGATE_JOIN_CONTRACT_KEYS.intersection(value.keys()):
+            return True
+        if value.get("type") in {"aggregateJoin", "aggregateRelation"}:
+            return True
+        if value.get("joinType") == "aggregate" or value.get("join_type") == "aggregate":
+            return True
+        if "rightRelation" in value and _AGGREGATE_JOIN_MARKER_KEYS.intersection(value.keys()):
+            return True
+        return any(_is_unsupported_aggregate_join_value(v) for v in value.values())
+    if isinstance(value, list):
+        return any(_is_unsupported_aggregate_join_value(item) for item in value)
+    return False
+
+
+def _reject_unsupported_aggregate_join_contract(qm_def: Dict[str, Any], qm_source: Any) -> None:
+    if _is_unsupported_aggregate_join_value(qm_def):
+        raise ValueError(
+            f"{AGGREGATE_JOIN_UNSUPPORTED_CODE}: QueryModel aggregate join is "
+            "not implemented in the Python engine yet. Export a Java neutral "
+            "snapshot first, then implement a dedicated aggregate relation "
+            "carrier instead of loading it as an ordinary explicit join. "
+            f"source={qm_source}"
+        )
+
 
 def _extra_metadata(definition: Dict[str, Any], consumed_keys: set) -> Dict[str, Any]:
     """Return definition keys that should survive as Pydantic extras."""
@@ -225,6 +272,11 @@ def _build_explicit_joins(
     alias_map: Dict[str, str] = {base_model_name: "t"}
 
     for join in joins:
+        if _is_unsupported_aggregate_join_value(join):
+            raise ValueError(
+                f"{AGGREGATE_JOIN_UNSUPPORTED_CODE}: aggregate relation joins "
+                "cannot be loaded as ordinary explicit joins."
+            )
         if not isinstance(join, JoinBuilder) or not join.has_conditions():
             continue
 
@@ -878,6 +930,7 @@ def load_models_from_directory(model_dir: str, namespace: Optional[str] = None) 
             if not qm_def or not isinstance(qm_def, dict):
                 logger.warning(f"No 'queryModel' export found in: {qm_file}")
                 continue
+            _reject_unsupported_aggregate_join_contract(qm_def, qm_file)
 
             qm_name = qm_def.get("name")
             if not qm_name:

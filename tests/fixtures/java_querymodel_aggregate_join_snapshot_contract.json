@@ -1,0 +1,126 @@
+{
+  "schemaVersion": 1,
+  "feature": "queryModelAggregateJoin",
+  "status": "contractOnly",
+  "owner": "java",
+  "source": "JavaQueryModelAggregateJoinSnapshotTest",
+  "purpose": "Define the neutral Java snapshot envelope required before Python QueryModel aggregate join implementation.",
+  "requiredEnvelopeFields": [
+    "schemaVersion",
+    "feature",
+    "source",
+    "cases"
+  ],
+  "requiredCaseFields": [
+    "id",
+    "type",
+    "model",
+    "request",
+    "expected"
+  ],
+  "requiredExpectedFieldsByType": {
+    "sql": [
+      "sqlMarkers",
+      "forbiddenSqlMarkers",
+      "params",
+      "diagnostics"
+    ],
+    "result": [
+      "rows",
+      "leftMeasureNonMultiplicationField",
+      "aggregateOutputFields"
+    ],
+    "metadata": [
+      "fields",
+      "aggregateRelation"
+    ],
+    "error": [
+      "errorCode",
+      "messageMarkers"
+    ]
+  },
+  "requiredCases": [
+    {
+      "id": "aggregate-join-left-measure-not-multiplied",
+      "type": "result",
+      "description": "One left row with multiple RHS details keeps the left measure at the original grain and exposes RHS aggregate outputs."
+    },
+    {
+      "id": "aggregate-join-sql-shape-sqlite",
+      "type": "sql",
+      "description": "SQLite generated SQL renders a structured RHS derived aggregate relation before LEFT JOIN."
+    },
+    {
+      "id": "aggregate-join-missing-right-key-groupby-refusal",
+      "type": "error",
+      "description": "RHS groupBy missing a right join key fails closed."
+    },
+    {
+      "id": "aggregate-join-fixed-rhs-filter",
+      "type": "sql",
+      "description": "Fixed RHS relation filter is rendered inside the aggregate relation before GROUP BY."
+    },
+    {
+      "id": "aggregate-join-runtime-extdata-filter",
+      "type": "sql",
+      "description": "Runtime extData value is rendered as an RHS derived-relation parameter."
+    },
+    {
+      "id": "aggregate-join-runtime-extdata-missing-refusal",
+      "type": "error",
+      "description": "Missing runtime extData value fails closed."
+    },
+    {
+      "id": "aggregate-join-and-pushdown-diagnostics",
+      "type": "sql",
+      "description": "Safe AND join-key/group-key/measure predicates duplicate to RHS WHERE/HAVING and emit pushed diagnostics."
+    },
+    {
+      "id": "aggregate-join-or-outer-only-diagnostics",
+      "type": "sql",
+      "description": "OR or mixed complex predicates remain outer-only and emit retained diagnostics."
+    },
+    {
+      "id": "aggregate-join-denied-source-column-refusal",
+      "type": "error",
+      "description": "Denying the RHS source physical column rejects aggregate outputs and dependent calculated fields."
+    },
+    {
+      "id": "aggregate-join-metadata-lineage",
+      "type": "metadata",
+      "description": "V3 metadata exposes aggregateRelation lineage and inherited aggregation/source metadata."
+    }
+  ],
+  "diagnosticContract": {
+    "requiredDecisionValues": [
+      "pushed",
+      "retained",
+      "refused"
+    ],
+    "requiredFields": [
+      "decision",
+      "field",
+      "op",
+      "target"
+    ],
+    "optionalFields": [
+      "reasonCode",
+      "expression"
+    ]
+  },
+  "metadataLineageRequiredKeys": [
+    "aggregation",
+    "sourceCaption",
+    "sourceMeasure",
+    "sourceAlias",
+    "sourceExpression",
+    "aggregateExpression",
+    "sourceColumn"
+  ],
+  "plannedPythonReplay": {
+    "fixturePath": "tests/fixtures/java_querymodel_aggregate_join_snapshot_parity.json",
+    "testPath": "tests/integration/test_java_querymodel_aggregate_join_snapshot_parity.py",
+    "initialMode": "skip-until-java-export",
+    "implementationBoundary": "Do not render production aggregate join SQL until Java neutral fixture cases are available."
+  }
+}

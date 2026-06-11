@@ -26,6 +26,7 @@ REQUIRED_FEATURES = {
     "governance",
     "domainFixtures",
     "semanticScaleFactor",
+    "queryModelAggregateJoin",
 }
 
 

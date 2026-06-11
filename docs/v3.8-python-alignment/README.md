@@ -90,10 +90,13 @@ Current P0 execution records:
 - [P0-70-domain-transport-refusal-replay-hardening.md](workitems/P0-70-domain-transport-refusal-replay-hardening.md)
 - [P0-71-domain-transport-sqlite-live-result-replay.md](workitems/P0-71-domain-transport-sqlite-live-result-replay.md)
 - [P0-72-querymodel-aggregate-join-python-gap-audit.md](workitems/P0-72-querymodel-aggregate-join-python-gap-audit.md)
+- [P0-73-querymodel-aggregate-join-neutral-snapshot-contract.md](workitems/P0-73-querymodel-aggregate-join-neutral-snapshot-contract.md)
+- [P0-74-querymodel-aggregate-join-python-replay-skeleton.md](workitems/P0-74-querymodel-aggregate-join-python-replay-skeleton.md)
 
 Current P1/P2 planning records:
 
 - [P1-1-semantic-scale-namespace-opt-out-or-live-result-parity.md](workitems/P1-1-semantic-scale-namespace-opt-out-or-live-result-parity.md)
+- [P1-2-querymodel-aggregate-join-parser-fail-closed.md](workitems/P1-2-querymodel-aggregate-join-parser-fail-closed.md)
 - [P2-1-querymodel-aggregate-join-python-design.md](workitems/P2-1-querymodel-aggregate-join-python-design.md)
 
 Current active snapshot lanes:
@@ -150,11 +153,11 @@ Current active snapshot lanes:
   local dependency artifacts
 - Registry/Odoo consumer readonly temp-dir audit for current community/pro
   `1.1.10` bundles, without refreshing committed generated Odoo models
-- QueryModel aggregate join audit lane, with Java 9.2 capability, Python
-  landing points, gap matrix, and snapshot-first follow-up split frozen before
-  implementation
+- QueryModel aggregate join audit and planned snapshot lane, with Java 9.2
+  capability, Python landing points, required neutral export contract, manifest
+  replay skeleton, and loader fail-closed guard before implementation
 
-Latest P0-72 status:
+Latest P0-74 / P1-2 status:
 
 - P0-26 extends the active MCP compose-script error snapshot lane with
   `missing-user-id-header` and `missing-namespace-header`.
@@ -334,6 +337,16 @@ Latest P0-72 status:
   conclusion that Python needs a separate aggregate relation carrier and
   neutral Java snapshot contract before implementation, instead of extending
   ordinary explicit joins or touching Odoo models first.
+- P0-73 adds the aggregate-join neutral snapshot contract fixture and planned
+  manifest lane, covering SQL/result, fail-closed, metadata lineage,
+  diagnostics, and governance cases required from Java.
+- P0-74 adds the Python contract replay skeleton and makes
+  `queryModelAggregateJoin` part of the always-on manifest feature matrix while
+  keeping production aggregate-join SQL unimplemented.
+- P1-2 adds the first bounded engine guard: Python now recognizes explicit
+  aggregate join declarations and Java-style `leftJoinAggregate(...)` DSL
+  sentinels, then fails closed with `QUERYMODEL_AGGREGATE_JOIN_UNSUPPORTED`
+  instead of loading them as ordinary joins.
 - P1-1 records the remaining semantic-scale choice: namespace opt-out parity or
   live DB/result parity.
 - P2-1 records the initial Python aggregate-join design boundary before any

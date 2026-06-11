@@ -11,6 +11,7 @@ from pathlib import Path
 
 from foggy.dataset_model.definitions.base import DimensionType
 from foggy.dataset_model.impl.loader import (
+    AGGREGATE_JOIN_UNSUPPORTED_CODE,
     _snake_to_camel,
     _adapt_fsscript_tm,
     _TmRefProxy,
@@ -968,3 +969,129 @@ export const queryModel = {
             ("orderId", "orderId"),
             ("orderLineNo", "orderLineNo"),
         ]
+
+    def test_aggregate_join_explicit_contract_fails_closed(self, caplog):
+        """Aggregate join declarations must not silently load as ordinary joins."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model_dir = Path(tmpdir) / "model"
+            model_dir.mkdir()
+            (model_dir / "FactOrderModel.tm").write_text(
+                """
+export const model = {
+    name: 'FactOrderModel',
+    caption: 'Orders',
+    tableName: 'fact_order',
+    idColumn: 'id',
+    properties: [
+        { column: 'id', name: 'id', caption: 'ID', type: 'LONG' },
+        { column: 'order_id', name: 'orderId', caption: 'Order ID', type: 'STRING' }
+    ],
+    measures: [
+        { column: 'order_amount', name: 'orderAmount', caption: 'Order Amount', aggregation: 'SUM' }
+    ]
+};
+""",
+                encoding="utf-8",
+            )
+            query_dir = Path(tmpdir) / "query"
+            query_dir.mkdir()
+            (query_dir / "OrderAggregateJoinQueryModel.qm").write_text(
+                """
+const fo = loadTableModel('FactOrderModel');
+export const queryModel = {
+    name: 'OrderAggregateJoinQueryModel',
+    caption: 'Order Aggregate Join Query',
+    model: fo,
+    aggregateJoins: [
+        {
+            rightModel: 'FactSalesModel',
+            groupBy: ['orderId'],
+            measures: [{ field: 'salesAmount', aggregation: 'SUM', alias: 'salesAmount' }]
+        }
+    ],
+    columnGroups: [
+        { caption: 'Fields', items: [{ ref: fo.orderId }, { ref: fo.orderAmount }] }
+    ]
+};
+""",
+                encoding="utf-8",
+            )
+
+            with caplog.at_level("WARNING"):
+                models = load_models_from_directory(tmpdir)
+
+        assert {m.name for m in models} == {"FactOrderModel"}
+        assert AGGREGATE_JOIN_UNSUPPORTED_CODE in caplog.text
+        assert "OrderAggregateJoinQueryModel.qm" in caplog.text
+
+    def test_left_join_aggregate_dsl_fails_closed(self, caplog):
+        """Java-style leftJoinAggregate DSL is recognized and refused explicitly."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model_dir = Path(tmpdir) / "model"
+            model_dir.mkdir()
+            (model_dir / "FactOrderModel.tm").write_text(
+                """
+export const model = {
+    name: 'FactOrderModel',
+    caption: 'Orders',
+    tableName: 'fact_order',
+    idColumn: 'id',
+    properties: [
+        { column: 'id', name: 'id', caption: 'ID', type: 'LONG' },
+        { column: 'order_id', name: 'orderId', caption: 'Order ID', type: 'STRING' }
+    ],
+    measures: [
+        { column: 'order_amount', name: 'orderAmount', caption: 'Order Amount', aggregation: 'SUM' }
+    ]
+};
+""",
+                encoding="utf-8",
+            )
+            (model_dir / "FactSalesModel.tm").write_text(
+                """
+export const model = {
+    name: 'FactSalesModel',
+    caption: 'Sales',
+    tableName: 'fact_sales',
+    idColumn: 'id',
+    properties: [
+        { column: 'id', name: 'id', caption: 'ID', type: 'LONG' },
+        { column: 'order_id', name: 'orderId', caption: 'Order ID', type: 'STRING' }
+    ],
+    measures: [
+        { column: 'sales_amount', name: 'salesAmount', caption: 'Sales Amount', aggregation: 'SUM' }
+    ]
+};
+""",
+                encoding="utf-8",
+            )
+            query_dir = Path(tmpdir) / "query"
+            query_dir.mkdir()
+            (query_dir / "OrderAggregateJoinDslQueryModel.qm").write_text(
+                """
+const fo = loadTableModel('FactOrderModel');
+const fs = loadTableModel('FactSalesModel');
+export const queryModel = {
+    name: 'OrderAggregateJoinDslQueryModel',
+    caption: 'Order Aggregate Join DSL Query',
+    model: fo,
+    joins: [
+        fo.leftJoinAggregate(fs)
+            .groupBy(fs.orderId)
+            .sum(fs.salesAmount, 'salesAmount')
+            .on(fo.orderId, fs.orderId)
+    ],
+    columnGroups: [
+        { caption: 'Fields', items: [{ ref: fo.orderId }, { ref: fo.orderAmount }] }
+    ]
+};
+""",
+                encoding="utf-8",
+            )
+
+            with caplog.at_level("WARNING"):
+                models = load_models_from_directory(tmpdir)
+
+        assert {m.name for m in models} == {"FactOrderModel", "FactSalesModel"}
+        assert AGGREGATE_JOIN_UNSUPPORTED_CODE in caplog.text
+        assert "ordinary explicit join" in caplog.text

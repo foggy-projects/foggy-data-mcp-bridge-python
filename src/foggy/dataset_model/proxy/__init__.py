@@ -234,6 +234,81 @@ class JoinBuilder:
         return self
 
 
+class UnsupportedAggregateRelationProxy:
+    """Sentinel for Java aggregate relation DSL not implemented in Python yet."""
+
+    aggregate_join_unsupported = True
+
+    def __init__(self, model_name: str, alias: Optional[str] = None):
+        self._model_name = model_name
+        self._alias = alias
+
+    @property
+    def model_name(self) -> str:
+        return self._model_name
+
+    def filterEq(self, *args, **kwargs) -> UnsupportedAggregateRelationProxy:
+        return self
+
+    def filterIn(self, *args, **kwargs) -> UnsupportedAggregateRelationProxy:
+        return self
+
+    def filterGt(self, *args, **kwargs) -> UnsupportedAggregateRelationProxy:
+        return self
+
+    def filterGte(self, *args, **kwargs) -> UnsupportedAggregateRelationProxy:
+        return self
+
+    def filterLt(self, *args, **kwargs) -> UnsupportedAggregateRelationProxy:
+        return self
+
+    def filterLte(self, *args, **kwargs) -> UnsupportedAggregateRelationProxy:
+        return self
+
+    def groupBy(self, *args, **kwargs) -> UnsupportedAggregateRelationProxy:
+        return self
+
+    def sum(self, *args, **kwargs) -> UnsupportedAggregateRelationProxy:
+        return self
+
+    def avg(self, *args, **kwargs) -> UnsupportedAggregateRelationProxy:
+        return self
+
+    def min(self, *args, **kwargs) -> UnsupportedAggregateRelationProxy:
+        return self
+
+    def max(self, *args, **kwargs) -> UnsupportedAggregateRelationProxy:
+        return self
+
+    def count(self, *args, **kwargs) -> UnsupportedAggregateRelationProxy:
+        return self
+
+    def countDistinct(self, *args, **kwargs) -> UnsupportedAggregateRelationProxy:
+        return self
+
+    def as_(self, alias: str) -> UnsupportedAggregateRelationProxy:
+        return UnsupportedAggregateRelationProxy(self._model_name, alias=alias)
+
+    def __getattr__(self, name: str):
+        if name == "as":
+            return self.as_
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return ColumnRef(self._model_name, name)
+
+
+class UnsupportedAggregateJoinBuilder(UnsupportedAggregateRelationProxy):
+    """Sentinel for Java leftJoinAggregate(...) declarations."""
+
+    def __init__(self, left: TableModelProxy, right: TableModelProxy):
+        super().__init__(right.model_name)
+        self.left = left
+        self.right = right
+
+    def on(self, *args, **kwargs) -> UnsupportedAggregateJoinBuilder:
+        return self
+
+
 class TableModelProxy:
     """Dynamic proxy for table model field access in QM definitions.
 
@@ -282,6 +357,15 @@ class TableModelProxy:
 
     def leftJoin(self, other: TableModelProxy) -> JoinBuilder:
         return self.left_join(other)
+
+    def leftJoinAggregate(self, other: TableModelProxy) -> UnsupportedAggregateJoinBuilder:
+        return UnsupportedAggregateJoinBuilder(self, other)
+
+    def filterEq(self, *args, **kwargs) -> UnsupportedAggregateRelationProxy:
+        return UnsupportedAggregateRelationProxy(self._model_name).filterEq(*args, **kwargs)
+
+    def groupBy(self, *args, **kwargs) -> UnsupportedAggregateRelationProxy:
+        return UnsupportedAggregateRelationProxy(self._model_name).groupBy(*args, **kwargs)
 
     def innerJoin(self, other: TableModelProxy) -> JoinBuilder:
         return self.inner_join(other)
