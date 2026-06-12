@@ -419,14 +419,15 @@ Latest P0-79+ / P1-2 status:
   for fieldAccess, system_slice, denied-source dependency, calculated-field,
   predefined calculated, and raw accessBuilder cases. The first runtime slice
   now aligns aggregate output fieldAccess allow/deny and system_slice guard
-  no-leak behavior in the narrow SQLite aggregate relation path; calculated,
+  no-leak behavior in the narrow SQLite aggregate relation path, and a follow-up
+  assertion proves unreferenced RHS denied-source pass-through; calculated,
   predefined calculated, raw accessBuilder, and broad runtime positives remain
   follow-up.
 - P0-88 freezes the public API metadata contract for aggregate relation
   lineage: Python public DTOs should expose exactly the Java seven-key
   `aggregateRelation` object while keeping engine-only metadata internal.
 - P0-79+ records the aggregate-join sequence as completed through P0-88, with
-  P0-87 v2 snapshot/replay active, the first P0-87 runtime slice complete, and
+  P0-87 v2 snapshot/replay active, the first P0-87 runtime slices complete, and
   P0-88 contract ready.
 - P1-1 records the remaining semantic-scale choice: namespace opt-out parity or
   live DB/result parity.
@@ -512,13 +513,13 @@ Latest P0-79+ / P1-2 status:
   with `10 passed in 0.08s`.
 - Python P0-87 runtime fieldAccess/system_slice focused coverage passed:
   `.venv/bin/python -m pytest tests/test_dataset_model/test_querymodel_aggregate_sqlite_alignment.py -q`
-  with `13 passed`.
+  with `14 passed in 0.49s`.
 - Python P0-87 aggregate runtime/replay combined coverage passed:
   `.venv/bin/python -m pytest tests/test_dataset_model/test_querymodel_aggregate_sqlite_alignment.py tests/test_dataset_model/test_querymodel_aggregate_runtime_refusal.py tests/integration/test_java_snapshot_parity_manifest.py tests/integration/test_java_querymodel_aggregate_join_snapshot_contract.py tests/integration/test_java_querymodel_aggregate_join_snapshot_parity.py -q`
-  with `28 passed in 0.72s`.
-- Full Python pytest after the first P0-87 runtime slice passed:
+  with `29 passed in 0.53s`.
+- Full Python pytest after the first P0-87 runtime slices passed:
   `.venv/bin/python -m pytest -q` with
-  `4140 passed, 232 skipped, 53 warnings in 19.95s`.
+  `4141 passed, 232 skipped, 53 warnings in 18.90s`.
 - Python P0-82 through P0-85 neighboring semantic regression passed:
   `.venv/bin/python -m pytest tests/test_dataset_model/test_semantic_query.py tests/test_dataset_model/test_strict_column_resolution.py tests/test_dataset_model/test_window_functions.py -q`
   with `131 passed`.

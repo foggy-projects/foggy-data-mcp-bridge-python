@@ -69,6 +69,10 @@ def _right_model() -> DbTableModelImpl:
                 name="customer_key",
                 column_type=ColumnType.LONG,
             ),
+            "profitAmount": DbColumnDef(
+                name="profit_amount",
+                column_type=ColumnType.DECIMAL,
+            ),
         },
         measures={
             "salesAmount": DbModelMeasureImpl(
@@ -415,6 +419,36 @@ def test_p0_87_system_slice_guard_does_not_leak_aggregate_output(tmp_path) -> No
     assert "having sum(agg_src.sales_amount) > ?" in debug_sql
     for field in case["expected"]["rowsForbiddenFields"]:
         assert field not in response.items[0]
+
+
+def test_p0_87_unreferenced_denied_source_column_passes(tmp_path) -> None:
+    case = _case("aggregate-join-denied-source-column-unreferenced-pass")
+    db_path = tmp_path / "aggregate_relation_unreferenced_denied_source.sqlite"
+    _seed_aggregate_db(db_path)
+    executor = SQLiteExecutor(str(db_path))
+    service = _service(_right_model(), _left_model(), executor=executor)
+
+    try:
+        response = service.query_model(
+            "OrderSalesAggregateRelationQueryModel",
+            _request(
+                slice=[{"field": "orderId", "op": "=", "value": ORDER_1}],
+                denied_columns=[
+                    DeniedColumn(table="fact_sales", column="profit_amount")
+                ],
+            ),
+            mode="execute",
+        )
+    finally:
+        service._run_async_in_sync(executor.close())
+
+    assert response.error is None
+    assert response.items == case["expected"]["rows"]
+    debug_sql = _normal(response.debug.extra["sql"])
+    for marker in case["expected"]["sqlMarkers"]:
+        assert marker in debug_sql
+    for marker in case["expected"]["forbiddenSqlMarkers"]:
+        assert marker not in debug_sql
 
 
 def test_p0_85_and_filters_push_to_rhs_with_diagnostics() -> None:
