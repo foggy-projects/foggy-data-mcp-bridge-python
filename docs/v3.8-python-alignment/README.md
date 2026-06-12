@@ -473,7 +473,7 @@ Latest P0-79+ / P1-2 status:
   `.venv/bin/ruff check tests/integration/test_odoo_registry_consumer_readonly.py`.
 - Python P0-82 through P0-85 focused aggregate relation coverage passed:
   `.venv/bin/python -m pytest tests/test_dataset_model/test_querymodel_aggregate_sqlite_alignment.py tests/test_dataset_model/test_querymodel_aggregate_runtime_refusal.py -q`
-  with `14 passed`.
+  with `15 passed`.
 - Python P0-82 through P0-85 guarded loader coverage passed:
   `.venv/bin/python -m pytest tests/test_dataset_model/test_loader_fsscript.py -q`
   with `68 passed`.

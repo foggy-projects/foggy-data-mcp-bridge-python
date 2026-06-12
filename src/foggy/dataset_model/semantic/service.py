@@ -5847,6 +5847,7 @@ class SemanticQueryService(SemanticServiceResolver):
                 data=[],
                 columns_info=build_result.columns,
                 sql=build_result.sql,
+                params=list(build_result.params) or None,
                 warnings=build_result.warnings,
                 duration_ms=(time.time() - start_time) * 1000,
             )

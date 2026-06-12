@@ -58,7 +58,7 @@ or having, while OR filters remain outer-only with explicit diagnostics.
 
 - Passed:
   `.venv/bin/python -m pytest tests/test_dataset_model/test_querymodel_aggregate_sqlite_alignment.py tests/test_dataset_model/test_querymodel_aggregate_runtime_refusal.py -q`
-  (`14 passed`)
+  (`15 passed`)
 - Passed:
   `.venv/bin/python -m pytest tests/integration/test_java_snapshot_parity_manifest.py tests/integration/test_java_querymodel_aggregate_join_snapshot_contract.py tests/integration/test_java_querymodel_aggregate_join_snapshot_parity.py -q`
   (`10 passed`)

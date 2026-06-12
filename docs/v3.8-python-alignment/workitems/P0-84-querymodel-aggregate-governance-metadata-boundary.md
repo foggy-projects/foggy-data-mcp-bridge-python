@@ -57,7 +57,7 @@ selected field is produced by a relation-owned grouped subquery.
 
 - Passed:
   `.venv/bin/python -m pytest tests/test_dataset_model/test_querymodel_aggregate_sqlite_alignment.py tests/test_dataset_model/test_querymodel_aggregate_runtime_refusal.py -q`
-  (`14 passed`)
+  (`15 passed`)
 - Passed:
   `.venv/bin/python -m pytest tests/test_dataset_model/test_loader_fsscript.py -q`
   (`68 passed`)

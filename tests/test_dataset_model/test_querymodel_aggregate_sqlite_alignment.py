@@ -406,6 +406,22 @@ def test_p0_85_runtime_extdata_filter_resolves_or_fails_closed() -> None:
     assert AGGREGATE_JOIN_RUNTIME_FILTER_MISSING_CODE in missing.error
 
 
+@pytest.mark.asyncio
+async def test_p0_85_async_validate_preserves_runtime_extdata_params() -> None:
+    service = _service(_right_model(), _runtime_filter_model())
+
+    response = await service.query_model_async(
+        "OrderSalesAggregateRelationRuntimeFilterQueryModel",
+        _request(slice=[{"field": "orderId", "op": "=", "value": ORDER_1}]),
+        mode="validate",
+        context=SemanticRequestContext(attributes={"extData": {"orderId": ORDER_1}}),
+    )
+
+    assert response.error is None
+    assert response.sql is not None
+    assert response.params == ["COMPLETED", ORDER_1, ORDER_1, ORDER_1]
+
+
 def _seed_aggregate_db(db_path: Path) -> None:
     conn = sqlite3.connect(db_path)
     try:
