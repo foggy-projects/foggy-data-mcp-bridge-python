@@ -16,12 +16,16 @@ from pydantic import BaseModel
 
 from foggy.dataset_model.impl.model import (
     DbTableModelImpl,
-    DbModelDimensionImpl,
     DbModelMeasureImpl,
     DimensionJoinDef,
     _resolve_measure_sql,
 )
-from foggy.dataset_model.aggregate_join import AGGREGATE_JOIN_UNSUPPORTED_CODE
+from foggy.dataset_model.aggregate_join import (
+    AGGREGATE_JOIN_DENIED_SOURCE_COLUMN_CODE,
+    AGGREGATE_JOIN_GROUPBY_MISSING_RIGHT_KEY_CODE,
+    AGGREGATE_JOIN_RUNTIME_FILTER_MISSING_CODE,
+    AGGREGATE_JOIN_UNSUPPORTED_CODE,
+)
 from foggy.dataset_model.impl.semantic_scale import semantic_scale_metadata_value
 from foggy.dataset_model.engine.query import SqlQueryBuilder
 from foggy.dataset_model.engine.formula import get_default_registry, SqlFormulaRegistry
@@ -30,7 +34,7 @@ from foggy.dataset_model.engine.hierarchy import (
     HierarchyConditionBuilder,
     get_default_hierarchy_registry,
 )
-from foggy.dataset_model.engine.join import JoinGraph, JoinEdge, JoinType
+from foggy.dataset_model.engine.join import JoinGraph, JoinType
 from foggy.dataset_model.definitions.base import ColumnType
 from foggy.dataset_model.definitions.dict_def import (
     DbDictionaryDiscoveryDef,
@@ -50,7 +54,7 @@ from foggy.mcp_spi import (
     ExecutionInfo,
     QueryMode,
 )
-from foggy.mcp_spi.semantic import DeniedColumn, FieldAccessDef
+from foggy.mcp_spi.semantic import DeniedColumn
 from foggy.dataset_model.semantic.field_validator import (
     extract_field_dependencies,
     validate_field_access,
@@ -70,7 +74,6 @@ from foggy.dataset_model.semantic.case_insensitive_resolver import (
 from foggy.dataset_model.order_by import normalize_order_by_item
 from foggy.dataset_model.semantic.calc_field_sorter import (
     sort_calc_fields_by_dependencies,
-    CircularCalcFieldError,
 )
 from foggy.dataset_model.semantic.fsscript_to_sql_visitor import (
     render_with_ast,
@@ -131,6 +134,7 @@ class QueryBuildResult(BaseModel):
     warnings: List[str] = []
     columns: List[Dict[str, Any]] = []
     cte_stages: List[QueryBuildResultCteStage] = []
+    diagnostics: List[Dict[str, Any]] = []
 
 
 class SemanticQueryService(SemanticServiceResolver):
@@ -196,6 +200,28 @@ class SemanticQueryService(SemanticServiceResolver):
                 "model": model_name or getattr(model, "name", None),
             },
         )
+
+    @classmethod
+    def _aggregate_relation_error_detail(
+        cls,
+        error_text: str,
+        model: Optional[DbTableModelImpl],
+        model_name: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        known_codes = (
+            AGGREGATE_JOIN_UNSUPPORTED_CODE,
+            AGGREGATE_JOIN_GROUPBY_MISSING_RIGHT_KEY_CODE,
+            AGGREGATE_JOIN_RUNTIME_FILTER_MISSING_CODE,
+            AGGREGATE_JOIN_DENIED_SOURCE_COLUMN_CODE,
+        )
+        code = next((item for item in known_codes if item in error_text), None)
+        if code is None:
+            return None
+        return {
+            "code": code,
+            "carrierCount": cls._aggregate_relation_carrier_count(model) if model else 0,
+            "model": model_name or getattr(model, "name", None),
+        }
 
     def __init__(
         self,
@@ -654,6 +680,13 @@ class SemanticQueryService(SemanticServiceResolver):
             if mapping:
                 denied_qm_fields = mapping.to_denied_qm_fields(request.denied_columns)
 
+        aggregate_error = self._validate_aggregate_relation_denied_columns(
+            model_name,
+            request,
+        )
+        if aggregate_error is not None:
+            return aggregate_error, request
+
         has_whitelist = field_access is not None and bool(field_access.visible)
         has_blacklist = bool(denied_qm_fields)
         if has_whitelist or has_blacklist:
@@ -676,6 +709,114 @@ class SemanticQueryService(SemanticServiceResolver):
             request = request.model_copy(update={"slice": merged_slice})
 
         return None, request
+
+    def _validate_aggregate_relation_denied_columns(
+        self,
+        model_name: str,
+        request: SemanticQueryRequest,
+    ) -> Optional[SemanticQueryResponse]:
+        if not request.denied_columns:
+            return None
+        model = self.get_model(model_name)
+        if model is None or not self._aggregate_relation_carrier_count(model):
+            return None
+
+        requested_fields = set()
+        if request.columns:
+            for raw_col in request.columns:
+                requested_fields.add(parse_column_with_alias(raw_col).base_expr)
+        else:
+            for relation in getattr(model, "aggregate_relations", None) or []:
+                requested_fields.update(
+                    measure.alias
+                    for measure in getattr(relation, "measures", None) or []
+                    if measure.alias
+                )
+
+        calculated_aliases = set()
+        for calc in request.calculated_fields or []:
+            if not isinstance(calc, dict):
+                continue
+            name = calc.get("name") or calc.get("alias")
+            if name:
+                calculated_aliases.add(str(name))
+            expr = calc.get("expression") or calc.get("formula") or ""
+            if isinstance(expr, str):
+                requested_fields.update(extract_field_dependencies(expr))
+
+        for relation in getattr(model, "aggregate_relations", None) or []:
+            right_model = self.get_model(relation.right_model)
+            if right_model is None:
+                continue
+            for measure in relation.measures or []:
+                if measure.alias not in requested_fields:
+                    continue
+                source_ref = self._aggregate_relation_source_physical_ref(
+                    right_model,
+                    measure.field,
+                )
+                if source_ref is None:
+                    continue
+                table_name, column_name = source_ref
+                if not self._aggregate_denied_columns_match(
+                    request.denied_columns,
+                    table_name,
+                    column_name,
+                ):
+                    continue
+                section = (
+                    "calculatedFields"
+                    if measure.alias in calculated_aliases
+                    else "columns"
+                )
+                error = (
+                    f"{AGGREGATE_JOIN_DENIED_SOURCE_COLUMN_CODE}: "
+                    f"aggregate relation {section} field '{measure.alias}' "
+                    "maps to a denied source column "
+                    f"{table_name}.{column_name}"
+                )
+                return SemanticQueryResponse.from_error(
+                    error,
+                    error_detail={
+                        "code": AGGREGATE_JOIN_DENIED_SOURCE_COLUMN_CODE,
+                        "field": measure.alias,
+                        "table": table_name,
+                        "column": column_name,
+                    },
+                )
+        return None
+
+    @staticmethod
+    def _aggregate_denied_columns_match(
+        denied_columns: List[Any],
+        table_name: str,
+        column_name: str,
+    ) -> bool:
+        for denied in denied_columns or []:
+            if (
+                getattr(denied, "table", None) == table_name
+                and getattr(denied, "column", None) == column_name
+            ):
+                return True
+        return False
+
+    @staticmethod
+    def _aggregate_relation_source_physical_ref(
+        model: DbTableModelImpl,
+        field_name: Optional[str],
+    ) -> Optional[Tuple[str, str]]:
+        if not field_name:
+            return None
+        measure = model.get_measure(field_name)
+        if measure is not None:
+            return model.source_table, measure.column or measure.name
+        column = model.get_column(field_name)
+        if column is not None:
+            return model.source_table, column.name
+        dimension = model.get_dimension(field_name)
+        if dimension is not None:
+            return model.source_table, dimension.column
+        return None
 
     def _sanitize_error(
         self,
@@ -926,8 +1067,6 @@ class SemanticQueryService(SemanticServiceResolver):
         table_model = self.get_model(model)
         if not table_model:
             return SemanticQueryResponse.from_error(f"Model not found: {model}")
-        if self._aggregate_relation_carrier_count(table_model):
-            return self._aggregate_relation_unsupported_response(table_model, model)
 
         # --- v1.4 Pivot: Validate and Translate Pivot Request ---
         is_pivot = False
@@ -980,10 +1119,18 @@ class SemanticQueryService(SemanticServiceResolver):
 
         # Build query
         try:
-            build_result = self._build_query(table_model, request)
+            build_result = self._build_query(table_model, request, context=context)
         except Exception as e:
             logger.exception(f"Failed to build query for model {model}")
-            return SemanticQueryResponse.from_error(f"Query build failed: {str(e)}")
+            error_text = str(e)
+            return SemanticQueryResponse.from_error(
+                f"Query build failed: {error_text}",
+                error_detail=self._aggregate_relation_error_detail(
+                    error_text,
+                    table_model,
+                    model,
+                ),
+            )
 
         # Validate mode
         if mode == QueryMode.VALIDATE:
@@ -1232,12 +1379,9 @@ class SemanticQueryService(SemanticServiceResolver):
         table_model = self.get_model(model_name)
         if table_model is None:
             raise ValueError(f"Model not found: {model_name}")
-        self._reject_aggregate_relations_if_unsupported(table_model, model_name)
 
-        is_pivot = False
         pivot_request = getattr(request, "pivot", None)
         if pivot_request:
-            is_pivot = True
             from foggy.dataset_model.semantic.pivot.executor import validate_and_translate_pivot
             request, _, _ps_metrics, _br_metrics = validate_and_translate_pivot(request)
 
@@ -1268,10 +1412,669 @@ class SemanticQueryService(SemanticServiceResolver):
 
         return self._build_query(table_model, request)
 
+    def _build_aggregate_relation_sqlite_query(
+        self,
+        model: DbTableModelImpl,
+        request: SemanticQueryRequest,
+        context: Optional[SemanticRequestContext] = None,
+    ) -> QueryBuildResult:
+        """Build the narrow SQLite aggregate-relation SQL path.
+
+        This path is intentionally narrow. It supports the Java neutral
+        fixture's SQL/result, governance/metadata, and pushdown diagnostics
+        boundary while keeping broader dialect and QueryModel feature support
+        fail-closed.
+        """
+        if request.time_window or request.pivot:
+            self._raise_aggregate_relation_unsupported(
+                "timeWindow and pivot are not supported by the aggregate "
+                "relation SQLite skeleton"
+            )
+        if (
+            request.group_by
+            or request.having
+            or request.calculated_fields
+            or request.post_aggregate_calculations
+            or request.post_slice
+            or request.order_by
+        ):
+            self._raise_aggregate_relation_unsupported(
+                "groupBy, having, calculated fields, post stages, and orderBy "
+                "are not supported by the aggregate relation SQLite skeleton"
+            )
+
+        relations = list(getattr(model, "aggregate_relations", None) or [])
+        if len(relations) != 1:
+            self._raise_aggregate_relation_unsupported(
+                f"exactly one aggregate relation is supported; carrier_count={len(relations)}"
+            )
+        relation = relations[0]
+        if str(relation.join_type or "LEFT").upper() != "LEFT":
+            self._raise_aggregate_relation_unsupported(
+                f"only LEFT aggregate relation joins are supported; join_type={relation.join_type}"
+            )
+
+        right_model = self.get_model(relation.right_model)
+        if right_model is None:
+            self._raise_aggregate_relation_unsupported(
+                f"right model is not registered: {relation.right_model}"
+            )
+
+        if not relation.conditions:
+            self._raise_aggregate_relation_unsupported(
+                "aggregate relation join conditions are required"
+            )
+        right_group_keys = set(relation.group_by or [])
+        for condition in relation.conditions:
+            if condition.right_field not in right_group_keys:
+                raise ValueError(
+                    f"{AGGREGATE_JOIN_GROUPBY_MISSING_RIGHT_KEY_CODE}: "
+                    "aggregate relation groupBy must cover right join key: "
+                    f"{condition.right_field}"
+                )
+
+        root_alias = "t1"
+        source_alias = "agg_src"
+        relation_alias = relation.alias or "t2"
+        output_measures = {measure.alias: measure for measure in relation.measures}
+        if not output_measures:
+            self._raise_aggregate_relation_unsupported(
+                "aggregate relation measures are required"
+            )
+
+        select_parts: List[str] = []
+        columns_info: List[Dict[str, Any]] = []
+        requested_columns = list(request.columns or [])
+        if not requested_columns:
+            requested_columns = list(model.columns.keys()) + list(output_measures.keys())
+
+        for raw_col in requested_columns:
+            parts = parse_column_with_alias(raw_col)
+            base_expr = parts.base_expr
+            label = parts.user_alias or base_expr
+            if base_expr in output_measures:
+                measure_def = output_measures[base_expr]
+                sql_expr = f"{relation_alias}.{base_expr}"
+                aggregate_expr = self._render_aggregate_relation_measure_sql(
+                    right_model,
+                    measure_def,
+                    source_alias,
+                )
+                source_expr = (
+                    self._resolve_aggregate_right_field_sql(
+                        right_model,
+                        measure_def.field,
+                        source_alias,
+                    )
+                    if measure_def.field
+                    else None
+                )
+                select_parts.append(f"{sql_expr} {self._qi(label)}")
+                columns_info.append({
+                    "name": label,
+                    "fieldName": raw_col,
+                    "expression": sql_expr,
+                    "aggregation": measure_def.aggregation,
+                    "sourceExpression": source_expr,
+                    "aggregateExpression": aggregate_expr,
+                    "aggregateRelation": self._aggregate_relation_measure_metadata(
+                        right_model,
+                        measure_def,
+                        source_expr,
+                        aggregate_expr,
+                    ),
+                })
+                continue
+
+            sql_expr = self._resolve_aggregate_root_field_sql(
+                model,
+                base_expr,
+                root_alias,
+            )
+            select_parts.append(f"{sql_expr} {self._qi(label)}")
+            columns_info.append({
+                "name": label,
+                "fieldName": raw_col,
+                "expression": sql_expr,
+                "aggregation": None,
+            })
+
+        rhs_select_parts: List[str] = []
+        rhs_group_by_parts: List[str] = []
+        for group_field in relation.group_by:
+            group_sql = self._resolve_aggregate_right_field_sql(
+                right_model,
+                group_field,
+                source_alias,
+            )
+            rhs_select_parts.append(f"{group_sql} {group_field}")
+            rhs_group_by_parts.append(group_sql)
+
+        for measure in relation.measures:
+            rhs_select_parts.append(
+                f"{self._render_aggregate_relation_measure_sql(right_model, measure, source_alias)} "
+                f"{measure.alias}"
+            )
+
+        rhs_where_parts: List[str] = []
+        params: List[Any] = []
+        for filter_def in relation.filters:
+            if filter_def.model and filter_def.model != relation.right_model:
+                self._raise_aggregate_relation_unsupported(
+                    "RHS filters must belong to the aggregate relation right model"
+                )
+            field_sql = self._resolve_aggregate_right_field_sql(
+                right_model,
+                filter_def.field,
+                source_alias,
+            )
+            condition_sql, condition_params = self._render_aggregate_filter_sql(
+                field_sql,
+                filter_def.op,
+                filter_def.value,
+                context=context,
+            )
+            rhs_where_parts.append(condition_sql)
+            params.extend(condition_params)
+
+        on_parts: List[str] = []
+        for condition in relation.conditions:
+            if condition.op not in (None, "=", "eq"):
+                self._raise_aggregate_relation_unsupported(
+                    "only equality aggregate relation join conditions are supported"
+                )
+            left_sql = self._resolve_aggregate_root_field_sql(
+                model,
+                condition.left_field,
+                root_alias,
+            )
+            on_parts.append(f"{left_sql} = {relation_alias}.{condition.right_field}")
+
+        (
+            outer_where,
+            outer_params,
+            pushed_where,
+            pushed_where_params,
+            pushed_having,
+            pushed_having_params,
+            diagnostics,
+        ) = self._render_aggregate_outer_filters(
+            model,
+            right_model,
+            relation,
+            request.slice or [],
+            root_alias,
+            source_alias,
+            relation_alias,
+            output_measures,
+        )
+        rhs_where_parts.extend(pushed_where)
+        params.extend(pushed_where_params)
+
+        right_table = self._table_expr_for_model(right_model)
+        rhs_sql = (
+            f"select {', '.join(rhs_select_parts)} "
+            f"from {right_table} {source_alias}"
+        )
+        if rhs_where_parts:
+            rhs_sql += f" where {' and '.join(rhs_where_parts)}"
+        rhs_sql += f" group by {', '.join(rhs_group_by_parts)}"
+        if pushed_having:
+            rhs_sql += f" having {' and '.join(pushed_having)}"
+            params.extend(pushed_having_params)
+
+        root_table = self._table_expr_for_model(model)
+        sql = (
+            f"select {', '.join(select_parts)} "
+            f"from {root_table} {root_alias} "
+            f"left join ({rhs_sql}) {relation_alias} "
+            f"on {' and '.join(on_parts)}"
+        )
+
+        if outer_where:
+            sql += f" where {' and '.join(outer_where)}"
+            params.extend(outer_params)
+
+        return QueryBuildResult(
+            sql=sql,
+            params=params,
+            warnings=[],
+            columns=columns_info,
+            diagnostics=diagnostics,
+        )
+
+    def _table_expr_for_model(self, model: DbTableModelImpl) -> str:
+        if model.source_schema:
+            return f"{model.source_schema}.{model.source_table}"
+        return model.source_table
+
+    def _raise_aggregate_relation_unsupported(self, detail: str) -> None:
+        raise ValueError(
+            f"{AGGREGATE_JOIN_UNSUPPORTED_CODE}: {detail}"
+        )
+
+    def _resolve_aggregate_root_field_sql(
+        self,
+        model: DbTableModelImpl,
+        field_name: str,
+        alias: str,
+    ) -> str:
+        column = model.get_column(field_name)
+        if column is not None:
+            return f"{alias}.{column.name}"
+        dimension = model.get_dimension(field_name)
+        if dimension is not None:
+            return f"{alias}.{dimension.column}"
+        measure = model.get_measure(field_name)
+        if measure is not None:
+            return f"{alias}.{measure.column or measure.name}"
+        resolved = model.resolve_field_strict(
+            field_name,
+            dialect_name=self._field_formula_dialect_name(),
+        )
+        if resolved and not resolved.get("join_def"):
+            return self._replace_sql_alias(
+                resolved["sql_expr"],
+                resolved.get("table_alias") or model.get_table_alias_for_model(),
+                alias,
+            )
+        self._raise_aggregate_relation_unsupported(
+            f"cannot resolve root field for aggregate relation query: {field_name}"
+        )
+        raise AssertionError("unreachable")
+
+    def _resolve_aggregate_right_field_sql(
+        self,
+        model: DbTableModelImpl,
+        field_name: str,
+        alias: str,
+    ) -> str:
+        column = model.get_column(field_name)
+        if column is not None:
+            return f"{alias}.{column.name}"
+        dimension = model.get_dimension(field_name)
+        if dimension is not None:
+            return f"{alias}.{dimension.column}"
+        measure = model.get_measure(field_name)
+        if measure is not None:
+            return f"{alias}.{measure.column or measure.name}"
+        resolved = model.resolve_field(
+            field_name,
+            dialect_name=self._field_formula_dialect_name(),
+        )
+        if resolved and not resolved.get("join_def"):
+            return self._replace_sql_alias(
+                resolved["sql_expr"],
+                resolved.get("table_alias") or model.get_table_alias_for_model(),
+                alias,
+            )
+        self._raise_aggregate_relation_unsupported(
+            f"cannot resolve RHS aggregate relation field: {field_name}"
+        )
+        raise AssertionError("unreachable")
+
+    @staticmethod
+    def _replace_sql_alias(sql_expr: str, old_alias: str, new_alias: str) -> str:
+        return re.sub(
+            rf"(?<![A-Za-z0-9_]){re.escape(old_alias)}\.",
+            f"{new_alias}.",
+            sql_expr,
+        )
+
+    def _render_aggregate_relation_measure_sql(
+        self,
+        right_model: DbTableModelImpl,
+        measure_def: Any,
+        alias: str,
+    ) -> str:
+        aggregation = str(measure_def.aggregation or "").replace("-", "_").upper()
+        if aggregation == "COUNTDISTINCT":
+            aggregation = "COUNT_DISTINCT"
+        field_name = measure_def.field
+        if aggregation == "COUNT" and not field_name:
+            return "count(*)"
+        if not field_name:
+            self._raise_aggregate_relation_unsupported(
+                f"aggregate measure {measure_def.alias} requires a source field"
+            )
+        field_sql = self._resolve_aggregate_right_field_sql(
+            right_model,
+            field_name,
+            alias,
+        )
+        if aggregation == "COUNT_DISTINCT" or measure_def.distinct:
+            return f"count(distinct {field_sql})"
+        if aggregation in {"SUM", "COUNT", "AVG", "MIN", "MAX"}:
+            return f"{aggregation.lower()}({field_sql})"
+        self._raise_aggregate_relation_unsupported(
+            f"unsupported aggregate relation measure aggregation: {measure_def.aggregation}"
+        )
+        raise AssertionError("unreachable")
+
+    def _aggregate_relation_measure_metadata(
+        self,
+        right_model: DbTableModelImpl,
+        measure_def: Any,
+        source_expr: Optional[str],
+        aggregate_expr: str,
+    ) -> Dict[str, Any]:
+        source_field = measure_def.field or measure_def.alias
+        source_measure = right_model.get_measure(source_field) if source_field else None
+        source_caption = (
+            source_measure.alias
+            if source_measure is not None and source_measure.alias
+            else source_field
+        )
+        aggregation = str(measure_def.aggregation or "").replace("-", "_").upper()
+        if aggregation == "COUNTDISTINCT":
+            aggregation = "COUNT_DISTINCT"
+        return {
+            "aggregation": aggregation,
+            "sourceColumn": measure_def.alias,
+            "sourceAlias": measure_def.alias,
+            "sourceCaption": source_caption,
+            "sourceMeasure": measure_def.alias,
+            "semanticScaleFactor": (
+                semantic_scale_metadata_value(
+                    getattr(source_measure, "semantic_scale_factor", None)
+                )
+                if source_measure is not None
+                else None
+            ),
+            "semanticUnit": getattr(source_measure, "semantic_unit", None)
+            if source_measure is not None
+            else None,
+            "semanticUnitLabel": getattr(source_measure, "semantic_unit_label", None)
+            if source_measure is not None
+            else None,
+            "sourceExpression": source_expr,
+            "aggregateExpression": aggregate_expr,
+        }
+
+    def _render_aggregate_filter_sql(
+        self,
+        field_sql: str,
+        operator: str,
+        value: Any,
+        *,
+        context: Optional[SemanticRequestContext] = None,
+    ) -> Tuple[str, List[Any]]:
+        if isinstance(value, dict):
+            value = self._resolve_aggregate_runtime_filter_value(value, context)
+        op = str(operator or "=").lower()
+        if op in {"=", "eq", "=="}:
+            if value is None:
+                self._raise_aggregate_relation_unsupported(
+                    "aggregate relation fixed filter value cannot be null"
+                )
+            return f"{field_sql} = ?", [value]
+        if op == "in":
+            values = value if isinstance(value, list) else [value]
+            if not values:
+                self._raise_aggregate_relation_unsupported(
+                    "aggregate relation IN filter requires at least one value"
+                )
+            placeholders = ", ".join(["?"] * len(values))
+            return f"{field_sql} in ({placeholders})", list(values)
+        if op in {"[]", "between"}:
+            if not isinstance(value, (list, tuple)) or len(value) != 2:
+                self._raise_aggregate_relation_unsupported(
+                    "aggregate relation range filter requires exactly two values"
+                )
+            return f"{field_sql} >= ? and {field_sql} <= ?", [value[0], value[1]]
+        self._raise_aggregate_relation_unsupported(
+            f"unsupported aggregate relation filter operator: {operator}"
+        )
+        raise AssertionError("unreachable")
+
+    def _resolve_aggregate_runtime_filter_value(
+        self,
+        value: Dict[str, Any],
+        context: Optional[SemanticRequestContext],
+    ) -> Any:
+        key = (
+            value.get("extData")
+            or value.get("ext_data")
+            or value.get("key")
+            or value.get("name")
+        )
+        attributes = getattr(context, "attributes", None) or {}
+        ext_data = attributes.get("extData") or attributes.get("ext_data") or {}
+        if isinstance(ext_data, dict) and key in ext_data:
+            return ext_data[key]
+        if key in attributes:
+            return attributes[key]
+        raise ValueError(
+            f"{AGGREGATE_JOIN_RUNTIME_FILTER_MISSING_CODE}: "
+            f"aggregate relation runtime filter is missing: {key}"
+        )
+
+    def _render_aggregate_outer_filters(
+        self,
+        model: DbTableModelImpl,
+        right_model: DbTableModelImpl,
+        relation: Any,
+        slice_items: List[Any],
+        root_alias: str,
+        source_alias: str,
+        relation_alias: str,
+        aggregate_output_measures: Dict[str, Any],
+    ) -> Tuple[
+        List[str],
+        List[Any],
+        List[str],
+        List[Any],
+        List[str],
+        List[Any],
+        List[Dict[str, Any]],
+    ]:
+        where_parts: List[str] = []
+        params: List[Any] = []
+        pushed_where_parts: List[str] = []
+        pushed_where_params: List[Any] = []
+        pushed_having_parts: List[str] = []
+        pushed_having_params: List[Any] = []
+        diagnostics: List[Dict[str, Any]] = []
+        left_to_right = {
+            condition.left_field: condition.right_field
+            for condition in relation.conditions or []
+        }
+
+        def _simple_field(item: Dict[str, Any]) -> Optional[str]:
+            return item.get("field") or item.get("column") or item.get("fieldName")
+
+        def _simple_op(item: Dict[str, Any]) -> str:
+            return item.get("op") or item.get("operator") or "="
+
+        def _is_or_item(item: Dict[str, Any]) -> bool:
+            return any(key in item for key in ("$or", "or")) or str(
+                item.get("logic") or item.get("type") or ""
+            ).lower() == "or"
+
+        def _or_children(item: Dict[str, Any]) -> List[Any]:
+            for key in ("$or", "or", "children", "conditions", "filters"):
+                value = item.get(key)
+                if isinstance(value, list):
+                    return value
+            return []
+
+        def _is_and_item(item: Dict[str, Any]) -> bool:
+            return any(key in item for key in ("$and", "and")) or str(
+                item.get("logic") or item.get("type") or ""
+            ).lower() == "and"
+
+        def _and_children(item: Dict[str, Any]) -> List[Any]:
+            for key in ("$and", "and", "children", "conditions", "filters"):
+                value = item.get(key)
+                if isinstance(value, list):
+                    return value
+            return []
+
+        def _append_push_diagnostics(
+            field_name: str,
+            op: str,
+            target: str,
+            expression_sql: str,
+        ) -> None:
+            if str(op).lower() in {"[]", "between"} and " and " in expression_sql:
+                lower_sql, upper_sql = expression_sql.split(" and ", 1)
+                diagnostics.append({
+                    "decision": "pushed",
+                    "field": field_name,
+                    "op": op,
+                    "target": target,
+                    "reasonCode": None,
+                    "expression": lower_sql,
+                })
+                diagnostics.append({
+                    "decision": "pushed",
+                    "field": field_name,
+                    "op": op,
+                    "target": target,
+                    "reasonCode": None,
+                    "expression": upper_sql,
+                })
+                return
+            diagnostics.append({
+                "decision": "pushed",
+                "field": field_name,
+                "op": op,
+                "target": target,
+                "reasonCode": None,
+                "expression": expression_sql,
+            })
+
+        def _render_simple(item: Dict[str, Any]) -> None:
+            field_name = _simple_field(item)
+            if not field_name:
+                self._raise_aggregate_relation_unsupported(
+                    "aggregate relation slice item requires field"
+                )
+            op = _simple_op(item)
+            value = item.get("value")
+            if field_name in aggregate_output_measures:
+                outer_sql = f"{relation_alias}.{field_name}"
+                condition_sql, condition_params = self._render_aggregate_filter_sql(
+                    outer_sql,
+                    op,
+                    value,
+                )
+                where_parts.append(condition_sql)
+                params.extend(condition_params)
+
+                measure_sql = self._render_aggregate_relation_measure_sql(
+                    right_model,
+                    aggregate_output_measures[field_name],
+                    source_alias,
+                )
+                pushed_sql, pushed_params = self._render_aggregate_filter_sql(
+                    measure_sql,
+                    op,
+                    value,
+                )
+                pushed_having_parts.append(pushed_sql)
+                pushed_having_params.extend(pushed_params)
+                _append_push_diagnostics(field_name, op, "having", pushed_sql)
+                return
+
+            field_sql = self._resolve_aggregate_root_field_sql(
+                model,
+                field_name,
+                root_alias,
+            )
+            condition_sql, condition_params = self._render_aggregate_filter_sql(
+                field_sql,
+                op,
+                value,
+            )
+            where_parts.append(condition_sql)
+            params.extend(condition_params)
+
+            right_field = left_to_right.get(field_name)
+            if right_field:
+                right_sql = self._resolve_aggregate_right_field_sql(
+                    right_model,
+                    right_field,
+                    source_alias,
+                )
+                pushed_sql, pushed_params = self._render_aggregate_filter_sql(
+                    right_sql,
+                    op,
+                    value,
+                )
+                pushed_where_parts.append(pushed_sql)
+                pushed_where_params.extend(pushed_params)
+                _append_push_diagnostics(field_name, op, "where", pushed_sql)
+
+        def _render_or(item: Dict[str, Any]) -> None:
+            parts = ["1=0"]
+            or_params: List[Any] = []
+            for child in _or_children(item):
+                if not isinstance(child, dict):
+                    self._raise_aggregate_relation_unsupported(
+                        "OR aggregate relation slice children must be dicts"
+                    )
+                field_name = _simple_field(child)
+                if not field_name:
+                    self._raise_aggregate_relation_unsupported(
+                        "OR aggregate relation slice item requires field"
+                    )
+                op = _simple_op(child)
+                field_sql = self._resolve_aggregate_root_field_sql(
+                    model,
+                    field_name,
+                    root_alias,
+                )
+                condition_sql, condition_params = self._render_aggregate_filter_sql(
+                    field_sql,
+                    op,
+                    child.get("value"),
+                )
+                parts.append(condition_sql)
+                or_params.extend(condition_params)
+                diagnostics.append({
+                    "decision": "retained",
+                    "field": field_name,
+                    "op": op,
+                    "target": "outer",
+                    "reasonCode": "OR_CONDITION_OUTER_ONLY",
+                    "expression": None,
+                })
+            where_parts.append(f"( {' or '.join(parts)} )")
+            params.extend(or_params)
+
+        for item in slice_items:
+            if not isinstance(item, dict):
+                self._raise_aggregate_relation_unsupported(
+                    "only dict slice items are supported by the aggregate relation skeleton"
+                )
+            if _is_or_item(item):
+                _render_or(item)
+                continue
+            if _is_and_item(item):
+                for child in _and_children(item):
+                    if not isinstance(child, dict):
+                        self._raise_aggregate_relation_unsupported(
+                            "AND aggregate relation slice children must be dicts"
+                        )
+                    _render_simple(child)
+                continue
+            _render_simple(item)
+        return (
+            where_parts,
+            params,
+            pushed_where_parts,
+            pushed_where_params,
+            pushed_having_parts,
+            pushed_having_params,
+            diagnostics,
+        )
+
     def _build_query(
         self,
         model: DbTableModelImpl,
         request: SemanticQueryRequest,
+        context: Optional[SemanticRequestContext] = None,
     ) -> QueryBuildResult:
         """Build a SQL query with auto-JOIN for dimension fields.
 
@@ -1282,7 +2085,13 @@ class SemanticQueryService(SemanticServiceResolver):
         """
         from foggy.dataset_model.impl.model import DimensionJoinDef
 
-        self._reject_aggregate_relations_if_unsupported(model)
+        if self._aggregate_relation_carrier_count(model):
+            return self._build_aggregate_relation_sqlite_query(
+                model,
+                request,
+                context=context,
+            )
+
         model = self._with_unique_dimension_join_aliases(model, request)
 
         warnings: List[str] = []
@@ -3145,7 +3954,6 @@ class SemanticQueryService(SemanticServiceResolver):
 
     def _build_measure_select(self, measure: DbModelMeasureImpl) -> Dict[str, Any]:
         """Build SELECT expression for a measure."""
-        col = measure.column or measure.name
         alias = measure.alias or measure.name
         agg = None
         sql_expr = _resolve_measure_sql(measure, "t", self._field_formula_dialect_name())
@@ -5014,8 +5822,6 @@ class SemanticQueryService(SemanticServiceResolver):
         table_model = self.get_model(model)
         if not table_model:
             return SemanticQueryResponse.from_error(f"Model not found: {model}")
-        if self._aggregate_relation_carrier_count(table_model):
-            return self._aggregate_relation_unsupported_response(table_model, model)
 
         # --- v1.2/v1.3: governance check + system_slice merge ---
         governance_error, request = self._apply_query_governance(model, request)
@@ -5023,10 +5829,18 @@ class SemanticQueryService(SemanticServiceResolver):
             return governance_error
 
         try:
-            build_result = self._build_query(table_model, request)
+            build_result = self._build_query(table_model, request, context=context)
         except Exception as e:
             logger.exception(f"Failed to build query for model {model}")
-            return SemanticQueryResponse.from_error(f"Query build failed: {str(e)}")
+            error_text = str(e)
+            return SemanticQueryResponse.from_error(
+                f"Query build failed: {error_text}",
+                error_detail=self._aggregate_relation_error_detail(
+                    error_text,
+                    table_model,
+                    model,
+                ),
+            )
 
         if mode == QueryMode.VALIDATE:
             return SemanticQueryResponse.from_legacy(

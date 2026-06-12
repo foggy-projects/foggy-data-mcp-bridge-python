@@ -1096,7 +1096,7 @@ export const queryModel = {
         assert "OrderAggregateJoinQueryModel.qm" in caplog.text
 
     def test_aggregate_join_contract_attaches_carrier_only_when_enabled(self):
-        """Controlled loader path can attach carriers while runtime still refuses."""
+        """Controlled loader path can attach carriers for narrow SQL lowering."""
         with tempfile.TemporaryDirectory() as tmpdir:
             model_dir = Path(tmpdir) / "model"
             model_dir.mkdir()
@@ -1186,10 +1186,10 @@ export const queryModel = {
             mode="validate",
         )
 
-        assert response.sql is None
-        assert response.error is not None
-        assert AGGREGATE_JOIN_UNSUPPORTED_CODE in response.error
-        assert "carrier_count=1" in response.error
+        assert response.error is None
+        assert response.sql is not None
+        assert "left join (select" in response.sql
+        assert "salesByOrder" in response.sql
 
     def test_left_join_aggregate_dsl_fails_closed(self, caplog):
         """Java-style leftJoinAggregate DSL is recognized and refused explicitly."""
@@ -1352,7 +1352,7 @@ export const queryModel = {
             mode="validate",
         )
 
-        assert response.sql is None
-        assert response.error is not None
-        assert AGGREGATE_JOIN_UNSUPPORTED_CODE in response.error
-        assert "carrier_count=1" in response.error
+        assert response.error is None
+        assert response.sql is not None
+        assert "left join (select" in response.sql
+        assert "agg_src.order_status = ?" in response.sql

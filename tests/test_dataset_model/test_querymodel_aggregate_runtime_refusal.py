@@ -1,4 +1,4 @@
-"""Runtime/compiler refusal tests for QueryModel aggregate relation carriers."""
+"""Runtime/compiler refusal tests for unsupported aggregate relation carriers."""
 
 import pytest
 
@@ -57,7 +57,7 @@ def _service_with(model):
     return service
 
 
-def test_query_model_refuses_aggregate_relations_before_sql_generation():
+def test_query_model_refuses_aggregate_relations_when_rhs_model_is_missing():
     model = _order_model_with_aggregate_relation()
     service = _service_with(model)
 
@@ -70,7 +70,7 @@ def test_query_model_refuses_aggregate_relations_before_sql_generation():
     assert response.sql is None
     assert response.error is not None
     assert AGGREGATE_JOIN_UNSUPPORTED_CODE in response.error
-    assert "carrier_count=1" in response.error
+    assert "right model is not registered" in response.error
     assert "fact_order" not in response.error
     assert response.error_detail == {
         "code": AGGREGATE_JOIN_UNSUPPORTED_CODE,
@@ -79,7 +79,7 @@ def test_query_model_refuses_aggregate_relations_before_sql_generation():
     }
 
 
-def test_build_query_with_governance_refuses_aggregate_relations_before_compiler_sql():
+def test_build_query_with_governance_refuses_missing_rhs_model():
     model = _order_model_with_aggregate_relation()
     service = _service_with(model)
 
@@ -91,11 +91,11 @@ def test_build_query_with_governance_refuses_aggregate_relations_before_compiler
 
     error = str(exc_info.value)
     assert AGGREGATE_JOIN_UNSUPPORTED_CODE in error
-    assert "carrier_count=1" in error
+    assert "right model is not registered" in error
     assert "fact_order" not in error
 
 
-def test_internal_build_query_refuses_aggregate_relations_directly():
+def test_internal_build_query_refuses_missing_rhs_model_directly():
     model = _order_model_with_aggregate_relation()
     service = _service_with(model)
 
@@ -104,12 +104,12 @@ def test_internal_build_query_refuses_aggregate_relations_directly():
 
     error = str(exc_info.value)
     assert AGGREGATE_JOIN_UNSUPPORTED_CODE in error
-    assert "carrier_count=1" in error
+    assert "right model is not registered" in error
     assert "fact_order" not in error
 
 
 @pytest.mark.asyncio
-async def test_query_model_async_refuses_aggregate_relations_before_sql_generation():
+async def test_query_model_async_refuses_missing_rhs_model():
     model = _order_model_with_aggregate_relation()
     service = _service_with(model)
 
@@ -122,8 +122,13 @@ async def test_query_model_async_refuses_aggregate_relations_before_sql_generati
     assert response.sql is None
     assert response.error is not None
     assert AGGREGATE_JOIN_UNSUPPORTED_CODE in response.error
-    assert "carrier_count=1" in response.error
+    assert "right model is not registered" in response.error
     assert "fact_order" not in response.error
+    assert response.error_detail == {
+        "code": AGGREGATE_JOIN_UNSUPPORTED_CODE,
+        "carrierCount": 1,
+        "model": "FactOrderModel",
+    }
 
 
 def test_normal_query_model_still_compiles_without_aggregate_relations():

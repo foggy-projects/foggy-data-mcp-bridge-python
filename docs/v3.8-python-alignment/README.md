@@ -94,6 +94,16 @@ Current P0 execution records:
 - [P0-74-querymodel-aggregate-join-python-replay-skeleton.md](workitems/P0-74-querymodel-aggregate-join-python-replay-skeleton.md)
 - [P0-75-querymodel-aggregate-join-java-snapshot-exporter.md](workitems/P0-75-querymodel-aggregate-join-java-snapshot-exporter.md)
 - [P0-76-querymodel-aggregate-join-python-snapshot-replay.md](workitems/P0-76-querymodel-aggregate-join-python-snapshot-replay.md)
+- [P0-77-querymodel-aggregate-relation-carrier.md](workitems/P0-77-querymodel-aggregate-relation-carrier.md)
+- [P0-78-querymodel-aggregate-loader-carrier-boundary.md](workitems/P0-78-querymodel-aggregate-loader-carrier-boundary.md)
+- [P0-79-plus-querymodel-aggregate-join-roadmap.md](workitems/P0-79-plus-querymodel-aggregate-join-roadmap.md)
+- [P0-79-querymodel-aggregate-runtime-refusal-boundary.md](workitems/P0-79-querymodel-aggregate-runtime-refusal-boundary.md)
+- [P0-80-querymodel-aggregate-loader-attachment-boundary.md](workitems/P0-80-querymodel-aggregate-loader-attachment-boundary.md)
+- [P0-81-querymodel-aggregate-sqlite-sql-shape-design.md](workitems/P0-81-querymodel-aggregate-sqlite-sql-shape-design.md)
+- [P0-82-querymodel-aggregate-sqlite-lowering-skeleton.md](workitems/P0-82-querymodel-aggregate-sqlite-lowering-skeleton.md)
+- [P0-83-querymodel-aggregate-sqlite-live-result-parity.md](workitems/P0-83-querymodel-aggregate-sqlite-live-result-parity.md)
+- [P0-84-querymodel-aggregate-governance-metadata-boundary.md](workitems/P0-84-querymodel-aggregate-governance-metadata-boundary.md)
+- [P0-85-querymodel-aggregate-pushdown-diagnostics-boundary.md](workitems/P0-85-querymodel-aggregate-pushdown-diagnostics-boundary.md)
 
 Current P1/P2 planning records:
 
@@ -158,8 +168,10 @@ Current active snapshot lanes:
 - QueryModel aggregate join audit and active snapshot replay lane, with Java 9.2
   capability, Python landing points, required neutral export contract, manifest
   replay skeleton, Java snapshot exporter, committed Java fixture replay,
-  loader fail-closed guard, carrier extraction, and planned P0-79+ runtime /
-  SQL / governance / diagnostics sequence before implementation
+  loader fail-closed guard, carrier extraction, guarded attachment, narrow
+  SQLite SQL lowering, SQLite live-result parity, RHS denied-source governance,
+  aggregate output lineage, pushdown diagnostics, and runtime extData filter
+  fail-closed behavior
 
 Latest P0-79+ / P1-2 status:
 
@@ -383,9 +395,19 @@ Latest P0-79+ / P1-2 status:
 - P0-81 defines the minimal SQLite SQL-shape for aggregate relation lowering:
   one root model, one RHS grouped subquery, fixed RHS filters, relation-owned
   aggregate outputs, and Java fixture marker checks before runtime exposure.
-- P0-79+ records the planned aggregate-join sequence: guarded loader
-  attachment, SQLite SQL-shape design, SQLite lowering skeleton, live-result
-  parity, governance/metadata, and pushdown diagnostics.
+- P0-82 implements the narrow SQLite aggregate relation lowering skeleton with
+  RHS preaggregation, fixed RHS filters, aggregate output projection, fallback
+  alias/count-star handling, and missing right-key groupBy fail-closed
+  behavior.
+- P0-83 adds focused SQLite live-result parity for the aggregate relation happy
+  path, proving the left-side measure is not multiplied by RHS fact rows.
+- P0-84 adds aggregate relation RHS denied-source governance and internal
+  aggregate output lineage metadata on build columns.
+- P0-85 adds deterministic pushdown diagnostics for simple AND filters,
+  retained OR diagnostics, runtime extData filter resolution, and missing-value
+  fail-closed behavior.
+- P0-79+ records the aggregate-join sequence as completed through P0-85 for the
+  narrow SQLite boundary.
 - P1-1 records the remaining semantic-scale choice: namespace opt-out parity or
   live DB/result parity.
 - P2-1 records the initial Python aggregate-join design boundary before any
@@ -449,6 +471,20 @@ Latest P0-79+ / P1-2 status:
   with `2 passed in 1.18s`.
 - Python P0-54 focused ruff passed:
   `.venv/bin/ruff check tests/integration/test_odoo_registry_consumer_readonly.py`.
+- Python P0-82 through P0-85 focused aggregate relation coverage passed:
+  `.venv/bin/python -m pytest tests/test_dataset_model/test_querymodel_aggregate_sqlite_alignment.py tests/test_dataset_model/test_querymodel_aggregate_runtime_refusal.py -q`
+  with `14 passed`.
+- Python P0-82 through P0-85 guarded loader coverage passed:
+  `.venv/bin/python -m pytest tests/test_dataset_model/test_loader_fsscript.py -q`
+  with `68 passed`.
+- Python P0-82 through P0-85 aggregate Java fixture replay passed:
+  `.venv/bin/python -m pytest tests/integration/test_java_snapshot_parity_manifest.py tests/integration/test_java_querymodel_aggregate_join_snapshot_contract.py tests/integration/test_java_querymodel_aggregate_join_snapshot_parity.py -q`
+  with `10 passed`.
+- Python P0-82 through P0-85 neighboring semantic regression passed:
+  `.venv/bin/python -m pytest tests/test_dataset_model/test_semantic_query.py tests/test_dataset_model/test_strict_column_resolution.py tests/test_dataset_model/test_window_functions.py -q`
+  with `131 passed`.
+- Python P0-82 through P0-85 focused lint and diff checks passed:
+  `.venv/bin/ruff check --select F ...` and `git diff --check`.
 - Java P0-59 focused exporter passed:
   `mvn test -P!multi-db -pl foggy-dataset-model -Dtest=JavaComposeSnapshotTest`.
 - Python P0-59 coverage inventory reported:
@@ -531,4 +567,5 @@ Latest P0-79+ / P1-2 status:
   P0-26/P0-27 progress docs; P0-29/P0-30/P0-31 focused evidence is recorded in
   their progress docs. P0-32/P0-33/P0-34/P0-35/P0-36/P0-39/P0-40/P0-41/P0-42
   /P0-43/P0-44/P0-45/P0-46/P0-47/P0-48/P0-49/P0-50/P0-51/P0-53/P0-54
-  evidence is recorded in their progress docs.
+  /P0-82/P0-83/P0-84/P0-85 evidence is recorded in their workitem/progress
+  docs.

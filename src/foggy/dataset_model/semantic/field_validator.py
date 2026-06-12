@@ -142,7 +142,6 @@ def _strip_cast_type_names(expr: str) -> str:
             out.append(expr[pos:])
             break
 
-        cast_start = pos + match.start()
         open_paren = pos + match.end() - 1
         close_paren = _find_matching_paren(expr, open_paren)
         if close_paren < 0:
@@ -749,6 +748,12 @@ def _collect_model_schema_fields(model: Any) -> Set[str]:
         calc_name = calc.get("name") if isinstance(calc, dict) else getattr(calc, "name", None)
         if calc_name:
             fields.add(calc_name)
+
+    for relation in getattr(model, "aggregate_relations", None) or []:
+        for measure in getattr(relation, "measures", None) or []:
+            alias = getattr(measure, "alias", None)
+            if alias:
+                fields.add(alias)
 
     dimension_joins = getattr(model, "dimension_joins", None) or {}
     if isinstance(dimension_joins, dict):

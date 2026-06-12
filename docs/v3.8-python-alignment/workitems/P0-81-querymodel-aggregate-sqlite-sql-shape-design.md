@@ -194,3 +194,9 @@ Required checks:
   result checks.
 - P0-84 and P0-85 remain responsible for governance/metadata and pushdown
   diagnostics respectively.
+
+## Status Note
+
+P0-82 through P0-85 have since implemented this narrow SQLite boundary and
+recorded the corresponding SQL, live-result, governance/metadata, diagnostics,
+and runtime filter evidence.

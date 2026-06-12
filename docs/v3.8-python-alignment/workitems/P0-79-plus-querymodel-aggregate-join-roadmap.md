@@ -2,7 +2,7 @@
 doc_purpose: Plan the P0-79+ sequence for Python-Java QueryModel aggregate join alignment.
 version: v3.8-python-alignment
 priority: P0-79+
-status: planned
+status: completed-through-P0-85
 owner: python-engine
 ---
 
@@ -29,6 +29,10 @@ are outside this line unless a separate approved work item says otherwise.
 - P0-77 added the aggregate relation carrier and model landing point.
 - P0-78 added loader-side carrier extraction while still rejecting aggregate
   joins before runtime loading.
+- P0-79 through P0-85 now complete the first narrow Python runtime boundary:
+  guarded loader attachment, SQLite SQL lowering, SQLite live-result parity,
+  RHS denied-source governance, aggregate output metadata lineage, pushdown
+  diagnostics, and runtime extData filter fail-closed behavior.
 
 ## Planned Sequence
 
@@ -37,10 +41,10 @@ are outside this line unless a separate approved work item says otherwise.
 | P0-79 runtime/compiler refusal boundary | Completed | Refuse any model carrying `aggregate_relations` before SQL generation until lowering exists. | Focused runtime/compiler refusal test plus existing loader and Java snapshot replay green. |
 | P0-80 loader attachment behind refusal | Completed | Allow parsed aggregate carriers to attach to a QueryModel only in a controlled path that still refuses before SQL/runtime. | Loader can produce an alias model with `aggregate_relations` in a clearly guarded path; runtime still fails closed. |
 | P0-81 minimal SQL-shape design for SQLite happy path | Completed | Define Python lowering shape for RHS grouped subquery and LEFT JOIN based on the committed Java fixture. | Design doc plus expected SQL markers; no broad runtime exposure. |
-| P0-82 SQLite SQL lowering skeleton | Planned | Implement the smallest RHS preaggregation renderer for the Java happy-path contract. | SQL marker replay for RHS preaggregation, join key, fixed filter, and non-multiplication shape. |
-| P0-83 SQLite live-result parity | Planned | Execute the happy path against SQLite and compare Java snapshot result semantics. | Left-side measure is not multiplied; aggregate output matches independent oracle SQL. |
-| P0-84 governance and metadata boundary | Planned | Add denied-column/calculated-field dependency refusal and V3 aggregate lineage surface. | Java governance/metadata cases replay or focused Python equivalents, with sanitized errors. |
-| P0-85 pushdown diagnostics boundary | Planned | Add AND pushdown and OR/mixed retained/refused diagnostics aligned to Java fixture cases. | Diagnostic reason-code replay against the Java aggregate snapshot. |
+| P0-82 SQLite SQL lowering skeleton | Completed | Implement the smallest RHS preaggregation renderer for the Java happy-path contract. | SQL marker replay covers RHS preaggregation, join key, fixed filter, fallback alias, `count(*)`, and missing right-key groupBy fail-closed behavior. |
+| P0-83 SQLite live-result parity | Completed | Execute the happy path against SQLite and compare Java snapshot result semantics. | Left-side measure is not multiplied; aggregate output matches focused SQLite oracle data. |
+| P0-84 governance and metadata boundary | Completed | Add denied-source-column refusal and aggregate output lineage metadata. | Focused Python governance/metadata tests prove sanitized denied-source failure and lineage on build columns. |
+| P0-85 pushdown diagnostics boundary | Completed | Add AND pushdown, OR retained diagnostics, and runtime filter fail-closed behavior aligned to Java fixture cases. | Diagnostic reason-code replay covers RHS where pushdown, RHS having pushdown, OR outer-only retention, and missing extData refusal. |
 
 ## Ordering Rules
 
@@ -50,8 +54,8 @@ are outside this line unless a separate approved work item says otherwise.
 - Do not expand to Odoo models before engine-neutral Java/Python parity gates
   pass.
 - Do not treat aggregate relations as ordinary explicit joins.
-- Do not expose product-facing behavior until SQL, governance, metadata, and
-  diagnostics have explicit evidence.
+- Do not expand product-facing behavior beyond the narrow SQLite boundary until
+  external dialect, DTO exposure, and broader QueryModel stage evidence exists.
 
 ## Evidence Required From Java
 
@@ -66,10 +70,10 @@ behavior that the current 10-case snapshot does not encode.
 
 ## Open Risks
 
-- Aggregate relation output ownership must not bypass denied-column or
-  calculated-field dependency checks.
-- Runtime filters must stay inside the RHS relation only when Java-compatible
-  binding and missing-value behavior are proven.
-- Pushdown diagnostics must not drift into best-effort optimizer behavior; they
-  need stable reason codes.
-- PostgreSQL/MySQL support should remain follow-up after SQLite closes.
+- PostgreSQL/MySQL/TMS DB support remains follow-up after the SQLite boundary.
+- Broader predicate pushdown must not drift into best-effort optimizer behavior;
+  new cases need stable reason codes before exposure.
+- V3 API DTO exposure for aggregate relation lineage remains separate from the
+  internal `QueryBuildResult.columns` metadata proven by P0-84.
+- Calculated fields over aggregate relation outputs and multi-relation QueryModel
+  stages remain unsupported in the current narrow path.
