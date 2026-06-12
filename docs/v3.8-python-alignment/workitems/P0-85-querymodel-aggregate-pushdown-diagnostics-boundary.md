@@ -68,6 +68,9 @@ or having, while OR filters remain outer-only with explicit diagnostics.
 - Passed:
   `.venv/bin/ruff check --select F src/foggy/dataset_model/aggregate_join.py src/foggy/dataset_model/semantic/field_validator.py src/foggy/dataset_model/semantic/service.py tests/test_dataset_model/test_querymodel_aggregate_sqlite_alignment.py tests/test_dataset_model/test_querymodel_aggregate_runtime_refusal.py tests/test_dataset_model/test_loader_fsscript.py`
 - Passed: `git diff --check`
+- Passed:
+  `.venv/bin/python -m pytest -q`
+  (`4137 passed, 232 skipped, 53 warnings in 19.61s`)
 
 ## Execution Check-in
 
@@ -79,6 +82,8 @@ or having, while OR filters remain outer-only with explicit diagnostics.
   - Diagnostics are deterministic for the covered fixture shapes.
   - OR filters are retained rather than guessed into a partial pushdown.
   - Runtime filter failure is fail-closed and uses an aggregate-specific code.
+  - Post-implementation quality review recorded at
+    `quality/P0-82-to-P0-85-aggregate-relation-implementation-quality.md`.
 
 ## Remaining Risks
 

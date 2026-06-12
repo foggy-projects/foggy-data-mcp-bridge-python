@@ -485,6 +485,12 @@ Latest P0-79+ / P1-2 status:
   with `131 passed`.
 - Python P0-82 through P0-85 focused lint and diff checks passed:
   `.venv/bin/ruff check --select F ...` and `git diff --check`.
+- Python P0-82 through P0-85 full pytest baseline passed:
+  `.venv/bin/python -m pytest -q` with
+  `4137 passed, 232 skipped, 53 warnings in 19.61s`.
+- Python P0-82 through P0-85 implementation quality review completed:
+  `quality/P0-82-to-P0-85-aggregate-relation-implementation-quality.md`
+  with decision `ready-with-risks`.
 - Java P0-59 focused exporter passed:
   `mvn test -P!multi-db -pl foggy-dataset-model -Dtest=JavaComposeSnapshotTest`.
 - Python P0-59 coverage inventory reported:
