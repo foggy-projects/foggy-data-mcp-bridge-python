@@ -2,7 +2,7 @@
 doc_purpose: Plan the P0-79+ sequence for Python-Java QueryModel aggregate join alignment.
 version: v3.8-python-alignment
 priority: P0-79+
-status: completed-through-P0-86-planned-through-P0-88
+status: completed-through-P0-88-with-P0-87-v2-replay
 owner: python-engine
 ---
 
@@ -33,10 +33,11 @@ are outside this line unless a separate approved work item says otherwise.
   guarded loader attachment, SQLite SQL lowering, SQLite live-result parity,
   RHS denied-source governance, aggregate output metadata lineage, pushdown
   diagnostics, and runtime extData filter fail-closed behavior.
-- P0-86 inventories Java 9.2 aggregate relation acceptance evidence that is not
-  represented in the current 10-case Java snapshot fixture.
-- P0-87 defines the next governance snapshot expansion and is ready for Java
-  exporter work.
+- P0-86 inventories Java 9.2 aggregate relation acceptance evidence that was
+  not represented in the earlier 10-case Java snapshot fixture.
+- P0-87 expands the Java snapshot to the 19-case
+  `querymodel-aggregate-join-2` governance fixture and activates Python replay
+  for the new case ids.
 - P0-88 freezes the public API metadata contract for aggregate relation lineage
   before Python exposes DTO behavior.
 
@@ -51,8 +52,8 @@ are outside this line unless a separate approved work item says otherwise.
 | P0-83 SQLite live-result parity | Completed | Execute the happy path against SQLite and compare Java snapshot result semantics. | Left-side measure is not multiplied; aggregate output matches focused SQLite oracle data. |
 | P0-84 governance and metadata boundary | Completed | Add denied-source-column refusal and aggregate output lineage metadata. | Focused Python governance/metadata tests prove sanitized denied-source failure and lineage on build columns. |
 | P0-85 pushdown diagnostics boundary | Completed | Add AND pushdown, OR retained diagnostics, and runtime filter fail-closed behavior aligned to Java fixture cases. | Diagnostic reason-code replay covers RHS where pushdown, RHS having pushdown, OR outer-only retention, and missing extData refusal. |
-| P0-86 Java fixture gap inventory | Completed | Compare Java 9.2 aggregate acceptance evidence with the current Python 10-case fixture. | Missing governance/API/SQL behavior cases are classified with risk and next gate. |
-| P0-87 governance snapshot expansion | Ready for Java export | Add Java-exported fieldAccess, system_slice, denied-source, calculated-field, and raw accessBuilder governance evidence. | Java exporter emits stable case ids; Python fixture/replay is regenerated from that output before behavior expands. |
+| P0-86 Java fixture gap inventory | Completed | Compare Java 9.2 aggregate acceptance evidence with the original Python 10-case fixture. | Missing governance/API/SQL behavior cases are classified with risk and next gate. |
+| P0-87 governance snapshot expansion | Completed for snapshot/replay | Add Java-exported fieldAccess, system_slice, denied-source, calculated-field, and raw accessBuilder governance evidence. | Java exporter emits stable v2 case ids; Python fixture/replay is regenerated from that output before behavior expands. |
 | P0-88 API metadata contract | Contract ready | Freeze the V3 public `aggregateRelation` DTO key set and parent measure attributes. | Python public metadata exposes exactly the Java seven-key lineage object while internal compiler metadata can keep engine-only fields. |
 
 ## Ordering Rules
@@ -71,16 +72,16 @@ are outside this line unless a separate approved work item says otherwise.
 The active fixture is
 `tests/fixtures/java_querymodel_aggregate_join_snapshot_parity.json`, exported
 from Java by `JavaQueryModelAggregateJoinSnapshotTest`. The P0-79+ sequence
-should continue using that fixture as the default contract until Java exports a
-newer stable snapshot.
+should continue using the v2 fixture as the default contract until Java exports
+a newer stable snapshot.
 
 Additional Java evidence should be requested only when a planned item needs
-behavior that the current 10-case snapshot does not encode.
+behavior that the current 19-case snapshot does not encode.
 
 P0-86 confirms that Java 9.2 acceptance has additional aggregate relation
-evidence outside the current 10-case fixture. P0-87 owns the governance exporter
-increment. P0-88 owns the API metadata DTO contract before Python public
-metadata exposure changes.
+evidence outside the original 10-case fixture. P0-87 now owns the exported v2
+governance fixture and Python replay increment. P0-88 owns the API metadata DTO
+contract before Python public metadata exposure changes.
 
 ## Open Risks
 
@@ -91,6 +92,9 @@ metadata exposure changes.
   internal `QueryBuildResult.columns` metadata proven by P0-84.
 - Calculated fields over aggregate relation outputs and multi-relation QueryModel
   stages remain unsupported in the current narrow path.
-- The current committed fixture does not yet cover aggregate output fieldAccess,
-  system_slice guard bypass, raw accessBuilder outer-only behavior, or the exact
-  public API metadata DTO shape.
+- The current committed fixture covers aggregate output fieldAccess,
+  system_slice guard bypass, raw accessBuilder outer-only behavior, and
+  calculated-field denied-source governance as Java replay evidence, but Python
+  runtime implementation for all new governance positives is still follow-up.
+- The exact public API metadata DTO exposure remains separate from internal
+  build-column metadata.

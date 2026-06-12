@@ -27,6 +27,15 @@ REQUIRED_CASE_IDS = {
     "aggregate-join-and-pushdown-diagnostics",
     "aggregate-join-or-outer-only-diagnostics",
     "aggregate-join-denied-source-column-refusal",
+    "aggregate-join-field-access-allow-output",
+    "aggregate-join-field-access-deny-output-refusal",
+    "aggregate-join-system-slice-guard-bypass-no-leak",
+    "aggregate-join-denied-source-column-unreferenced-pass",
+    "aggregate-join-calculated-field-denied-source-refusal",
+    "aggregate-join-calculated-field-chain-denied-source-refusal",
+    "aggregate-join-predefined-calculated-field-denied-source-refusal",
+    "aggregate-join-predefined-calculated-field-allowed-exec",
+    "aggregate-join-raw-sql-access-builder-outer-only",
     "aggregate-join-metadata-lineage",
 }
 
@@ -51,7 +60,7 @@ def test_snapshot_schema_and_required_cases() -> None:
     assert snapshot["schemaVersion"] == 1
     assert snapshot["feature"] == "queryModelAggregateJoin"
     assert snapshot["source"] == "JavaQueryModelAggregateJoinSnapshotTest"
-    assert snapshot["contractVersion"] == "querymodel-aggregate-join-1"
+    assert snapshot["contractVersion"] == "querymodel-aggregate-join-2"
     assert snapshot["dialect"] == "sqlite"
 
     case_ids = {case["id"] for case in snapshot["cases"]}
@@ -128,6 +137,7 @@ def _assert_sql_case(case: dict[str, Any]) -> None:
             f"{case['id']} contains forbidden SQL marker: {marker}"
         )
 
+    _assert_row_contract(case)
     _assert_diagnostics(expected.get("diagnostics", []))
 
 
@@ -139,6 +149,32 @@ def _assert_error_case(case: dict[str, Any]) -> None:
     marker_text = json.dumps(expected, ensure_ascii=False)
     for marker in expected.get("messageMarkers", []):
         assert marker in marker_text, f"{case['id']} missing error marker: {marker}"
+
+
+def _assert_row_contract(case: dict[str, Any]) -> None:
+    expected = case["expected"]
+    rows = expected.get("rows", [])
+
+    if rows:
+        assert isinstance(rows, list)
+        assert all(isinstance(row, dict) for row in rows)
+
+    for field in expected.get("rowsRequiredFields", []):
+        assert rows, f"{case['id']} should include row evidence for {field}"
+        for row in rows:
+            assert field in row, f"{case['id']} row missing required field: {field}"
+
+    for field in expected.get("rowsForbiddenFields", []):
+        for row in rows:
+            assert field not in row, f"{case['id']} row leaked forbidden field: {field}"
+
+    field_access = expected.get("fieldAccess")
+    if field_access is not None:
+        assert isinstance(field_access, list)
+        allowed = set(field_access)
+        for row in rows:
+            leaked = set(row) - allowed
+            assert not leaked, f"{case['id']} row fields outside fieldAccess: {leaked}"
 
 
 def _assert_metadata_case(case: dict[str, Any]) -> None:

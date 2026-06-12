@@ -345,7 +345,7 @@
       "feature": "queryModelAggregateJoin",
       "status": "active",
       "owner": "java",
-      "scope": "QueryModel aggregate join neutral SQL/result/metadata/governance/diagnostics snapshots before Python implementation",
+      "scope": "QueryModel aggregate join neutral SQL/result/metadata/governance/diagnostics snapshots before and during Python implementation",
       "designDoc": "docs/v3.8-python-alignment/workitems/P0-72-querymodel-aggregate-join-python-gap-audit.md",
       "contractFixture": "tests/fixtures/java_querymodel_aggregate_join_snapshot_contract.json",
       "javaExporter": "foggy-dataset-model/src/test/java/com/foggyframework/dataset/db/model/parity/JavaQueryModelAggregateJoinSnapshotTest.java",
@@ -369,22 +369,30 @@
         "safe AND join-key/group-key/measure pushdown diagnostics",
         "OR and mixed predicate outer-only diagnostics",
         "source physical deniedColumns refusal for aggregate outputs and dependent calculated fields",
+        "aggregate output fieldAccess allow and deny governance",
+        "system_slice guard predicate without output leakage",
+        "unrelated denied RHS source physical column pass-through",
+        "dynamic calculated-field denied-source refusal",
+        "transitive calculated-field denied-source refusal",
+        "predefined calculated-field denied-source refusal",
+        "predefined calculated-field positive SQL/result evidence",
+        "raw SQL accessBuilder predicate remains outer-only",
         "V3 metadata aggregateRelation lineage fields"
       ],
       "plannedExtensions": [
-        "Python compiler/runtime refusal for aggregate relation carriers before SQL lowering",
-        "Python production SQL lowering for aggregate relations",
-        "SQLite live-result parity after Python implementation",
+        "Python runtime implementation for newly exported P0-87 governance cases",
+        "Python public API metadata DTO exposure from the P0-88 contract",
+        "Group-key alias, derived relation parameter binding, projection pruning/default aggregation, and mixed predicate P0-89 SQL/diagnostics expansion",
         "MySQL/PostgreSQL aggregate join replay expansion after SQLite closure"
       ],
       "verification": [
         "Python keeps the contract fixture and committed Java snapshot replay always-on",
-        "Java exporter writes target/parity/_querymodel_aggregate_join_snapshot.json with the 10 contract cases",
-        "Python replay validates SQL/result/error/metadata/diagnostics markers without production SQL lowering",
+        "Java exporter writes target/parity/_querymodel_aggregate_join_snapshot.json with the 19 v2 contract cases",
+        "Python replay validates SQL/result/error/metadata/diagnostics/governance markers against the committed v2 fixture",
         "Python loader refuses aggregate join declarations instead of loading them as ordinary explicit joins",
         "Python proxy/model layer preserves aggregate relation carrier structure while runtime remains fail-closed",
         "Python loader extracts aggregate relation carriers and reports carrier_count before fail-closed rejection",
-        "Python production SQL lowering remains unimplemented until the dedicated compiler path lands"
+        "Python has a guarded SQLite aggregate relation runtime boundary and keeps unsupported shapes fail-closed"
       ]
     }
   ]

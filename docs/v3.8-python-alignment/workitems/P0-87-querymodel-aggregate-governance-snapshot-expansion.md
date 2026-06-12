@@ -2,7 +2,7 @@
 doc_purpose: Define the next Java snapshot expansion for aggregate relation governance parity.
 version: v3.8-python-alignment
 priority: P0-87
-status: ready-for-java-export
+status: java-exported-python-replay-active
 owner: java-python-parity
 ---
 
@@ -12,17 +12,17 @@ Date: 2026-06-12
 
 ## Scope
 
-P0-87 defines the next aggregate relation snapshot increment for governance
-behavior that Java 9.2 acceptance covers but the current Python 10-case fixture
-does not.
+P0-87 defines and activates the next aggregate relation snapshot increment for
+governance behavior that Java 9.2 acceptance covers and the previous Python
+10-case fixture did not.
 
-This is an exporter/snapshot planning item first. Python runtime changes should
-wait until the Java fixture output is available and the replay contract is
+This is an exporter/snapshot and replay item first. Python runtime behavior for
+the newly exported cases should expand only after the fixture contract is
 reviewed. Odoo and production business models remain out of scope.
 
 ## Current Baseline
 
-The active Python fixture already covers:
+The v1 Python fixture already covered:
 
 - RHS preaggregation SQL shape for SQLite.
 - Root-side measure non-multiplication live-result semantics.
@@ -32,13 +32,14 @@ The active Python fixture already covers:
 - Referenced denied RHS source physical-column refusal.
 - Internal aggregate output lineage metadata.
 
-It does not cover fieldAccess, system slice, unrelated denied-source columns,
-raw accessBuilder boundaries, or calculated-field dependency governance for
-aggregate relations.
+The v2 Python fixture now also covers fieldAccess, system slice, unrelated
+denied-source columns, raw accessBuilder boundaries, and calculated-field
+dependency governance for aggregate relations. These are pinned as Java
+snapshot replay evidence before broader Python runtime expansion.
 
 ## Required Java Exporter Cases
 
-The proposed stable case ids are:
+The exported stable case ids are:
 
 | Proposed Case ID | Type | Required Contract |
 | --- | --- | --- |
@@ -49,23 +50,23 @@ The proposed stable case ids are:
 | `aggregate-join-calculated-field-denied-source-refusal` | error | A dynamic calculated field depending on a denied aggregate source fails closed. |
 | `aggregate-join-calculated-field-chain-denied-source-refusal` | error | A transitive calculated dependency on a denied aggregate source fails closed. |
 | `aggregate-join-predefined-calculated-field-denied-source-refusal` | error | A predefined calculated field depending on a denied aggregate source fails closed. |
-| `aggregate-join-predefined-calculated-field-allowed-exec` | result | A predefined calculated field over allowed aggregate relation data executes with stable output. |
-| `aggregate-join-raw-sql-access-builder-outer-only` | diagnostics | Raw SQL accessBuilder predicates stay outside the RHS aggregate subquery and report a stable outer-only reason. |
+| `aggregate-join-predefined-calculated-field-allowed-exec` | sql | A predefined calculated field over allowed aggregate relation data renders with stable SQL/result evidence. |
+| `aggregate-join-raw-sql-access-builder-outer-only` | sql | Raw SQL accessBuilder predicates stay outside the RHS aggregate subquery. |
 
-The last case is included because Java acceptance covers raw accessBuilder
-outer-only behavior. If the Java exporter cannot produce it without introducing
-unstable SQL text, it can move to the P0-89 SQL/diagnostics expansion.
+The Java exporter produced all planned P0-87 cases in
+`querymodel-aggregate-join-2`. Follow-up optimizer/SQL details that were not
+needed for this governance increment should move to P0-89.
 
 ## Python Replay Expectations
 
-Once the Java exporter produces stable cases:
+The Java exporter produced stable cases and Python replay now:
 
-- Extend `tests/fixtures/java_querymodel_aggregate_join_snapshot_parity.json`
+- Extends `tests/fixtures/java_querymodel_aggregate_join_snapshot_parity.json`
   from the Java output rather than hand-authoring expected behavior.
-- Extend `tests/integration/test_java_querymodel_aggregate_join_snapshot_contract.py`
-  to require the new case ids and forbidden leakage markers.
-- Extend `tests/integration/test_java_querymodel_aggregate_join_snapshot_parity.py`
-  to replay each new case by type.
+- Extends `tests/integration/test_java_querymodel_aggregate_join_snapshot_contract.py`
+  to require the new case ids.
+- Extends `tests/integration/test_java_querymodel_aggregate_join_snapshot_parity.py`
+  to replay each new case by type and to pin row-level field leakage rules.
 - Keep current runtime unsupported boundaries fail-closed where Python does not
   yet implement a positive Java behavior.
 
@@ -79,6 +80,19 @@ Expected Python behavior by group:
 | Calculated field denial | Ensure dynamic/predefined calculated dependency checks inherit aggregate source boundaries and fail closed with sanitized errors. |
 | Positive predefined calculated execution | Treat as later implementation if it requires formula execution over aggregate outputs; do not fake parity in replay. |
 | Raw accessBuilder | Keep raw predicates outer-only with a deterministic diagnostic reason before adding any pushdown behavior. |
+
+## Exported Evidence
+
+The Java exporter now writes
+`foggy-dataset-model/target/parity/_querymodel_aggregate_join_snapshot.json`
+with:
+
+- `contractVersion = querymodel-aggregate-join-2`
+- `dialect = sqlite`
+- `19` cases, including all P0-87 governance additions.
+
+The committed Python fixture copy is
+`tests/fixtures/java_querymodel_aggregate_join_snapshot_parity.json`.
 
 ## Non-Goals
 
@@ -101,10 +115,18 @@ Expected Python behavior by group:
 
 ## Execution Check-In
 
-- Status: ready for Java exporter work.
-- Current Python code impact: none.
-- Current fixture impact: none.
-- Required next evidence: Java snapshot output containing the P0-87 case ids.
-- Verification on 2026-06-12: existing aggregate relation manifest/contract/
-  parity replay stayed green with `10 passed in 0.05s`.
-- `git diff --check` passed.
+- Status: Java exporter produced v2 governance cases; Python contract/manifest/
+  replay is updated locally.
+- Current Java impact: `JavaQueryModelAggregateJoinSnapshotTest` adds the v2
+  aggregate governance cases and generated a 19-case SQLite snapshot.
+- Current Python code impact: focused replay tests only; no broad runtime
+  implementation for the newly exported governance behaviors yet.
+- Current fixture impact:
+  `tests/fixtures/java_querymodel_aggregate_join_snapshot_parity.json` is
+  regenerated from the Java v2 snapshot.
+- Verification on 2026-06-12:
+  `JAVA_HOME=/Users/fengjianguang/.jdk/temurin-17/Contents/Home mvn -pl foggy-dataset-model -am -P'!multi-db' -Dspring.profiles.active=sqlite -Dtest=JavaQueryModelAggregateJoinSnapshotTest -Dfoggy.parity.snapshot=true -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTests=false test`
+  passed and produced `querymodel-aggregate-join-2`.
+- Verification on 2026-06-12:
+  `.venv/bin/python -m pytest tests/integration/test_java_snapshot_parity_manifest.py tests/integration/test_java_querymodel_aggregate_join_snapshot_contract.py tests/integration/test_java_querymodel_aggregate_join_snapshot_parity.py -q`
+  passed with `10 passed in 0.08s`.

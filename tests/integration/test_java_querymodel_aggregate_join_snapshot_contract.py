@@ -27,6 +27,15 @@ REQUIRED_CASE_IDS = {
     "aggregate-join-and-pushdown-diagnostics",
     "aggregate-join-or-outer-only-diagnostics",
     "aggregate-join-denied-source-column-refusal",
+    "aggregate-join-field-access-allow-output",
+    "aggregate-join-field-access-deny-output-refusal",
+    "aggregate-join-system-slice-guard-bypass-no-leak",
+    "aggregate-join-denied-source-column-unreferenced-pass",
+    "aggregate-join-calculated-field-denied-source-refusal",
+    "aggregate-join-calculated-field-chain-denied-source-refusal",
+    "aggregate-join-predefined-calculated-field-denied-source-refusal",
+    "aggregate-join-predefined-calculated-field-allowed-exec",
+    "aggregate-join-raw-sql-access-builder-outer-only",
     "aggregate-join-metadata-lineage",
 }
 
@@ -42,6 +51,7 @@ def test_contract_schema_and_required_cases() -> None:
     assert contract["feature"] == "queryModelAggregateJoin"
     assert contract["status"] == "contractOnly"
     assert contract["source"] == "JavaQueryModelAggregateJoinSnapshotTest"
+    assert contract["contractVersion"] == "querymodel-aggregate-join-2"
 
     required_envelope = set(contract["requiredEnvelopeFields"])
     assert {"schemaVersion", "feature", "source", "cases"}.issubset(required_envelope)

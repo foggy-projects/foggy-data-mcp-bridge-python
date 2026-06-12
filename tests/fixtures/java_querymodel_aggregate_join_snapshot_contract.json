@@ -4,7 +4,8 @@
   "status": "contractOnly",
   "owner": "java",
   "source": "JavaQueryModelAggregateJoinSnapshotTest",
-  "purpose": "Define the neutral Java snapshot envelope required before Python QueryModel aggregate join implementation.",
+  "contractVersion": "querymodel-aggregate-join-2",
+  "purpose": "Define the neutral Java snapshot envelope for Python QueryModel aggregate join implementation and governance replay.",
   "requiredEnvelopeFields": [
     "schemaVersion",
     "feature",
@@ -22,8 +23,7 @@
     "sql": [
       "sqlMarkers",
       "forbiddenSqlMarkers",
-      "params",
-      "diagnostics"
+      "params"
     ],
     "result": [
       "rows",
@@ -37,6 +37,22 @@
     "error": [
       "errorCode",
       "messageMarkers"
+    ]
+  },
+  "optionalExpectedFieldsByType": {
+    "sql": [
+      "diagnostics",
+      "rows",
+      "rowsRequiredFields",
+      "rowsForbiddenFields",
+      "fieldAccess",
+      "systemSlice",
+      "deniedColumns"
+    ],
+    "error": [
+      "fieldAccess",
+      "calculatedFields",
+      "predefinedCalculatedField"
     ]
   },
   "requiredCases": [
@@ -86,6 +102,51 @@
       "description": "Denying the RHS source physical column rejects aggregate outputs and dependent calculated fields."
     },
     {
+      "id": "aggregate-join-field-access-allow-output",
+      "type": "sql",
+      "description": "Aggregate output projection passes when fieldAccess allows the selected output aliases."
+    },
+    {
+      "id": "aggregate-join-field-access-deny-output-refusal",
+      "type": "error",
+      "description": "Denying a selected aggregate output alias fails closed with sanitized markers."
+    },
+    {
+      "id": "aggregate-join-system-slice-guard-bypass-no-leak",
+      "type": "sql",
+      "description": "System slice governance can filter on an aggregate output without projecting or exposing that guard field."
+    },
+    {
+      "id": "aggregate-join-denied-source-column-unreferenced-pass",
+      "type": "sql",
+      "description": "A denied RHS source physical column that is unrelated to selected aggregate outputs does not block the query."
+    },
+    {
+      "id": "aggregate-join-calculated-field-denied-source-refusal",
+      "type": "error",
+      "description": "A dynamic calculated field depending on a denied aggregate source fails closed."
+    },
+    {
+      "id": "aggregate-join-calculated-field-chain-denied-source-refusal",
+      "type": "error",
+      "description": "A transitive calculated dependency on a denied aggregate source fails closed."
+    },
+    {
+      "id": "aggregate-join-predefined-calculated-field-denied-source-refusal",
+      "type": "error",
+      "description": "A predefined calculated field depending on a denied aggregate source fails closed."
+    },
+    {
+      "id": "aggregate-join-predefined-calculated-field-allowed-exec",
+      "type": "sql",
+      "description": "A predefined calculated field over allowed aggregate relation data renders and returns stable output evidence."
+    },
+    {
+      "id": "aggregate-join-raw-sql-access-builder-outer-only",
+      "type": "sql",
+      "description": "A raw SQL accessBuilder predicate stays outside the RHS aggregate subquery."
+    },
+    {
       "id": "aggregate-join-metadata-lineage",
       "type": "metadata",
       "description": "V3 metadata exposes aggregateRelation lineage and inherited aggregation/source metadata."
@@ -120,7 +181,7 @@
   "plannedPythonReplay": {
     "fixturePath": "tests/fixtures/java_querymodel_aggregate_join_snapshot_parity.json",
     "testPath": "tests/integration/test_java_querymodel_aggregate_join_snapshot_parity.py",
-    "initialMode": "skip-until-java-export",
-    "implementationBoundary": "Do not render production aggregate join SQL until Java neutral fixture cases are available."
+    "initialMode": "always-on-offline-replay",
+    "implementationBoundary": "Replay Java neutral fixture cases before expanding Python production aggregate join behavior beyond the current guarded SQLite boundary."
   }
 }

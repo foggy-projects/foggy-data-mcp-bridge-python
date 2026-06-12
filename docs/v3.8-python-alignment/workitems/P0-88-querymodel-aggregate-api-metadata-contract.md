@@ -125,6 +125,7 @@ Add tests only when the implementation work starts:
 - Required next evidence: either a Java metadata snapshot case that includes
   the exact public DTO shape or a focused Python implementation test derived
   from the Java V3 metadata contract above.
-- Verification on 2026-06-12: existing aggregate relation manifest/contract/
-  parity replay stayed green with `10 passed in 0.05s`.
+- Verification on 2026-06-12: aggregate relation manifest/contract/parity
+  replay stayed green after the P0-87 v2 fixture update with
+  `10 passed in 0.08s`.
 - `git diff --check` passed.
