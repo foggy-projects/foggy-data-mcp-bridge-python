@@ -376,6 +376,10 @@ Latest P0-79+ / P1-2 status:
   `aggregate_relations`: synchronous validate, async validate,
   `build_query_with_governance`, and direct `_build_query` all fail closed
   with sanitized `QUERYMODEL_AGGREGATE_JOIN_UNSUPPORTED` before SQL generation.
+- P0-80 adds a guarded loader attachment path:
+  `load_models_from_directory(..., attach_aggregate_relations=True)` can attach
+  parsed aggregate relation carriers to a QM alias while default loading remains
+  fail-closed and runtime validate still refuses before SQL generation.
 - P0-79+ records the planned aggregate-join sequence: guarded loader
   attachment, SQLite SQL-shape design, SQLite lowering skeleton, live-result
   parity, governance/metadata, and pushdown diagnostics.

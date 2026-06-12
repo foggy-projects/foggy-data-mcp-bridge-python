@@ -425,6 +425,7 @@ def _build_explicit_joins(
     joins: List[Any],
     tm_models: Dict[str, DbTableModelImpl],
     base_model_name: str,
+    skip_aggregate_relation_joins: bool = False,
 ) -> List[ExplicitJoinDef]:
     """Convert evaluated JoinBuilder objects into runtime explicit joins."""
     explicit_joins: List[ExplicitJoinDef] = []
@@ -433,6 +434,8 @@ def _build_explicit_joins(
 
     for join in joins:
         if _is_unsupported_aggregate_join_value(join):
+            if skip_aggregate_relation_joins:
+                continue
             raise ValueError(
                 f"{AGGREGATE_JOIN_UNSUPPORTED_CODE}: aggregate relation joins "
                 "cannot be loaded as ordinary explicit joins."
@@ -483,6 +486,7 @@ def _apply_explicit_join_metadata(
     base_model_name: str,
     column_groups: Optional[List[Dict[str, Any]]],
     joins: Optional[List[Any]],
+    skip_aggregate_relation_joins: bool = False,
 ) -> None:
     """Attach explicit multi-model join metadata to a QM alias model."""
     alias_model.field_model_map = {}
@@ -497,7 +501,12 @@ def _apply_explicit_join_metadata(
         )
 
     if joins and isinstance(joins, list):
-        explicit_joins = _build_explicit_joins(joins, tm_models, base_model_name)
+        explicit_joins = _build_explicit_joins(
+            joins,
+            tm_models,
+            base_model_name,
+            skip_aggregate_relation_joins=skip_aggregate_relation_joins,
+        )
         alias_model.explicit_joins = explicit_joins
         for join in explicit_joins:
             alias_model.model_alias_map[join.left_model] = join.left_alias
@@ -969,7 +978,11 @@ def _create_service_aware_loader(base_path: Path):
     return ServiceAwareFileModuleLoader(base_path=base_path)
 
 
-def load_models_from_directory(model_dir: str, namespace: Optional[str] = None) -> List[DbTableModelImpl]:
+def load_models_from_directory(
+    model_dir: str,
+    namespace: Optional[str] = None,
+    attach_aggregate_relations: bool = False,
+) -> List[DbTableModelImpl]:
     """Load TM and QM models from a directory containing FSScript files.
 
     Scans the directory (recursively) for:
@@ -992,6 +1005,10 @@ def load_models_from_directory(model_dir: str, namespace: Optional[str] = None) 
                    When set (e.g., ``"odoo"``), model ``OdooSaleOrderModel``
                    is registered as ``"odoo:OdooSaleOrderModel"``.
                    Aligned with Java ``@EnableFoggyFramework(namespace="odoo")``.
+        attach_aggregate_relations: Explicitly attach parsed aggregate relation
+                   carriers to QM alias models. Defaults to ``False`` so loader
+                   behavior remains fail-closed until the runtime SQL lowering
+                   path is implemented.
 
     Returns:
         List of loaded DbTableModelImpl instances (TMs + QM aliases)
@@ -1090,7 +1107,19 @@ def load_models_from_directory(model_dir: str, namespace: Optional[str] = None) 
             if not qm_def or not isinstance(qm_def, dict):
                 logger.warning(f"No 'queryModel' export found in: {qm_file}")
                 continue
-            _reject_unsupported_aggregate_join_contract(qm_def, qm_file)
+            aggregate_relation_carriers = _extract_aggregate_relation_carriers(qm_def)
+            if _is_unsupported_aggregate_join_value(qm_def) and not attach_aggregate_relations:
+                _reject_unsupported_aggregate_join_contract(qm_def, qm_file)
+            if (
+                _is_unsupported_aggregate_join_value(qm_def)
+                and attach_aggregate_relations
+                and not aggregate_relation_carriers
+            ):
+                raise ValueError(
+                    f"{AGGREGATE_JOIN_UNSUPPORTED_CODE}: QueryModel aggregate join "
+                    "was recognized but no aggregate relation carrier could be "
+                    f"extracted. carrier_count=0 source={qm_file}"
+                )
 
             qm_name = qm_def.get("name")
             if not qm_name:
@@ -1124,7 +1153,13 @@ def load_models_from_directory(model_dir: str, namespace: Optional[str] = None) 
                     tm_ref_name,
                     column_groups if isinstance(column_groups, list) else None,
                     joins if isinstance(joins, list) else None,
+                    skip_aggregate_relation_joins=attach_aggregate_relations,
                 )
+                if aggregate_relation_carriers:
+                    alias_model.aggregate_relations = [
+                        carrier.model_copy(deep=True)
+                        for carrier in aggregate_relation_carriers
+                    ]
                 if column_groups and isinstance(column_groups, list):
                     allowed = _extract_allowed_fields(column_groups)
                     if allowed:

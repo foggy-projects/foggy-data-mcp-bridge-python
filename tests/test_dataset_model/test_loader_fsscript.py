@@ -20,7 +20,9 @@ from foggy.dataset_model.impl.loader import (
     _apply_column_group_filter,
     load_models_from_directory,
 )
+from foggy.dataset_model.semantic.service import SemanticQueryService
 from foggy.dataset_model.proxy import TableModelProxy
+from foggy.mcp_spi import SemanticQueryRequest
 
 
 # ==================== _snake_to_camel ====================
@@ -1093,6 +1095,102 @@ export const queryModel = {
         assert "carrier_count=1" in caplog.text
         assert "OrderAggregateJoinQueryModel.qm" in caplog.text
 
+    def test_aggregate_join_contract_attaches_carrier_only_when_enabled(self):
+        """Controlled loader path can attach carriers while runtime still refuses."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model_dir = Path(tmpdir) / "model"
+            model_dir.mkdir()
+            (model_dir / "FactOrderModel.tm").write_text(
+                """
+export const model = {
+    name: 'FactOrderModel',
+    caption: 'Orders',
+    tableName: 'fact_order',
+    idColumn: 'id',
+    properties: [
+        { column: 'id', name: 'id', caption: 'ID', type: 'LONG' },
+        { column: 'order_id', name: 'orderId', caption: 'Order ID', type: 'STRING' }
+    ],
+    measures: [
+        { column: 'order_amount', name: 'orderAmount', caption: 'Order Amount', aggregation: 'SUM' }
+    ]
+};
+""",
+                encoding="utf-8",
+            )
+            (model_dir / "FactSalesModel.tm").write_text(
+                """
+export const model = {
+    name: 'FactSalesModel',
+    caption: 'Sales',
+    tableName: 'fact_sales',
+    idColumn: 'id',
+    properties: [
+        { column: 'id', name: 'id', caption: 'ID', type: 'LONG' },
+        { column: 'order_id', name: 'orderId', caption: 'Order ID', type: 'STRING' }
+    ],
+    measures: [
+        { column: 'sales_amount', name: 'salesAmount', caption: 'Sales Amount', aggregation: 'SUM' }
+    ]
+};
+""",
+                encoding="utf-8",
+            )
+            query_dir = Path(tmpdir) / "query"
+            query_dir.mkdir()
+            (query_dir / "OrderAggregateJoinQueryModel.qm").write_text(
+                """
+const fo = loadTableModel('FactOrderModel');
+export const queryModel = {
+    name: 'OrderAggregateJoinQueryModel',
+    caption: 'Order Aggregate Join Query',
+    model: fo,
+    aggregateJoins: [
+        {
+            rightModel: 'FactSalesModel',
+            alias: 'salesByOrder',
+            groupBy: ['orderId'],
+            measures: [{ field: 'salesAmount', aggregation: 'SUM', alias: 'salesAmount' }],
+            conditions: [{ leftField: 'orderId', rightField: 'orderId' }]
+        }
+    ],
+    columnGroups: [
+        { caption: 'Fields', items: [{ ref: fo.orderId }, { ref: fo.orderAmount }] }
+    ]
+};
+""",
+                encoding="utf-8",
+            )
+
+            models = load_models_from_directory(tmpdir, attach_aggregate_relations=True)
+
+        model_names = {m.name for m in models}
+        assert model_names == {
+            "FactOrderModel",
+            "FactSalesModel",
+            "OrderAggregateJoinQueryModel",
+        }
+        qm = next(m for m in models if m.name == "OrderAggregateJoinQueryModel")
+        assert len(qm.aggregate_relations) == 1
+        assert qm.aggregate_relations[0].alias == "salesByOrder"
+        assert qm.aggregate_relations[0].right_model == "FactSalesModel"
+        assert qm.aggregate_relations[0].conditions[0].left_field == "orderId"
+        assert qm.explicit_joins == []
+
+        service = SemanticQueryService()
+        for model in models:
+            service.register_model(model)
+        response = service.query_model(
+            "OrderAggregateJoinQueryModel",
+            SemanticQueryRequest(columns=["orderAmount"], limit=10),
+            mode="validate",
+        )
+
+        assert response.sql is None
+        assert response.error is not None
+        assert AGGREGATE_JOIN_UNSUPPORTED_CODE in response.error
+        assert "carrier_count=1" in response.error
+
     def test_left_join_aggregate_dsl_fails_closed(self, caplog):
         """Java-style leftJoinAggregate DSL is recognized and refused explicitly."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1165,3 +1263,96 @@ export const queryModel = {
         assert AGGREGATE_JOIN_UNSUPPORTED_CODE in caplog.text
         assert "carrier_count=1" in caplog.text
         assert "ordinary explicit join" in caplog.text
+
+    def test_left_join_aggregate_dsl_attaches_carrier_without_explicit_join(self):
+        """Controlled loader path preserves Java-style DSL carrier structure."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model_dir = Path(tmpdir) / "model"
+            model_dir.mkdir()
+            (model_dir / "FactOrderModel.tm").write_text(
+                """
+export const model = {
+    name: 'FactOrderModel',
+    caption: 'Orders',
+    tableName: 'fact_order',
+    idColumn: 'id',
+    properties: [
+        { column: 'id', name: 'id', caption: 'ID', type: 'LONG' },
+        { column: 'order_id', name: 'orderId', caption: 'Order ID', type: 'STRING' }
+    ],
+    measures: [
+        { column: 'order_amount', name: 'orderAmount', caption: 'Order Amount', aggregation: 'SUM' }
+    ]
+};
+""",
+                encoding="utf-8",
+            )
+            (model_dir / "FactSalesModel.tm").write_text(
+                """
+export const model = {
+    name: 'FactSalesModel',
+    caption: 'Sales',
+    tableName: 'fact_sales',
+    idColumn: 'id',
+    properties: [
+        { column: 'id', name: 'id', caption: 'ID', type: 'LONG' },
+        { column: 'order_id', name: 'orderId', caption: 'Order ID', type: 'STRING' },
+        { column: 'order_status', name: 'orderStatus', caption: 'Order Status', type: 'STRING' }
+    ],
+    measures: [
+        { column: 'sales_amount', name: 'salesAmount', caption: 'Sales Amount', aggregation: 'SUM' }
+    ]
+};
+""",
+                encoding="utf-8",
+            )
+            query_dir = Path(tmpdir) / "query"
+            query_dir.mkdir()
+            (query_dir / "OrderAggregateJoinDslQueryModel.qm").write_text(
+                """
+const fo = loadTableModel('FactOrderModel');
+const fs = loadTableModel('FactSalesModel');
+export const queryModel = {
+    name: 'OrderAggregateJoinDslQueryModel',
+    caption: 'Order Aggregate Join DSL Query',
+    model: fo,
+    joins: [
+        fo.leftJoinAggregate(fs)
+            .filterEq(fs.orderStatus, 'COMPLETED')
+            .groupBy(fs.orderId)
+            .sum(fs.salesAmount, 'salesAmount')
+            .on(fo.orderId, fs.orderId)
+    ],
+    columnGroups: [
+        { caption: 'Fields', items: [{ ref: fo.orderId }, { ref: fo.orderAmount }] }
+    ]
+};
+""",
+                encoding="utf-8",
+            )
+
+            models = load_models_from_directory(tmpdir, attach_aggregate_relations=True)
+
+        qm = next(m for m in models if m.name == "OrderAggregateJoinDslQueryModel")
+        assert qm.explicit_joins == []
+        assert len(qm.aggregate_relations) == 1
+        carrier = qm.aggregate_relations[0]
+        assert carrier.right_model == "FactSalesModel"
+        assert carrier.filters[0].field == "orderStatus"
+        assert carrier.filters[0].value == "COMPLETED"
+        assert carrier.measures[0].alias == "salesAmount"
+        assert carrier.conditions[0].left_field == "orderId"
+
+        service = SemanticQueryService()
+        for model in models:
+            service.register_model(model)
+        response = service.query_model(
+            "OrderAggregateJoinDslQueryModel",
+            SemanticQueryRequest(columns=["orderAmount"], limit=10),
+            mode="validate",
+        )
+
+        assert response.sql is None
+        assert response.error is not None
+        assert AGGREGATE_JOIN_UNSUPPORTED_CODE in response.error
+        assert "carrier_count=1" in response.error
