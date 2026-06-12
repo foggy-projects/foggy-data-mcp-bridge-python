@@ -956,6 +956,9 @@ P0-46 follow-up:
   `load_models_from_directory(..., attach_aggregate_relations=True)` can attach
   parsed aggregate relation carriers to a QM alias while default loading remains
   fail-closed and runtime validate still refuses before SQL generation.
+- P0-81 defines the minimal SQLite SQL-shape for aggregate relation lowering:
+  one root model, one RHS grouped subquery, fixed RHS filters, relation-owned
+  aggregate outputs, and Java fixture marker checks before runtime exposure.
 - P0-79+ now records the aggregate-join continuation sequence through guarded
   loader attachment, SQLite SQL-shape design, SQLite lowering skeleton,
   live-result parity, governance/metadata, and pushdown diagnostics.
