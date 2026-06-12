@@ -157,10 +157,17 @@ Current active snapshot lanes:
   `1.1.10` bundles, without refreshing committed generated Odoo models
 - QueryModel aggregate join audit and active snapshot replay lane, with Java 9.2
   capability, Python landing points, required neutral export contract, manifest
-  replay skeleton, Java snapshot exporter, committed Java fixture replay, and
-  loader fail-closed guard before implementation
+  replay skeleton, Java snapshot exporter, committed Java fixture replay,
+  loader fail-closed guard, carrier extraction, and planned P0-79+ runtime /
+  SQL / governance / diagnostics sequence before implementation
 
-Latest P0-78 / P1-2 status:
+Latest P0-79+ / P1-2 status:
+
+- This P0 line is the Python engine to Java engine alignment line. It stays on
+  engine-neutral fixtures, fail-closed boundaries, compiler/runtime contracts,
+  SQL shape, metadata, governance, diagnostics, and live-result parity. Odoo
+  business model expansion and productization remain out of scope unless a
+  separate approved work item says otherwise.
 
 - P0-26 extends the active MCP compose-script error snapshot lane with
   `missing-user-id-header` and `missing-namespace-header`.
@@ -365,6 +372,11 @@ Latest P0-78 / P1-2 status:
 - P0-78 adds loader-side carrier extraction for explicit aggregate relation
   dicts and Java-style `leftJoinAggregate(...)` DSL objects. The loader now
   reports `carrier_count=N` before rejecting unsupported aggregate joins.
+- P0-79 is planned for runtime/compiler refusal around models that carry
+  `aggregate_relations` before SQL lowering exists.
+- P0-79+ records the planned aggregate-join sequence: guarded loader
+  attachment, SQLite SQL-shape design, SQLite lowering skeleton, live-result
+  parity, governance/metadata, and pushdown diagnostics.
 - P1-1 records the remaining semantic-scale choice: namespace opt-out parity or
   live DB/result parity.
 - P2-1 records the initial Python aggregate-join design boundary before any
