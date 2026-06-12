@@ -12,6 +12,7 @@ import pytest
 from foggy.dataset.db.executor import SQLiteExecutor
 from foggy.dataset_model.aggregate_join import (
     AGGREGATE_JOIN_DENIED_SOURCE_COLUMN_CODE,
+    AGGREGATE_JOIN_FIELD_ACCESS_DENIED_CODE,
     AGGREGATE_JOIN_GROUPBY_MISSING_RIGHT_KEY_CODE,
     AGGREGATE_JOIN_RUNTIME_FILTER_MISSING_CODE,
 )
@@ -30,7 +31,7 @@ from foggy.dataset_model.impl.model import (
 )
 from foggy.dataset_model.semantic.service import SemanticQueryService
 from foggy.mcp_spi import SemanticQueryRequest, SemanticRequestContext
-from foggy.mcp_spi.semantic import DeniedColumn
+from foggy.mcp_spi.semantic import DeniedColumn, FieldAccessDef
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parents[1]
@@ -323,6 +324,97 @@ def test_p0_84_aggregate_output_lineage_is_attached_to_columns() -> None:
     assert unique_relation["aggregateExpression"] == (
         "count(distinct agg_src.customer_key)"
     )
+
+
+def test_p0_87_field_access_allows_aggregate_outputs(tmp_path) -> None:
+    _case("aggregate-join-field-access-allow-output")
+    db_path = tmp_path / "aggregate_relation_field_access.sqlite"
+    _seed_aggregate_db(db_path)
+    executor = SQLiteExecutor(str(db_path))
+    service = _service(_right_model(), _left_model(), executor=executor)
+
+    try:
+        response = service.query_model(
+            "OrderSalesAggregateRelationQueryModel",
+            _request(
+                slice=[{"field": "orderId", "op": "=", "value": ORDER_1}],
+                field_access=FieldAccessDef(
+                    visible=[
+                        "orderId",
+                        "amount",
+                        "salesAmount",
+                        "uniqueCustomers",
+                    ]
+                ),
+            ),
+            mode="execute",
+        )
+    finally:
+        service._run_async_in_sync(executor.close())
+
+    assert response.error is None
+    assert response.items == [
+        {
+            "orderId": ORDER_1,
+            "amount": 10998,
+            "salesAmount": 9898.2,
+            "uniqueCustomers": 1,
+        }
+    ]
+
+
+def test_p0_87_field_access_denies_aggregate_output() -> None:
+    case = _case("aggregate-join-field-access-deny-output-refusal")
+    service = _service(_right_model(), _left_model())
+
+    response = service.query_model(
+        "OrderSalesAggregateRelationQueryModel",
+        _request(
+            field_access=FieldAccessDef(
+                visible=["orderId", "amount", "uniqueCustomers"]
+            )
+        ),
+        mode="validate",
+    )
+
+    assert response.sql is None
+    assert response.error is not None
+    assert AGGREGATE_JOIN_FIELD_ACCESS_DENIED_CODE in response.error
+    for marker in case["expected"]["messageMarkers"]:
+        assert marker in response.error
+    assert response.error_detail == {
+        "code": AGGREGATE_JOIN_FIELD_ACCESS_DENIED_CODE,
+        "field": "salesAmount",
+    }
+
+
+def test_p0_87_system_slice_guard_does_not_leak_aggregate_output(tmp_path) -> None:
+    case = _case("aggregate-join-system-slice-guard-bypass-no-leak")
+    db_path = tmp_path / "aggregate_relation_system_slice.sqlite"
+    _seed_aggregate_db(db_path)
+    executor = SQLiteExecutor(str(db_path))
+    service = _service(_right_model(), _left_model(), executor=executor)
+
+    try:
+        response = service.query_model(
+            "OrderSalesAggregateRelationQueryModel",
+            SemanticQueryRequest(
+                columns=["orderId", "amount"],
+                slice=[{"field": "orderId", "op": "=", "value": ORDER_1}],
+                system_slice=[{"field": "salesAmount", "op": ">", "value": 0}],
+                field_access=FieldAccessDef(visible=["orderId", "amount"]),
+            ),
+            mode="execute",
+        )
+    finally:
+        service._run_async_in_sync(executor.close())
+
+    assert response.error is None
+    assert response.items == [{"orderId": ORDER_1, "amount": 10998}]
+    debug_sql = response.debug.extra["sql"]
+    assert "having sum(agg_src.sales_amount) > ?" in debug_sql
+    for field in case["expected"]["rowsForbiddenFields"]:
+        assert field not in response.items[0]
 
 
 def test_p0_85_and_filters_push_to_rhs_with_diagnostics() -> None:

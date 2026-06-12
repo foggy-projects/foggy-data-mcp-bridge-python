@@ -2,7 +2,7 @@
 doc_purpose: Define the next Java snapshot expansion for aggregate relation governance parity.
 version: v3.8-python-alignment
 priority: P0-87
-status: java-exported-python-replay-active
+status: java-exported-python-replay-active-runtime-fieldaccess-systemslice
 owner: java-python-parity
 ---
 
@@ -18,7 +18,10 @@ governance behavior that Java 9.2 acceptance covers and the previous Python
 
 This is an exporter/snapshot and replay item first. Python runtime behavior for
 the newly exported cases should expand only after the fixture contract is
-reviewed. Odoo and production business models remain out of scope.
+reviewed. After fixture review, the first Python runtime slice covers aggregate
+output `fieldAccess` allow/deny and `system_slice` guard no-leak behavior in the
+narrow SQLite aggregate relation path. Odoo and production business models
+remain out of scope.
 
 ## Current Baseline
 
@@ -74,8 +77,8 @@ Expected Python behavior by group:
 
 | Group | Initial Python Target |
 | --- | --- |
-| FieldAccess allow/deny | Implement or validate governance resolution around aggregate outputs only after the fixture proves Java markers. |
-| System slice | Merge governance predicates before aggregate lowering and verify the guard field is not projected or exposed as a user field. |
+| FieldAccess allow/deny | Implemented for aggregate output aliases in the narrow SQLite runtime path: non-empty `fieldAccess.visible` allows listed outputs and denies user-requested aggregate outputs with an aggregate-specific sanitized code. |
+| System slice | Implemented for aggregate output guard predicates in the narrow SQLite runtime path: `system_slice` can reference an aggregate output without requiring it to be user-visible or projected; aggregate comparison filter ops are supported for this guard shape. |
 | Unreferenced denied source | Preserve P0-84 referenced-source refusal while allowing unrelated denied physical columns. |
 | Calculated field denial | Ensure dynamic/predefined calculated dependency checks inherit aggregate source boundaries and fail closed with sanitized errors. |
 | Positive predefined calculated execution | Treat as later implementation if it requires formula execution over aggregate outputs; do not fake parity in replay. |
@@ -116,11 +119,14 @@ The committed Python fixture copy is
 ## Execution Check-In
 
 - Status: Java exporter produced v2 governance cases; Python contract/manifest/
-  replay is updated locally.
+  replay is updated, and the first focused Python runtime slice is active.
 - Current Java impact: `JavaQueryModelAggregateJoinSnapshotTest` adds the v2
   aggregate governance cases and generated a 19-case SQLite snapshot.
-- Current Python code impact: focused replay tests only; no broad runtime
-  implementation for the newly exported governance behaviors yet.
+- Current Python code impact: aggregate-aware `fieldAccess` validation now
+  checks user-requested aggregate outputs before generic visible-field pruning,
+  while intentionally excluding `system_slice` from user-field checks. Aggregate
+  relation filter rendering now supports comparison operators needed by the
+  Java v2 guard case.
 - Current fixture impact:
   `tests/fixtures/java_querymodel_aggregate_join_snapshot_parity.json` is
   regenerated from the Java v2 snapshot.
@@ -130,3 +136,23 @@ The committed Python fixture copy is
 - Verification on 2026-06-12:
   `.venv/bin/python -m pytest tests/integration/test_java_snapshot_parity_manifest.py tests/integration/test_java_querymodel_aggregate_join_snapshot_contract.py tests/integration/test_java_querymodel_aggregate_join_snapshot_parity.py -q`
   passed with `10 passed in 0.08s`.
+- Verification on 2026-06-12:
+  `.venv/bin/python -m pytest tests/test_dataset_model/test_querymodel_aggregate_sqlite_alignment.py -q`
+  passed with `13 passed`.
+- Verification on 2026-06-12:
+  `.venv/bin/python -m pytest tests/test_dataset_model/test_querymodel_aggregate_sqlite_alignment.py tests/test_dataset_model/test_querymodel_aggregate_runtime_refusal.py tests/integration/test_java_snapshot_parity_manifest.py tests/integration/test_java_querymodel_aggregate_join_snapshot_contract.py tests/integration/test_java_querymodel_aggregate_join_snapshot_parity.py -q`
+  passed with `28 passed in 0.72s`.
+- Focused lint/checks on 2026-06-12:
+  `.venv/bin/ruff check --select F src/foggy/dataset_model/aggregate_join.py src/foggy/dataset_model/semantic/service.py tests/test_dataset_model/test_querymodel_aggregate_sqlite_alignment.py`
+  and `git diff --check` passed.
+- Neighboring semantic regression on 2026-06-12:
+  `.venv/bin/python -m pytest tests/test_dataset_model/test_semantic_query.py tests/test_dataset_model/test_strict_column_resolution.py tests/test_dataset_model/test_window_functions.py -q`
+  passed with `131 passed in 9.43s`.
+- Full Python baseline on 2026-06-12:
+  `.venv/bin/python -m pytest -q` passed with
+  `4140 passed, 232 skipped, 53 warnings in 19.95s`.
+- Remaining runtime gaps: unrelated denied-source pass-through should get an
+  explicit runtime assertion, and calculated/predefined calculated dependency
+  behavior, positive predefined calculated execution, raw accessBuilder runtime
+  behavior, public API DTO exposure, external dialects, and broader QueryModel
+  stages remain follow-up.

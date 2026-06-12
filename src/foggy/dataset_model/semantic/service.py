@@ -22,6 +22,7 @@ from foggy.dataset_model.impl.model import (
 )
 from foggy.dataset_model.aggregate_join import (
     AGGREGATE_JOIN_DENIED_SOURCE_COLUMN_CODE,
+    AGGREGATE_JOIN_FIELD_ACCESS_DENIED_CODE,
     AGGREGATE_JOIN_GROUPBY_MISSING_RIGHT_KEY_CODE,
     AGGREGATE_JOIN_RUNTIME_FILTER_MISSING_CODE,
     AGGREGATE_JOIN_UNSUPPORTED_CODE,
@@ -687,6 +688,13 @@ class SemanticQueryService(SemanticServiceResolver):
         if aggregate_error is not None:
             return aggregate_error, request
 
+        aggregate_error = self._validate_aggregate_relation_field_access(
+            model_name,
+            request,
+        )
+        if aggregate_error is not None:
+            return aggregate_error, request
+
         has_whitelist = field_access is not None and bool(field_access.visible)
         has_blacklist = bool(denied_qm_fields)
         if has_whitelist or has_blacklist:
@@ -709,6 +717,92 @@ class SemanticQueryService(SemanticServiceResolver):
             request = request.model_copy(update={"slice": merged_slice})
 
         return None, request
+
+    def _validate_aggregate_relation_field_access(
+        self,
+        model_name: str,
+        request: SemanticQueryRequest,
+    ) -> Optional[SemanticQueryResponse]:
+        field_access = request.field_access
+        if field_access is None or not field_access.visible:
+            return None
+
+        model = self.get_model(model_name)
+        if model is None or not self._aggregate_relation_carrier_count(model):
+            return None
+
+        aggregate_output_aliases = {
+            measure.alias
+            for relation in getattr(model, "aggregate_relations", None) or []
+            for measure in getattr(relation, "measures", None) or []
+            if measure.alias
+        }
+        if not aggregate_output_aliases:
+            return None
+
+        referenced_fields = self._collect_user_request_field_refs(request)
+        visible_fields = set(field_access.visible)
+        blocked = sorted(
+            field
+            for field in referenced_fields
+            if field in aggregate_output_aliases and field not in visible_fields
+        )
+        if not blocked:
+            return None
+
+        field = blocked[0]
+        error = (
+            f"{AGGREGATE_JOIN_FIELD_ACCESS_DENIED_CODE}: "
+            f"aggregate relation fieldAccess denies field '{field}'"
+        )
+        return SemanticQueryResponse.from_error(
+            error,
+            error_detail={
+                "code": AGGREGATE_JOIN_FIELD_ACCESS_DENIED_CODE,
+                "field": field,
+            },
+        )
+
+    def _collect_user_request_field_refs(
+        self,
+        request: SemanticQueryRequest,
+    ) -> set[str]:
+        """Collect user-supplied field refs, intentionally excluding system_slice."""
+        refs: set[str] = set()
+
+        for raw_col in request.columns or []:
+            refs.add(parse_column_with_alias(raw_col).base_expr)
+
+        refs.update(self._collect_condition_fields(request.slice or []))
+        refs.update(self._collect_condition_fields(request.having or []))
+        refs.update(self._collect_condition_fields(request.post_slice or []))
+
+        for order_item in request.order_by or []:
+            field_name, _direction = self._normalize_order_by_item(order_item)
+            if field_name:
+                refs.add(field_name)
+
+        for calc in request.calculated_fields or []:
+            if not isinstance(calc, dict):
+                continue
+            name = calc.get("name") or calc.get("alias")
+            if name:
+                refs.add(str(name))
+            expr = calc.get("expression") or calc.get("formula") or ""
+            if isinstance(expr, str):
+                refs.update(extract_field_dependencies(expr))
+
+        for calc in request.post_aggregate_calculations or []:
+            if not isinstance(calc, dict):
+                continue
+            name = calc.get("name") or calc.get("alias")
+            if name:
+                refs.add(str(name))
+            expr = calc.get("expression") or calc.get("formula") or ""
+            if isinstance(expr, str):
+                refs.update(extract_field_dependencies(expr))
+
+        return refs
 
     def _validate_aggregate_relation_denied_columns(
         self,
@@ -1808,6 +1902,22 @@ class SemanticQueryService(SemanticServiceResolver):
                     "aggregate relation fixed filter value cannot be null"
                 )
             return f"{field_sql} = ?", [value]
+        comparison_ops = {
+            ">": ">",
+            "gt": ">",
+            ">=": ">=",
+            "gte": ">=",
+            "<": "<",
+            "lt": "<",
+            "<=": "<=",
+            "lte": "<=",
+        }
+        if op in comparison_ops:
+            if value is None:
+                self._raise_aggregate_relation_unsupported(
+                    "aggregate relation comparison filter value cannot be null"
+                )
+            return f"{field_sql} {comparison_ops[op]} ?", [value]
         if op == "in":
             values = value if isinstance(value, list) else [value]
             if not values:
