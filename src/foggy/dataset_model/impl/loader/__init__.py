@@ -24,6 +24,7 @@ from foggy.dataset_model.definitions.base import (
 from foggy.dataset_model.definitions.measure import DbMeasureDef, MeasureType
 from foggy.dataset_model.definitions.dict_def import DbDictionaryDiscoveryDef
 from foggy.dataset_model.definitions.query_model import DbQueryModelDef
+from foggy.dataset_model.aggregate_join import AGGREGATE_JOIN_UNSUPPORTED_CODE
 from foggy.dataset_model.impl.model import (
     AggregateRelationConditionDef,
     AggregateRelationDef,
@@ -41,7 +42,6 @@ from foggy.dataset_model.proxy import ColumnRef, DimensionProxy, JoinBuilder, Ta
 
 logger = logging.getLogger(__name__)
 
-AGGREGATE_JOIN_UNSUPPORTED_CODE = "QUERYMODEL_AGGREGATE_JOIN_UNSUPPORTED"
 _AGGREGATE_JOIN_CONTRACT_KEYS = {
     "aggregateJoin",
     "aggregateJoins",

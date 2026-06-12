@@ -34,7 +34,7 @@ are outside this line unless a separate approved work item says otherwise.
 
 | Item | Status | Purpose | Acceptance Gate |
 | --- | --- | --- | --- |
-| P0-79 runtime/compiler refusal boundary | Planned | Refuse any model carrying `aggregate_relations` before SQL generation until lowering exists. | Focused runtime/compiler refusal test plus existing loader and Java snapshot replay green. |
+| P0-79 runtime/compiler refusal boundary | Completed | Refuse any model carrying `aggregate_relations` before SQL generation until lowering exists. | Focused runtime/compiler refusal test plus existing loader and Java snapshot replay green. |
 | P0-80 loader attachment behind refusal | Planned | Allow parsed aggregate carriers to attach to a QueryModel only in a controlled path that still refuses before SQL/runtime. | Loader can produce an alias model with `aggregate_relations` in a test-only or clearly guarded path; runtime still fails closed. |
 | P0-81 minimal SQL-shape design for SQLite happy path | Planned | Define Python lowering shape for RHS grouped subquery and LEFT JOIN based on the committed Java fixture. | Design doc plus expected SQL markers; no broad runtime exposure. |
 | P0-82 SQLite SQL lowering skeleton | Planned | Implement the smallest RHS preaggregation renderer for the Java happy-path contract. | SQL marker replay for RHS preaggregation, join key, fixed filter, and non-multiplication shape. |

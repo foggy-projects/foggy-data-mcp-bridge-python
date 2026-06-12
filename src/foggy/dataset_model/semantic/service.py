@@ -21,6 +21,7 @@ from foggy.dataset_model.impl.model import (
     DimensionJoinDef,
     _resolve_measure_sql,
 )
+from foggy.dataset_model.aggregate_join import AGGREGATE_JOIN_UNSUPPORTED_CODE
 from foggy.dataset_model.impl.semantic_scale import semantic_scale_metadata_value
 from foggy.dataset_model.engine.query import SqlQueryBuilder
 from foggy.dataset_model.engine.formula import get_default_registry, SqlFormulaRegistry
@@ -151,6 +152,50 @@ class SemanticQueryService(SemanticServiceResolver):
         re.IGNORECASE,
     )
     DICTIONARY_DISCOVERY_COUNT_ALIAS = "__foggyDictionaryCount"
+
+    @staticmethod
+    def _aggregate_relation_carrier_count(model: DbTableModelImpl) -> int:
+        return len(getattr(model, "aggregate_relations", None) or [])
+
+    @classmethod
+    def _aggregate_relation_unsupported_message(
+        cls,
+        model: DbTableModelImpl,
+        model_name: Optional[str] = None,
+    ) -> str:
+        count = cls._aggregate_relation_carrier_count(model)
+        safe_model_name = model_name or getattr(model, "name", "<unknown>")
+        return (
+            f"{AGGREGATE_JOIN_UNSUPPORTED_CODE}: QueryModel aggregate relations "
+            "are not implemented in the Python engine yet. "
+            f"model={safe_model_name} carrier_count={count}"
+        )
+
+    @classmethod
+    def _reject_aggregate_relations_if_unsupported(
+        cls,
+        model: DbTableModelImpl,
+        model_name: Optional[str] = None,
+    ) -> None:
+        if cls._aggregate_relation_carrier_count(model):
+            raise ValueError(
+                cls._aggregate_relation_unsupported_message(model, model_name)
+            )
+
+    @classmethod
+    def _aggregate_relation_unsupported_response(
+        cls,
+        model: DbTableModelImpl,
+        model_name: Optional[str] = None,
+    ) -> SemanticQueryResponse:
+        return SemanticQueryResponse.from_error(
+            cls._aggregate_relation_unsupported_message(model, model_name),
+            error_detail={
+                "code": AGGREGATE_JOIN_UNSUPPORTED_CODE,
+                "carrierCount": cls._aggregate_relation_carrier_count(model),
+                "model": model_name or getattr(model, "name", None),
+            },
+        )
 
     def __init__(
         self,
@@ -881,6 +926,8 @@ class SemanticQueryService(SemanticServiceResolver):
         table_model = self.get_model(model)
         if not table_model:
             return SemanticQueryResponse.from_error(f"Model not found: {model}")
+        if self._aggregate_relation_carrier_count(table_model):
+            return self._aggregate_relation_unsupported_response(table_model, model)
 
         # --- v1.4 Pivot: Validate and Translate Pivot Request ---
         is_pivot = False
@@ -1185,6 +1232,7 @@ class SemanticQueryService(SemanticServiceResolver):
         table_model = self.get_model(model_name)
         if table_model is None:
             raise ValueError(f"Model not found: {model_name}")
+        self._reject_aggregate_relations_if_unsupported(table_model, model_name)
 
         is_pivot = False
         pivot_request = getattr(request, "pivot", None)
@@ -1234,6 +1282,7 @@ class SemanticQueryService(SemanticServiceResolver):
         """
         from foggy.dataset_model.impl.model import DimensionJoinDef
 
+        self._reject_aggregate_relations_if_unsupported(model)
         model = self._with_unique_dimension_join_aliases(model, request)
 
         warnings: List[str] = []
@@ -4965,6 +5014,8 @@ class SemanticQueryService(SemanticServiceResolver):
         table_model = self.get_model(model)
         if not table_model:
             return SemanticQueryResponse.from_error(f"Model not found: {model}")
+        if self._aggregate_relation_carrier_count(table_model):
+            return self._aggregate_relation_unsupported_response(table_model, model)
 
         # --- v1.2/v1.3: governance check + system_slice merge ---
         governance_error, request = self._apply_query_governance(model, request)

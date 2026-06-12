@@ -372,8 +372,10 @@ Latest P0-79+ / P1-2 status:
 - P0-78 adds loader-side carrier extraction for explicit aggregate relation
   dicts and Java-style `leftJoinAggregate(...)` DSL objects. The loader now
   reports `carrier_count=N` before rejecting unsupported aggregate joins.
-- P0-79 is planned for runtime/compiler refusal around models that carry
-  `aggregate_relations` before SQL lowering exists.
+- P0-79 adds the runtime/compiler refusal boundary around models that carry
+  `aggregate_relations`: synchronous validate, async validate,
+  `build_query_with_governance`, and direct `_build_query` all fail closed
+  with sanitized `QUERYMODEL_AGGREGATE_JOIN_UNSUPPORTED` before SQL generation.
 - P0-79+ records the planned aggregate-join sequence: guarded loader
   attachment, SQLite SQL-shape design, SQLite lowering skeleton, live-result
   parity, governance/metadata, and pushdown diagnostics.

@@ -2,7 +2,7 @@
 doc_purpose: Plan the runtime/compiler refusal boundary for aggregate relation carriers before SQL lowering.
 version: v3.8-python-alignment
 priority: P0-79
-status: planned
+status: completed
 owner: python-engine
 ---
 
@@ -44,12 +44,32 @@ silently ignored or executed through ordinary QueryModel paths.
 
 ## Acceptance Criteria
 
-- Focused test proves a model with `aggregate_relations` refuses before SQL
-  generation.
-- Focused test proves a normal QueryModel without aggregate relations still
-  compiles/runs through the existing baseline path.
-- Existing P0-76/P0-78 aggregate snapshot and loader tests remain green.
-- No SQL lowering or live-result behavior is introduced in this item.
+- Completed. Focused test proves a model with `aggregate_relations` refuses
+  before SQL generation through synchronous validate, asynchronous validate,
+  `build_query_with_governance`, and direct `_build_query` compiler paths.
+- Completed. Focused test proves a normal QueryModel without aggregate
+  relations still compiles through the existing validate baseline path.
+- Completed. Existing P0-76/P0-78 aggregate snapshot and loader tests remain
+  green.
+- Completed. No SQL lowering or live-result behavior is introduced in this
+  item.
+
+## Implementation
+
+- Added shared `AGGREGATE_JOIN_UNSUPPORTED_CODE` in
+  `src/foggy/dataset_model/aggregate_join.py`.
+- Reused that code from the loader fail-closed path and from semantic query
+  service runtime/compiler checks.
+- Added an aggregate relation refusal boundary in:
+  - `SemanticQueryService.query_model`
+  - `SemanticQueryService.query_model_async`
+  - `SemanticQueryService.build_query_with_governance`
+  - `SemanticQueryService._build_query`
+- The refusal response includes only sanitized model-level metadata:
+  error code, requested model name, and carrier count. It does not include
+  generated SQL, table SQL, or physical column fragments.
+- Added focused tests in
+  `tests/test_dataset_model/test_querymodel_aggregate_runtime_refusal.py`.
 
 ## Non-Goals
 
@@ -60,13 +80,33 @@ silently ignored or executed through ordinary QueryModel paths.
 
 ## Verification Plan
 
-- `.venv/bin/python -m pytest tests/test_dataset_model/test_loader_fsscript.py -q`
-- New focused runtime/compiler refusal pytest.
-- `.venv/bin/python -m pytest tests/integration/test_java_snapshot_parity_manifest.py tests/integration/test_java_querymodel_aggregate_join_snapshot_contract.py tests/integration/test_java_querymodel_aggregate_join_snapshot_parity.py -q`
-- `git diff --check`
+- Passed:
+  `.venv/bin/python -m pytest tests/test_dataset_model/test_querymodel_aggregate_runtime_refusal.py -q`
+  (`5 passed`)
+- Passed:
+  `.venv/bin/python -m pytest tests/test_dataset_model/test_loader_fsscript.py -q`
+  (`66 passed`)
+- Passed:
+  `.venv/bin/python -m pytest tests/integration/test_java_snapshot_parity_manifest.py tests/integration/test_java_querymodel_aggregate_join_snapshot_contract.py tests/integration/test_java_querymodel_aggregate_join_snapshot_parity.py -q`
+  (`10 passed`)
+- Pending final workspace check: `git diff --check`
+
+## Execution Check-in
+
+- Code paths touched:
+  - `src/foggy/dataset_model/aggregate_join.py`
+  - `src/foggy/dataset_model/impl/loader/__init__.py`
+  - `src/foggy/dataset_model/semantic/service.py`
+  - `tests/test_dataset_model/test_querymodel_aggregate_runtime_refusal.py`
+- Self-check:
+  - Aggregate relation carriers fail closed before SQL generation.
+  - Ordinary QueryModel compilation remains unchanged.
+  - Error detail is sanitized and intentionally does not expose physical SQL.
+  - Loader fail-closed behavior still uses the same refusal code.
 
 ## Next
 
 After P0-79, the safe order is P0-80 loader attachment behind the same refusal
 boundary, then P0-81 minimal SQLite SQL-shape design. Production aggregate join
-execution must wait for SQL/result/governance/diagnostics parity evidence.
+execution must wait for SQL/result/governance/metadata/diagnostics parity
+evidence.
