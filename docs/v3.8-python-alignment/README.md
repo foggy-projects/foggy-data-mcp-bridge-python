@@ -104,6 +104,9 @@ Current P0 execution records:
 - [P0-83-querymodel-aggregate-sqlite-live-result-parity.md](workitems/P0-83-querymodel-aggregate-sqlite-live-result-parity.md)
 - [P0-84-querymodel-aggregate-governance-metadata-boundary.md](workitems/P0-84-querymodel-aggregate-governance-metadata-boundary.md)
 - [P0-85-querymodel-aggregate-pushdown-diagnostics-boundary.md](workitems/P0-85-querymodel-aggregate-pushdown-diagnostics-boundary.md)
+- [P0-86-querymodel-aggregate-java-fixture-gap-inventory.md](workitems/P0-86-querymodel-aggregate-java-fixture-gap-inventory.md)
+- [P0-87-querymodel-aggregate-governance-snapshot-expansion.md](workitems/P0-87-querymodel-aggregate-governance-snapshot-expansion.md)
+- [P0-88-querymodel-aggregate-api-metadata-contract.md](workitems/P0-88-querymodel-aggregate-api-metadata-contract.md)
 
 Current P1/P2 planning records:
 
@@ -170,8 +173,9 @@ Current active snapshot lanes:
   replay skeleton, Java snapshot exporter, committed Java fixture replay,
   loader fail-closed guard, carrier extraction, guarded attachment, narrow
   SQLite SQL lowering, SQLite live-result parity, RHS denied-source governance,
-  aggregate output lineage, pushdown diagnostics, and runtime extData filter
-  fail-closed behavior
+  aggregate output lineage, pushdown diagnostics, runtime extData filter
+  fail-closed behavior, Java fixture gap inventory, planned governance snapshot
+  expansion, and public API metadata contract
 
 Latest P0-79+ / P1-2 status:
 
@@ -406,8 +410,18 @@ Latest P0-79+ / P1-2 status:
 - P0-85 adds deterministic pushdown diagnostics for simple AND filters,
   retained OR diagnostics, runtime extData filter resolution, and missing-value
   fail-closed behavior.
-- P0-79+ records the aggregate-join sequence as completed through P0-85 for the
-  narrow SQLite boundary.
+- P0-86 inventories the Java 9.2 aggregate relation acceptance evidence that is
+  not represented in the current 10-case Python fixture, including fieldAccess,
+  system_slice, raw accessBuilder, calculated dependency, API metadata,
+  composite-key, and external dialect gaps.
+- P0-87 defines the next governance snapshot expansion and is ready for Java
+  exporter work. It does not change Python runtime behavior or fixtures by
+  itself.
+- P0-88 freezes the public API metadata contract for aggregate relation
+  lineage: Python public DTOs should expose exactly the Java seven-key
+  `aggregateRelation` object while keeping engine-only metadata internal.
+- P0-79+ records the aggregate-join sequence as completed through P0-86, with
+  P0-87 ready for Java export and P0-88 contract ready.
 - P1-1 records the remaining semantic-scale choice: namespace opt-out parity or
   live DB/result parity.
 - P2-1 records the initial Python aggregate-join design boundary before any
@@ -480,6 +494,10 @@ Latest P0-79+ / P1-2 status:
 - Python P0-82 through P0-85 aggregate Java fixture replay passed:
   `.venv/bin/python -m pytest tests/integration/test_java_snapshot_parity_manifest.py tests/integration/test_java_querymodel_aggregate_join_snapshot_contract.py tests/integration/test_java_querymodel_aggregate_join_snapshot_parity.py -q`
   with `10 passed`.
+- Python P0-86 through P0-88 documentation update kept the aggregate Java
+  fixture replay green:
+  `.venv/bin/python -m pytest tests/integration/test_java_snapshot_parity_manifest.py tests/integration/test_java_querymodel_aggregate_join_snapshot_contract.py tests/integration/test_java_querymodel_aggregate_join_snapshot_parity.py -q`
+  with `10 passed in 0.05s`; `git diff --check` passed.
 - Python P0-82 through P0-85 neighboring semantic regression passed:
   `.venv/bin/python -m pytest tests/test_dataset_model/test_semantic_query.py tests/test_dataset_model/test_strict_column_resolution.py tests/test_dataset_model/test_window_functions.py -q`
   with `131 passed`.

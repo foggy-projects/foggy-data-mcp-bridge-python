@@ -971,8 +971,15 @@ P0-46 follow-up:
 - P0-85 adds the first deterministic pushdown diagnostics boundary: simple AND
   filters can push to RHS `where`/`having`, OR filters remain outer-only with a
   retained reason code, and runtime extData RHS filters resolve or fail closed.
+- P0-86 inventories Java 9.2 aggregate relation acceptance evidence that is not
+  yet represented in the current 10-case Python fixture.
+- P0-87 defines the next governance snapshot expansion for fieldAccess,
+  system_slice, denied-source dependency, calculated-field dependency, and raw
+  accessBuilder cases. It is ready for Java exporter work.
+- P0-88 freezes the public API metadata contract for aggregate relation
+  lineage before Python exposes DTO behavior.
 - P0-79+ now records the aggregate-join continuation sequence as completed
-  through P0-85 for the narrow SQLite boundary.
+  through P0-86, with P0-87 ready for Java export and P0-88 contract ready.
 
 Odoo registry consumer baseline:
 
