@@ -2,7 +2,7 @@
 doc_purpose: Define the next Java snapshot expansion for aggregate relation governance parity.
 version: v3.8-python-alignment
 priority: P0-87
-status: java-exported-python-replay-active-runtime-fieldaccess-systemslice-unreferenced-denied-source
+status: java-exported-python-replay-active-runtime-fieldaccess-systemslice-denied-source-calculated
 owner: java-python-parity
 ---
 
@@ -19,10 +19,11 @@ governance behavior that Java 9.2 acceptance covers and the previous Python
 This is an exporter/snapshot and replay item first. Python runtime behavior for
 the newly exported cases should expand only after the fixture contract is
 reviewed. After fixture review, the first Python runtime slices cover aggregate
-output `fieldAccess` allow/deny, `system_slice` guard no-leak behavior, and an
-explicit unreferenced denied-source pass-through assertion in the narrow SQLite
-aggregate relation path. Odoo and production business models remain out of
-scope.
+output `fieldAccess` allow/deny, `system_slice` guard no-leak behavior, an
+explicit unreferenced denied-source pass-through assertion, and dynamic
+calculated-field direct/chain denied-source fail-closed behavior in the narrow
+SQLite aggregate relation path. Odoo and production business models remain out
+of scope.
 
 ## Current Baseline
 
@@ -81,7 +82,7 @@ Expected Python behavior by group:
 | FieldAccess allow/deny | Implemented for aggregate output aliases in the narrow SQLite runtime path: non-empty `fieldAccess.visible` allows listed outputs and denies user-requested aggregate outputs with an aggregate-specific sanitized code. |
 | System slice | Implemented for aggregate output guard predicates in the narrow SQLite runtime path: `system_slice` can reference an aggregate output without requiring it to be user-visible or projected; aggregate comparison filter ops are supported for this guard shape. |
 | Unreferenced denied source | Runtime assertion now proves a known but unrelated RHS physical denied column does not block selected aggregate outputs and does not appear in generated SQL. |
-| Calculated field denial | Ensure dynamic/predefined calculated dependency checks inherit aggregate source boundaries and fail closed with sanitized errors. |
+| Calculated field denial | Dynamic calculated direct/chain dependency denial is implemented for aggregate outputs in the narrow SQLite runtime path; predefined calculated dependency denial remains follow-up. |
 | Positive predefined calculated execution | Treat as later implementation if it requires formula execution over aggregate outputs; do not fake parity in replay. |
 | Raw accessBuilder | Keep raw predicates outer-only with a deterministic diagnostic reason before adding any pushdown behavior. |
 
@@ -120,18 +121,24 @@ The committed Python fixture copy is
 ## Execution Check-In
 
 - Status: Java exporter produced v2 governance cases; Python contract/manifest/
-  replay is updated, and the first focused Python runtime slices are active.
+  replay is updated, and the first focused Python runtime slices are active,
+  including dynamic calculated direct/chain denial.
 - Current Java impact: `JavaQueryModelAggregateJoinSnapshotTest` adds the v2
   aggregate governance cases and generated a 19-case SQLite snapshot.
 - Current Python code impact: aggregate-aware `fieldAccess` validation now
   checks user-requested aggregate outputs before generic visible-field pruning,
   while intentionally excluding `system_slice` from user-field checks. Aggregate
   relation filter rendering now supports comparison operators needed by the
-  Java v2 guard case.
+  Java v2 guard case. Aggregate denied-source validation now recursively expands
+  user-selected dynamic calculated aliases and returns sanitized
+  `error_detail.calculatedFields` alias chains for direct and transitive
+  dependencies.
 - Current Python test impact: the SQLite aggregate relation test model declares
   an unrelated RHS `profitAmount` physical column so the v2 unreferenced
   denied-source case proves a known source column pass-through, not an unknown
-  column no-op.
+  column no-op. The same focused suite now replays Java v2 direct and chained
+  dynamic calculated-field denied-source refusal cases against the Python
+  runtime.
 - Current fixture impact:
   `tests/fixtures/java_querymodel_aggregate_join_snapshot_parity.json` is
   regenerated from the Java v2 snapshot.
@@ -143,20 +150,20 @@ The committed Python fixture copy is
   passed with `10 passed in 0.08s`.
 - Verification on 2026-06-12:
   `.venv/bin/python -m pytest tests/test_dataset_model/test_querymodel_aggregate_sqlite_alignment.py -q`
-  passed with `14 passed in 0.49s`.
+  passed with `16 passed in 0.71s`.
 - Verification on 2026-06-12:
   `.venv/bin/python -m pytest tests/test_dataset_model/test_querymodel_aggregate_sqlite_alignment.py tests/test_dataset_model/test_querymodel_aggregate_runtime_refusal.py tests/integration/test_java_snapshot_parity_manifest.py tests/integration/test_java_querymodel_aggregate_join_snapshot_contract.py tests/integration/test_java_querymodel_aggregate_join_snapshot_parity.py -q`
-  passed with `29 passed in 0.53s`.
+  passed with `31 passed in 0.53s`.
 - Focused lint/checks on 2026-06-12:
   `.venv/bin/ruff check --select F src/foggy/dataset_model/aggregate_join.py src/foggy/dataset_model/semantic/service.py tests/test_dataset_model/test_querymodel_aggregate_sqlite_alignment.py`
   and `git diff --check` passed.
 - Neighboring semantic regression on 2026-06-12:
   `.venv/bin/python -m pytest tests/test_dataset_model/test_semantic_query.py tests/test_dataset_model/test_strict_column_resolution.py tests/test_dataset_model/test_window_functions.py -q`
-  passed with `131 passed in 9.43s`.
+  passed with `131 passed in 7.57s`.
 - Full Python baseline on 2026-06-12:
   `.venv/bin/python -m pytest -q` passed with
-  `4141 passed, 232 skipped, 53 warnings in 18.90s`.
-- Remaining runtime gaps: calculated/predefined calculated dependency behavior,
-  positive predefined calculated execution, raw accessBuilder runtime behavior,
-  public API DTO exposure, external dialects, and broader QueryModel stages
-  remain follow-up.
+  `4143 passed, 232 skipped, 53 warnings in 19.28s`.
+- Remaining runtime gaps: predefined calculated dependency behavior, positive
+  predefined calculated execution, raw accessBuilder runtime behavior, public
+  API DTO exposure, external dialects, and broader QueryModel stages remain
+  follow-up.

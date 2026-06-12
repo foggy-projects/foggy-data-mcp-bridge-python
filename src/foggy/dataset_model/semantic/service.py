@@ -816,9 +816,10 @@ class SemanticQueryService(SemanticServiceResolver):
             return None
 
         requested_fields = set()
+        requested_column_refs: list[str] = []
         if request.columns:
             for raw_col in request.columns:
-                requested_fields.add(parse_column_with_alias(raw_col).base_expr)
+                requested_column_refs.append(parse_column_with_alias(raw_col).base_expr)
         else:
             for relation in getattr(model, "aggregate_relations", None) or []:
                 requested_fields.update(
@@ -827,16 +828,32 @@ class SemanticQueryService(SemanticServiceResolver):
                     if measure.alias
                 )
 
-        calculated_aliases = set()
+        calculated_dependencies: dict[str, set[str]] = {}
         for calc in request.calculated_fields or []:
-            if not isinstance(calc, dict):
+            if isinstance(calc, dict):
+                name = calc.get("name") or calc.get("alias")
+                expr = calc.get("expression") or calc.get("formula") or ""
+            else:
+                name = getattr(calc, "name", None) or getattr(calc, "alias", None)
+                expr = getattr(calc, "expression", "") or getattr(calc, "formula", "")
+            if not name:
                 continue
-            name = calc.get("name") or calc.get("alias")
-            if name:
-                calculated_aliases.add(str(name))
-            expr = calc.get("expression") or calc.get("formula") or ""
             if isinstance(expr, str):
-                requested_fields.update(extract_field_dependencies(expr))
+                calculated_dependencies[str(name)] = (
+                    extract_field_dependencies(expr) | extract_formula_fields(expr)
+                )
+
+        calculated_aliases_by_source: dict[str, set[str]] = {}
+        for field in requested_column_refs:
+            if field in calculated_dependencies:
+                self._collect_calculated_dependency_source_fields(
+                    field,
+                    calculated_dependencies,
+                    requested_fields,
+                    calculated_aliases_by_source,
+                )
+            else:
+                requested_fields.add(field)
 
         for relation in getattr(model, "aggregate_relations", None) or []:
             right_model = self.get_model(relation.right_model)
@@ -858,27 +875,53 @@ class SemanticQueryService(SemanticServiceResolver):
                     column_name,
                 ):
                     continue
-                section = (
-                    "calculatedFields"
-                    if measure.alias in calculated_aliases
-                    else "columns"
+                calculated_aliases = sorted(
+                    calculated_aliases_by_source.get(measure.alias, set())
+                )
+                section = "calculatedFields" if calculated_aliases else "columns"
+                calculated_alias_text = (
+                    " via calculated field(s) "
+                    + ", ".join(f"'{alias}'" for alias in calculated_aliases)
+                    if calculated_aliases
+                    else ""
                 )
                 error = (
                     f"{AGGREGATE_JOIN_DENIED_SOURCE_COLUMN_CODE}: "
                     f"aggregate relation {section} field '{measure.alias}' "
                     "maps to a denied source column "
                     f"{table_name}.{column_name}"
+                    f"{calculated_alias_text}"
                 )
-                return SemanticQueryResponse.from_error(
-                    error,
-                    error_detail={
-                        "code": AGGREGATE_JOIN_DENIED_SOURCE_COLUMN_CODE,
-                        "field": measure.alias,
-                        "table": table_name,
-                        "column": column_name,
-                    },
-                )
+                error_detail = {
+                    "code": AGGREGATE_JOIN_DENIED_SOURCE_COLUMN_CODE,
+                    "field": measure.alias,
+                    "table": table_name,
+                    "column": column_name,
+                }
+                if calculated_aliases:
+                    error_detail["calculatedFields"] = calculated_aliases
+                return SemanticQueryResponse.from_error(error, error_detail=error_detail)
         return None
+
+    def _collect_calculated_dependency_source_fields(
+        self,
+        root_alias: str,
+        calculated_dependencies: dict[str, set[str]],
+        requested_fields: set[str],
+        calculated_aliases_by_source: dict[str, set[str]],
+    ) -> None:
+        def visit(alias: str, path: list[str], seen: set[str]) -> None:
+            if alias in seen:
+                return
+            next_seen = seen | {alias}
+            for dependency in calculated_dependencies.get(alias, set()):
+                if dependency in calculated_dependencies:
+                    visit(dependency, path + [dependency], next_seen)
+                    continue
+                requested_fields.add(dependency)
+                calculated_aliases_by_source.setdefault(dependency, set()).update(path)
+
+        visit(root_alias, [root_alias], set())
 
     @staticmethod
     def _aggregate_denied_columns_match(

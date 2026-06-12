@@ -195,10 +195,8 @@ def _service(*models: DbTableModelImpl, executor: Any | None = None) -> Semantic
 
 
 def _request(**kwargs: Any) -> SemanticQueryRequest:
-    return SemanticQueryRequest(
-        columns=["orderId", "amount", "salesAmount", "uniqueCustomers"],
-        **kwargs,
-    )
+    kwargs.setdefault("columns", ["orderId", "amount", "salesAmount", "uniqueCustomers"])
+    return SemanticQueryRequest(**kwargs)
 
 
 def test_p0_82_sqlite_shape_matches_java_fixed_filter_markers() -> None:
@@ -449,6 +447,67 @@ def test_p0_87_unreferenced_denied_source_column_passes(tmp_path) -> None:
         assert marker in debug_sql
     for marker in case["expected"]["forbiddenSqlMarkers"]:
         assert marker not in debug_sql
+
+
+def test_p0_87_calculated_field_denied_source_fails_closed() -> None:
+    case = _case("aggregate-join-calculated-field-denied-source-refusal")
+    service = _service(_right_model(), _left_model())
+
+    response = service.query_model(
+        "OrderSalesAggregateRelationQueryModel",
+        _request(
+            columns=case["request"]["columns"],
+            slice=case["request"]["slice"],
+            calculated_fields=case["expected"]["calculatedFields"],
+            denied_columns=[
+                DeniedColumn(table="fact_sales", column="sales_amount")
+            ],
+        ),
+        mode="validate",
+    )
+
+    assert response.sql is None
+    assert response.error is not None
+    assert AGGREGATE_JOIN_DENIED_SOURCE_COLUMN_CODE in response.error
+    for marker in case["expected"]["messageMarkers"]:
+        assert marker in response.error
+    assert response.error_detail is not None
+    assert response.error_detail["field"] == "salesAmount"
+    assert response.error_detail["table"] == "fact_sales"
+    assert response.error_detail["column"] == "sales_amount"
+    assert response.error_detail["calculatedFields"] == ["salesAmountWithTax"]
+
+
+def test_p0_87_calculated_field_chain_denied_source_fails_closed() -> None:
+    case = _case("aggregate-join-calculated-field-chain-denied-source-refusal")
+    service = _service(_right_model(), _left_model())
+
+    response = service.query_model(
+        "OrderSalesAggregateRelationQueryModel",
+        _request(
+            columns=case["request"]["columns"],
+            slice=case["request"]["slice"],
+            calculated_fields=case["expected"]["calculatedFields"],
+            denied_columns=[
+                DeniedColumn(table="fact_sales", column="sales_amount")
+            ],
+        ),
+        mode="validate",
+    )
+
+    assert response.sql is None
+    assert response.error is not None
+    assert AGGREGATE_JOIN_DENIED_SOURCE_COLUMN_CODE in response.error
+    for marker in case["expected"]["messageMarkers"]:
+        assert marker in response.error
+    assert response.error_detail is not None
+    assert response.error_detail["field"] == "salesAmount"
+    assert response.error_detail["table"] == "fact_sales"
+    assert response.error_detail["column"] == "sales_amount"
+    assert set(response.error_detail["calculatedFields"]) == {
+        "salesAmountWithTax",
+        "salesAmountScore",
+    }
 
 
 def test_p0_85_and_filters_push_to_rhs_with_diagnostics() -> None:
