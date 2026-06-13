@@ -25,6 +25,7 @@ from foggy.dataset_model.aggregate_join import (
     AGGREGATE_JOIN_FIELD_ACCESS_DENIED_CODE,
     AGGREGATE_JOIN_GROUPBY_MISSING_RIGHT_KEY_CODE,
     AGGREGATE_JOIN_RUNTIME_FILTER_MISSING_CODE,
+    AGGREGATE_JOIN_RUNTIME_FILTER_UNSAFE_CODE,
     AGGREGATE_JOIN_UNSUPPORTED_CODE,
 )
 from foggy.dataset_model.impl.semantic_scale import semantic_scale_metadata_value
@@ -37,6 +38,7 @@ from foggy.dataset_model.engine.hierarchy import (
 )
 from foggy.dataset_model.engine.join import JoinGraph, JoinType
 from foggy.dataset_model.definitions.base import ColumnType
+from foggy.dataset_model.definitions.access import RowFilterType
 from foggy.dataset_model.definitions.dict_def import (
     DbDictionaryDiscoveryDef,
     DictionaryDiscoveryResult,
@@ -117,6 +119,16 @@ from foggy.dataset_model.semantic.memory_grid import (
 
 logger = logging.getLogger(__name__)
 
+AGGREGATE_RELATION_PUBLIC_METADATA_KEYS = (
+    "aggregation",
+    "sourceCaption",
+    "sourceMeasure",
+    "sourceAlias",
+    "sourceExpression",
+    "aggregateExpression",
+    "sourceColumn",
+)
+
 
 class QueryBuildResultCteStage(BaseModel):
     alias: str
@@ -136,6 +148,8 @@ class QueryBuildResult(BaseModel):
     columns: List[Dict[str, Any]] = []
     cte_stages: List[QueryBuildResultCteStage] = []
     diagnostics: List[Dict[str, Any]] = []
+    total_sql: Optional[str] = None
+    total_params: List[Any] = []
 
 
 class SemanticQueryService(SemanticServiceResolver):
@@ -157,6 +171,7 @@ class SemanticQueryService(SemanticServiceResolver):
         re.IGNORECASE,
     )
     DICTIONARY_DISCOVERY_COUNT_ALIAS = "__foggyDictionaryCount"
+    _AGGREGATE_RUNTIME_FILTER_SAFE_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
     @staticmethod
     def _aggregate_relation_carrier_count(model: DbTableModelImpl) -> int:
@@ -213,7 +228,9 @@ class SemanticQueryService(SemanticServiceResolver):
             AGGREGATE_JOIN_UNSUPPORTED_CODE,
             AGGREGATE_JOIN_GROUPBY_MISSING_RIGHT_KEY_CODE,
             AGGREGATE_JOIN_RUNTIME_FILTER_MISSING_CODE,
+            AGGREGATE_JOIN_RUNTIME_FILTER_UNSAFE_CODE,
             AGGREGATE_JOIN_DENIED_SOURCE_COLUMN_CODE,
+            AGGREGATE_JOIN_FIELD_ACCESS_DENIED_CODE,
         )
         code = next((item for item in known_codes if item in error_text), None)
         if code is None:
@@ -828,27 +845,38 @@ class SemanticQueryService(SemanticServiceResolver):
                     if measure.alias
                 )
 
+        predefined_dependencies: dict[str, set[str]] = {}
+        for calc in getattr(model, "predefined_calculated_fields", None) or []:
+            name, expr = self._calculated_field_name_and_expression(calc)
+            if name and isinstance(expr, str):
+                predefined_dependencies[name] = (
+                    extract_field_dependencies(expr) | extract_formula_fields(expr)
+                )
+
         calculated_dependencies: dict[str, set[str]] = {}
         for calc in request.calculated_fields or []:
-            if isinstance(calc, dict):
-                name = calc.get("name") or calc.get("alias")
-                expr = calc.get("expression") or calc.get("formula") or ""
-            else:
-                name = getattr(calc, "name", None) or getattr(calc, "alias", None)
-                expr = getattr(calc, "expression", "") or getattr(calc, "formula", "")
-            if not name:
-                continue
-            if isinstance(expr, str):
-                calculated_dependencies[str(name)] = (
+            name, expr = self._calculated_field_name_and_expression(calc)
+            if name and isinstance(expr, str):
+                calculated_dependencies[name] = (
                     extract_field_dependencies(expr) | extract_formula_fields(expr)
                 )
 
         calculated_aliases_by_source: dict[str, set[str]] = {}
+        predefined_aliases_by_source: dict[str, set[str]] = {}
+        dependency_graph = dict(calculated_dependencies)
+        dependency_graph.update(predefined_dependencies)
         for field in requested_column_refs:
-            if field in calculated_dependencies:
+            if field in predefined_dependencies:
                 self._collect_calculated_dependency_source_fields(
                     field,
-                    calculated_dependencies,
+                    dependency_graph,
+                    requested_fields,
+                    predefined_aliases_by_source,
+                )
+            elif field in calculated_dependencies:
+                self._collect_calculated_dependency_source_fields(
+                    field,
+                    dependency_graph,
                     requested_fields,
                     calculated_aliases_by_source,
                 )
@@ -878,30 +906,53 @@ class SemanticQueryService(SemanticServiceResolver):
                 calculated_aliases = sorted(
                     calculated_aliases_by_source.get(measure.alias, set())
                 )
-                section = "calculatedFields" if calculated_aliases else "columns"
-                calculated_alias_text = (
-                    " via calculated field(s) "
-                    + ", ".join(f"'{alias}'" for alias in calculated_aliases)
-                    if calculated_aliases
-                    else ""
+                predefined_aliases = sorted(
+                    predefined_aliases_by_source.get(measure.alias, set())
                 )
+                section = "columns"
+                error_field = measure.alias
+                dependency_alias_text = ""
+                if predefined_aliases:
+                    error_field = predefined_aliases[0]
+                    dependency_alias_text = (
+                        f" via aggregate field '{measure.alias}'"
+                    )
+                elif calculated_aliases:
+                    section = "calculatedFields"
+                    dependency_alias_text = (
+                        " via calculated field(s) "
+                        + ", ".join(f"'{alias}'" for alias in calculated_aliases)
+                    )
                 error = (
                     f"{AGGREGATE_JOIN_DENIED_SOURCE_COLUMN_CODE}: "
-                    f"aggregate relation {section} field '{measure.alias}' "
+                    f"aggregate relation {section} field '{error_field}' "
                     "maps to a denied source column "
                     f"{table_name}.{column_name}"
-                    f"{calculated_alias_text}"
+                    f"{dependency_alias_text}"
                 )
                 error_detail = {
                     "code": AGGREGATE_JOIN_DENIED_SOURCE_COLUMN_CODE,
-                    "field": measure.alias,
+                    "field": error_field,
                     "table": table_name,
                     "column": column_name,
                 }
+                if predefined_aliases:
+                    error_detail["sourceField"] = measure.alias
+                    error_detail["predefinedCalculatedFields"] = predefined_aliases
                 if calculated_aliases:
                     error_detail["calculatedFields"] = calculated_aliases
                 return SemanticQueryResponse.from_error(error, error_detail=error_detail)
         return None
+
+    @staticmethod
+    def _calculated_field_name_and_expression(calc: Any) -> Tuple[Optional[str], Any]:
+        if isinstance(calc, dict):
+            name = calc.get("name") or calc.get("alias")
+            expr = calc.get("expression") or calc.get("formula") or ""
+        else:
+            name = getattr(calc, "name", None) or getattr(calc, "alias", None)
+            expr = getattr(calc, "expression", "") or getattr(calc, "formula", "")
+        return str(name) if name else None, expr
 
     def _collect_calculated_dependency_source_fields(
         self,
@@ -989,6 +1040,37 @@ class SemanticQueryService(SemanticServiceResolver):
         Returns the same response (for call-site convenience)."""
         if response is not None and response.error:
             response.error = self._sanitize_error(model_name, response.error)
+        return response
+
+    @staticmethod
+    def _attach_aggregate_relation_diagnostics(
+        response: SemanticQueryResponse,
+        build_result: QueryBuildResult,
+    ) -> SemanticQueryResponse:
+        if not build_result.diagnostics:
+            return response
+        if response.debug is None:
+            response.debug = DebugInfo(extra={})
+        if response.debug.extra is None:
+            response.debug.extra = {}
+        response.debug.extra["aggregateRelationDiagnostics"] = list(
+            build_result.diagnostics
+        )
+        return response
+
+    @staticmethod
+    def _attach_aggregate_relation_total_debug(
+        response: SemanticQueryResponse,
+        build_result: QueryBuildResult,
+    ) -> SemanticQueryResponse:
+        if not build_result.total_sql:
+            return response
+        if response.debug is None:
+            response.debug = DebugInfo(extra={})
+        if response.debug.extra is None:
+            response.debug.extra = {}
+        response.debug.extra["totalSql"] = build_result.total_sql
+        response.debug.extra["totalParams"] = list(build_result.total_params)
         return response
 
     def _resolve_effective_visible(
@@ -1271,7 +1353,7 @@ class SemanticQueryService(SemanticServiceResolver):
 
         # Validate mode
         if mode == QueryMode.VALIDATE:
-            return SemanticQueryResponse.from_legacy(
+            response = SemanticQueryResponse.from_legacy(
                 data=[],
                 columns_info=build_result.columns,
                 sql=build_result.sql,
@@ -1279,6 +1361,8 @@ class SemanticQueryService(SemanticServiceResolver):
                 warnings=build_result.warnings,
                 duration_ms=(time.time() - start_time) * 1000,
             )
+            self._attach_aggregate_relation_total_debug(response, build_result)
+            return self._attach_aggregate_relation_diagnostics(response, build_result)
 
         # Check cache
         cache_key = self._get_cache_key(
@@ -1454,6 +1538,8 @@ class SemanticQueryService(SemanticServiceResolver):
                 "from_cache": False,
             },
         )
+        self._attach_aggregate_relation_total_debug(response, build_result)
+        self._attach_aggregate_relation_diagnostics(response, build_result)
         if build_result.warnings:
             response.warnings = build_result.warnings
 
@@ -1567,17 +1653,19 @@ class SemanticQueryService(SemanticServiceResolver):
                 "timeWindow and pivot are not supported by the aggregate "
                 "relation SQLite skeleton"
             )
+        predefined_calcs = self._aggregate_relation_allowed_predefined_calculations(
+            model,
+            request,
+        )
         if (
             request.group_by
             or request.having
-            or request.calculated_fields
             or request.post_aggregate_calculations
             or request.post_slice
-            or request.order_by
         ):
             self._raise_aggregate_relation_unsupported(
-                "groupBy, having, calculated fields, post stages, and orderBy "
-                "are not supported by the aggregate relation SQLite skeleton"
+                "groupBy, having, and post stages are not supported by the "
+                "aggregate relation SQLite skeleton"
             )
 
         relations = list(getattr(model, "aggregate_relations", None) or [])
@@ -1618,17 +1706,85 @@ class SemanticQueryService(SemanticServiceResolver):
             self._raise_aggregate_relation_unsupported(
                 "aggregate relation measures are required"
             )
+        required_output_aliases = (
+            set(output_measures)
+            if self._aggregate_relation_has_raw_sql_access_filter(model)
+            else self._aggregate_relation_required_output_aliases(
+                request,
+                output_measures,
+                predefined_calcs,
+            )
+        )
 
         select_parts: List[str] = []
+        select_params: List[Any] = []
         columns_info: List[Dict[str, Any]] = []
         requested_columns = list(request.columns or [])
         if not requested_columns:
             requested_columns = list(model.columns.keys()) + list(output_measures.keys())
+        compiled_predefined_calcs: Dict[str, str] = {}
+        compiled_predefined_calc_params: Dict[str, List[Any]] = {}
+        selected_order_exprs: Dict[str, str] = {}
+        total_specs: List[Dict[str, Any]] = []
+
+        def _record_selected_output(
+            raw_col: str,
+            base_expr: str,
+            label: str,
+            sql_expr: str,
+            *,
+            total_kind: str,
+            measure_def: Optional[Any] = None,
+            order_expr: Optional[str] = None,
+        ) -> None:
+            effective_order_expr = order_expr or sql_expr
+            for key in (raw_col, base_expr, label):
+                if key:
+                    selected_order_exprs[key] = effective_order_expr
+            total_specs.append({
+                "label": label,
+                "field": base_expr,
+                "sqlExpr": sql_expr,
+                "kind": total_kind,
+                "measureDef": measure_def,
+            })
 
         for raw_col in requested_columns:
             parts = parse_column_with_alias(raw_col)
             base_expr = parts.base_expr
             label = parts.user_alias or base_expr
+            if base_expr in predefined_calcs:
+                calc_def = predefined_calcs[base_expr]
+                sql_expr, calc_params = self._build_aggregate_relation_predefined_calculated_sql(
+                    calc_def,
+                    model,
+                    right_model,
+                    relation,
+                    root_alias,
+                    relation_alias,
+                    output_measures,
+                    predefined_calcs,
+                    compiled_predefined_calcs,
+                    compiled_predefined_calc_params,
+                )
+                select_parts.append(f"{sql_expr} {self._qi(label)}")
+                select_params.extend(calc_params)
+                columns_info.append({
+                    "name": label,
+                    "fieldName": raw_col,
+                    "expression": calc_def.expression,
+                    "aggregation": None,
+                    "predefinedCalculatedField": True,
+                })
+                _record_selected_output(
+                    raw_col,
+                    base_expr,
+                    label,
+                    sql_expr,
+                    total_kind="predefinedCalculatedField",
+                    order_expr=self._qi(label),
+                )
+                continue
             if base_expr in output_measures:
                 measure_def = output_measures[base_expr]
                 sql_expr = f"{relation_alias}.{base_expr}"
@@ -1661,6 +1817,14 @@ class SemanticQueryService(SemanticServiceResolver):
                         aggregate_expr,
                     ),
                 })
+                _record_selected_output(
+                    raw_col,
+                    base_expr,
+                    label,
+                    sql_expr,
+                    total_kind="aggregateMeasure",
+                    measure_def=measure_def,
+                )
                 continue
 
             sql_expr = self._resolve_aggregate_root_field_sql(
@@ -1675,6 +1839,13 @@ class SemanticQueryService(SemanticServiceResolver):
                 "expression": sql_expr,
                 "aggregation": None,
             })
+            _record_selected_output(
+                raw_col,
+                base_expr,
+                label,
+                sql_expr,
+                total_kind="rootField",
+            )
 
         rhs_select_parts: List[str] = []
         rhs_group_by_parts: List[str] = []
@@ -1688,6 +1859,8 @@ class SemanticQueryService(SemanticServiceResolver):
             rhs_group_by_parts.append(group_sql)
 
         for measure in relation.measures:
+            if measure.alias not in required_output_aliases:
+                continue
             rhs_select_parts.append(
                 f"{self._render_aggregate_relation_measure_sql(right_model, measure, source_alias)} "
                 f"{measure.alias}"
@@ -1745,6 +1918,12 @@ class SemanticQueryService(SemanticServiceResolver):
             relation_alias,
             output_measures,
         )
+        access_filter, access_params = (
+            self._render_aggregate_relation_access_filter(model, root_alias)
+        )
+        if access_filter:
+            outer_where.append(access_filter)
+            outer_params.extend(access_params)
         rhs_where_parts.extend(pushed_where)
         params.extend(pushed_where_params)
 
@@ -1772,13 +1951,182 @@ class SemanticQueryService(SemanticServiceResolver):
             sql += f" where {' and '.join(outer_where)}"
             params.extend(outer_params)
 
+        total_sql: Optional[str] = None
+        total_params: List[Any] = []
+        if request.return_total:
+            total_sql, total_params = self._build_aggregate_relation_total_sql(
+                model,
+                total_specs,
+                sql,
+                params,
+            )
+
+        if request.order_by:
+            order_parts = self._build_aggregate_relation_order_by(
+                request.order_by,
+                model,
+                relation,
+                root_alias,
+                relation_alias,
+                output_measures,
+                selected_order_exprs,
+            )
+            if order_parts:
+                sql += f" order by {', '.join(order_parts)}"
+
         return QueryBuildResult(
             sql=sql,
-            params=params,
+            params=select_params + params,
             warnings=[],
             columns=columns_info,
             diagnostics=diagnostics,
+            total_sql=total_sql,
+            total_params=total_params,
         )
+
+    def _build_aggregate_relation_order_by(
+        self,
+        order_by: List[Any],
+        model: DbTableModelImpl,
+        relation: Any,
+        root_alias: str,
+        relation_alias: str,
+        output_measures: Dict[str, Any],
+        selected_order_exprs: Dict[str, str],
+    ) -> List[str]:
+        order_parts: List[str] = []
+        left_to_right = {
+            condition.left_field: condition.right_field
+            for condition in relation.conditions or []
+        }
+        for order_item in order_by or []:
+            field_name, direction = self._normalize_order_by_item(order_item)
+            if not field_name:
+                self._raise_aggregate_relation_unsupported(
+                    "aggregate relation orderBy item requires field"
+                )
+
+            if field_name in output_measures:
+                sql_expr = f"{relation_alias}.{field_name}"
+            elif self._aggregate_relation_root_field_exists(model, field_name):
+                sql_expr = self._resolve_aggregate_root_field_sql(
+                    model,
+                    field_name,
+                    root_alias,
+                )
+            elif field_name in selected_order_exprs:
+                sql_expr = selected_order_exprs[field_name]
+            elif field_name in (relation.group_by or []) and field_name not in left_to_right:
+                sql_expr = f"{relation_alias}.{field_name}"
+            else:
+                self._raise_aggregate_relation_unsupported(
+                    "aggregate relation orderBy field is not available in the "
+                    f"outer query: {field_name}"
+                )
+
+            order_parts.append(f"{sql_expr} {direction.lower()}")
+        return order_parts
+
+    def _build_aggregate_relation_total_sql(
+        self,
+        model: DbTableModelImpl,
+        total_specs: List[Dict[str, Any]],
+        base_sql: str,
+        params: List[Any],
+    ) -> Tuple[str, List[Any]]:
+        split_marker = " from "
+        if split_marker not in base_sql:
+            self._raise_aggregate_relation_unsupported(
+                "cannot build aggregate relation returnTotal SQL from query"
+            )
+        from_clause = base_sql.split(split_marker, 1)[1]
+        source_parts: List[str] = []
+        total_parts: List[str] = []
+
+        for spec in total_specs:
+            total_expr = self._aggregate_relation_total_outer_expr(model, spec)
+            if not total_expr:
+                continue
+            label = spec["label"]
+            source_parts.append(f"{spec['sqlExpr']} {self._qi(label)}")
+            total_parts.append(total_expr)
+
+        if source_parts:
+            inner_select = ", ".join(source_parts)
+        else:
+            inner_select = f"1 {self._qi('__foggyTotalRow')}"
+        total_parts.append(f"count(*) {self._qi('total')}")
+        total_sql = (
+            f"select {', '.join(total_parts)} "
+            f"from (select {inner_select} from {from_clause}) tx"
+        )
+        return total_sql, list(params)
+
+    def _aggregate_relation_total_outer_expr(
+        self,
+        model: DbTableModelImpl,
+        spec: Dict[str, Any],
+    ) -> Optional[str]:
+        label = spec["label"]
+        tx_expr = f"tx.{self._qi(label)}"
+        alias_expr = self._qi(label)
+        kind = spec.get("kind")
+        if kind == "rootField":
+            if not self._aggregate_relation_root_field_is_numeric(
+                model,
+                str(spec.get("field") or ""),
+            ):
+                return None
+            return f"sum({tx_expr}) {alias_expr}"
+
+        if kind != "aggregateMeasure":
+            return None
+
+        measure_def = spec.get("measureDef")
+        aggregation = getattr(measure_def, "aggregation", None)
+        if hasattr(aggregation, "value"):
+            aggregation = aggregation.value
+        normalized = str(aggregation or "sum").strip().lower().replace("-", "_")
+        if normalized in {"count_distinct", "countdistinct", "count_distincts"}:
+            return f"count(distinct {tx_expr}) {alias_expr}"
+        if normalized == "count":
+            return f"sum({tx_expr}) {alias_expr}"
+        if normalized in {"avg", "average"}:
+            return f"avg({tx_expr}) {alias_expr}"
+        if normalized == "min":
+            return f"min({tx_expr}) {alias_expr}"
+        if normalized == "max":
+            return f"max({tx_expr}) {alias_expr}"
+        return f"sum({tx_expr}) {alias_expr}"
+
+    @staticmethod
+    def _aggregate_relation_root_field_exists(
+        model: DbTableModelImpl,
+        field_name: str,
+    ) -> bool:
+        return bool(
+            model.get_column(field_name)
+            or model.get_dimension(field_name)
+            or model.get_measure(field_name)
+        )
+
+    @staticmethod
+    def _aggregate_relation_root_field_is_numeric(
+        model: DbTableModelImpl,
+        field_name: str,
+    ) -> bool:
+        column = model.get_column(field_name)
+        raw_type = getattr(column, "column_type", None) if column is not None else None
+        if raw_type is None and model.get_measure(field_name) is not None:
+            return True
+        value = raw_type.value if hasattr(raw_type, "value") else raw_type
+        return str(value or "").lower() in {
+            ColumnType.INTEGER.value,
+            ColumnType.LONG.value,
+            ColumnType.FLOAT.value,
+            ColumnType.DOUBLE.value,
+            ColumnType.DECIMAL.value,
+        }
 
     def _table_expr_for_model(self, model: DbTableModelImpl) -> str:
         if model.source_schema:
@@ -1789,6 +2137,264 @@ class SemanticQueryService(SemanticServiceResolver):
         raise ValueError(
             f"{AGGREGATE_JOIN_UNSUPPORTED_CODE}: {detail}"
         )
+
+    def _aggregate_relation_allowed_predefined_calculations(
+        self,
+        model: DbTableModelImpl,
+        request: SemanticQueryRequest,
+    ) -> Dict[str, CalculatedFieldDef]:
+        predefined = self._aggregate_relation_predefined_calculations(model)
+        if not request.calculated_fields:
+            return predefined
+
+        unsupported: List[str] = []
+        for calc in self._request_calculated_field_defs(request):
+            predefined_calc = predefined.get(calc.name)
+            if predefined_calc is None:
+                unsupported.append(calc.name)
+                continue
+            if not self._aggregate_relation_predefined_calc_matches(
+                predefined_calc,
+                calc,
+            ):
+                unsupported.append(calc.name)
+                continue
+            if (
+                calc.is_window_function()
+                or calc.agg
+                or self._formula_contains_aggregate_call(calc.expression)
+            ):
+                unsupported.append(calc.name)
+
+        if unsupported:
+            self._raise_aggregate_relation_unsupported(
+                "request-level calculatedFields are not supported by the "
+                "aggregate relation SQLite skeleton; only scalar model "
+                "predefined_calculated_fields referenced from columns[] are "
+                "supported. unsupported="
+                + ", ".join(sorted(set(unsupported)))
+            )
+        return predefined
+
+    def _aggregate_relation_predefined_calculations(
+        self,
+        model: DbTableModelImpl,
+    ) -> Dict[str, CalculatedFieldDef]:
+        predefined: Dict[str, CalculatedFieldDef] = {}
+        for calc in getattr(model, "predefined_calculated_fields", None) or []:
+            calc_def = self._aggregate_relation_calculated_field_def(calc)
+            if not calc_def.name:
+                continue
+            predefined[calc_def.name] = calc_def
+        return predefined
+
+    @staticmethod
+    def _aggregate_relation_calculated_field_def(calc: Any) -> CalculatedFieldDef:
+        if isinstance(calc, CalculatedFieldDef):
+            return calc
+        if isinstance(calc, dict):
+            payload = dict(calc)
+            aliases = {
+                "returnType": "return_type",
+                "dependsOn": "depends_on",
+                "partitionBy": "partition_by",
+                "windowOrderBy": "window_order_by",
+                "windowFrame": "window_frame",
+            }
+            for java_key, py_key in aliases.items():
+                if java_key in payload and py_key not in payload:
+                    payload[py_key] = payload[java_key]
+            return CalculatedFieldDef(**payload)
+        return calc
+
+    @staticmethod
+    def _aggregate_relation_predefined_calc_matches(
+        predefined: CalculatedFieldDef,
+        requested: CalculatedFieldDef,
+    ) -> bool:
+        return (
+            requested.name == predefined.name
+            and str(requested.expression or "").strip()
+            == str(predefined.expression or "").strip()
+        )
+
+    def _build_aggregate_relation_predefined_calculated_sql(
+        self,
+        calc_def: CalculatedFieldDef,
+        model: DbTableModelImpl,
+        right_model: DbTableModelImpl,
+        relation: Any,
+        root_alias: str,
+        relation_alias: str,
+        output_measures: Dict[str, Any],
+        predefined_calcs: Dict[str, CalculatedFieldDef],
+        compiled_calcs: Dict[str, str],
+        compiled_calcs_params: Dict[str, List[Any]],
+        visiting: Optional[set[str]] = None,
+    ) -> Tuple[str, List[Any]]:
+        alias = calc_def.alias or calc_def.name
+        if calc_def.name in compiled_calcs:
+            return compiled_calcs[calc_def.name], list(
+                compiled_calcs_params.get(calc_def.name, [])
+            )
+        if (
+            calc_def.is_window_function()
+            or calc_def.agg
+            or self._formula_contains_aggregate_call(calc_def.expression)
+        ):
+            self._raise_aggregate_relation_unsupported(
+                "aggregate relation predefined calculated fields only support "
+                f"scalar expressions; field={alias}"
+            )
+
+        visiting = visiting or set()
+        if calc_def.name in visiting:
+            self._raise_aggregate_relation_unsupported(
+                f"aggregate relation predefined calculated field cycle: {calc_def.name}"
+            )
+        next_visiting = set(visiting)
+        next_visiting.add(calc_def.name)
+
+        def _resolver(name: str):
+            if name in compiled_calcs:
+                nested_params = list(compiled_calcs_params.get(name, []))
+                if nested_params:
+                    return f"({compiled_calcs[name]})", nested_params
+                return f"({compiled_calcs[name]})"
+            if name in predefined_calcs:
+                nested_sql, nested_params = (
+                    self._build_aggregate_relation_predefined_calculated_sql(
+                        predefined_calcs[name],
+                        model,
+                        right_model,
+                        relation,
+                        root_alias,
+                        relation_alias,
+                        output_measures,
+                        predefined_calcs,
+                        compiled_calcs,
+                        compiled_calcs_params,
+                        next_visiting,
+                    )
+                )
+                if nested_params:
+                    return f"({nested_sql})", nested_params
+                return f"({nested_sql})"
+            if name in output_measures:
+                return f"{relation_alias}.{name}"
+            return self._resolve_aggregate_root_field_sql(model, name, root_alias)
+
+        try:
+            compiled = self._get_formula_compiler().compile(
+                calc_def.expression,
+                _resolver,
+                calculate_context=CalculateQueryContext(),
+            )
+        except FormulaError as exc:
+            self._raise_aggregate_relation_unsupported(
+                "cannot compile aggregate relation predefined calculated "
+                f"field {alias!r}: {exc}"
+            )
+            raise AssertionError("unreachable")
+
+        sql = compiled.sql_fragment
+        params = list(compiled.bind_params)
+        if getattr(calc_def, "empty_default", None) is not None:
+            sql = f"COALESCE({sql}, ?)"
+            params.append(calc_def.empty_default)
+
+        compiled_calcs[calc_def.name] = sql
+        compiled_calcs_params[calc_def.name] = list(params)
+        return sql, params
+
+    def _aggregate_relation_has_raw_sql_access_filter(
+        self,
+        model: DbTableModelImpl,
+    ) -> bool:
+        access = getattr(model, "access", None)
+        if access is None:
+            return False
+        if not getattr(access, "enabled", True):
+            return False
+        if not getattr(access, "row_filter_enabled", False):
+            return False
+        if not access.get_row_filter_sql():
+            return False
+        row_filter_type = getattr(access, "row_filter_type", RowFilterType.NONE)
+        row_filter_value = getattr(row_filter_type, "value", row_filter_type)
+        return (
+            str(row_filter_value or RowFilterType.NONE.value).lower()
+            == RowFilterType.SQL.value
+        )
+
+    def _aggregate_relation_required_output_aliases(
+        self,
+        request: SemanticQueryRequest,
+        output_measures: Dict[str, Any],
+        predefined_calcs: Dict[str, CalculatedFieldDef],
+    ) -> set[str]:
+        if not request.columns:
+            return set(output_measures)
+
+        refs: set[str] = set()
+        visited_calcs: set[str] = set()
+
+        def collect_predefined_dependencies(name: str) -> None:
+            if name in visited_calcs:
+                return
+            calc_def = predefined_calcs.get(name)
+            if calc_def is None:
+                return
+            visited_calcs.add(name)
+            dependencies = extract_field_dependencies(str(calc_def.expression or ""))
+            refs.update(dependencies)
+            for dependency in dependencies:
+                collect_predefined_dependencies(dependency)
+
+        def collect_condition_refs(item: Any) -> None:
+            if isinstance(item, dict):
+                for key in ("field", "fieldName", "column"):
+                    value = item.get(key)
+                    if isinstance(value, str):
+                        refs.add(value)
+                for key in (
+                    "conditions",
+                    "children",
+                    "filters",
+                    "items",
+                    "args",
+                    "$or",
+                    "$and",
+                    "or",
+                    "and",
+                ):
+                    nested = item.get(key)
+                    if isinstance(nested, list):
+                        for child in nested:
+                            collect_condition_refs(child)
+                    else:
+                        collect_condition_refs(nested)
+            elif isinstance(item, list):
+                for child in item:
+                    collect_condition_refs(child)
+
+        for raw_col in request.columns or []:
+            if not isinstance(raw_col, str):
+                continue
+            parts = parse_column_with_alias(raw_col)
+            refs.add(parts.base_expr)
+            refs.update(extract_field_dependencies(parts.base_expr))
+            collect_predefined_dependencies(parts.base_expr)
+
+        collect_condition_refs(request.slice or [])
+        for order_item in request.order_by or []:
+            field_name, _direction = self._normalize_order_by_item(order_item)
+            if field_name:
+                refs.add(field_name)
+        for ref in list(refs):
+            collect_predefined_dependencies(ref)
+
+        return {alias for alias in output_measures if alias in refs}
 
     def _resolve_aggregate_root_field_sql(
         self,
@@ -1897,10 +2503,9 @@ class SemanticQueryService(SemanticServiceResolver):
     ) -> Dict[str, Any]:
         source_field = measure_def.field or measure_def.alias
         source_measure = right_model.get_measure(source_field) if source_field else None
-        source_caption = (
-            source_measure.alias
-            if source_measure is not None and source_measure.alias
-            else source_field
+        source_caption = self._aggregate_relation_source_caption(
+            right_model,
+            measure_def,
         )
         aggregation = str(measure_def.aggregation or "").replace("-", "_").upper()
         if aggregation == "COUNTDISTINCT":
@@ -1927,6 +2532,275 @@ class SemanticQueryService(SemanticServiceResolver):
             "sourceExpression": source_expr,
             "aggregateExpression": aggregate_expr,
         }
+
+    def _aggregate_relation_public_metadata_fields(
+        self,
+        relation: Any,
+    ) -> List[Dict[str, Any]]:
+        right_model = self.get_model(relation.right_model)
+        if right_model is None:
+            return []
+
+        source_alias = "agg_src"
+        field_infos: List[Dict[str, Any]] = []
+        for measure_def in relation.measures:
+            field_name = getattr(measure_def, "alias", None)
+            if not field_name:
+                continue
+
+            source_expr = (
+                self._resolve_aggregate_right_field_sql(
+                    right_model,
+                    measure_def.field,
+                    source_alias,
+                )
+                if measure_def.field
+                else None
+            )
+            aggregate_expr = self._render_aggregate_relation_measure_sql(
+                right_model,
+                measure_def,
+                source_alias,
+            )
+            lineage = self._aggregate_relation_measure_metadata(
+                right_model,
+                measure_def,
+                source_expr,
+                aggregate_expr,
+            )
+            public_lineage = self._public_aggregate_relation_metadata(lineage)
+            agg_name = public_lineage["aggregation"]
+            field_type = self._aggregate_relation_public_measure_type(
+                right_model,
+                measure_def,
+            )
+            field_info: Dict[str, Any] = {
+                "name": self._aggregate_relation_output_caption(
+                    right_model,
+                    measure_def,
+                ),
+                "fieldName": field_name,
+                "meta": (
+                    f"Aggregate Relation Measure | {field_type} | "
+                    f"Default Aggregation: {agg_name}"
+                ),
+                "type": field_type,
+                "filterType": "number",
+                "filterable": True,
+                "measure": True,
+                "aggregatable": True,
+                "aggregation": agg_name,
+                "sourceColumn": field_name,
+                "sourceExpression": public_lineage["sourceExpression"],
+                "aggregateExpression": public_lineage["aggregateExpression"],
+                "aggregateRelation": public_lineage,
+                "models": {},
+            }
+            source_def = self._aggregate_relation_source_definition(
+                right_model,
+                measure_def,
+            )
+            if source_def is not None:
+                self._attach_semantic_scale_metadata(field_info, source_def)
+            field_infos.append(field_info)
+        return field_infos
+
+    @staticmethod
+    def _public_aggregate_relation_metadata(
+        metadata: Dict[str, Any],
+    ) -> Dict[str, str]:
+        return {
+            key: "" if metadata.get(key) is None else str(metadata.get(key))
+            for key in AGGREGATE_RELATION_PUBLIC_METADATA_KEYS
+        }
+
+    def _aggregate_relation_output_caption(
+        self,
+        right_model: DbTableModelImpl,
+        measure_def: Any,
+    ) -> str:
+        explicit = self._aggregate_relation_extra_value(
+            measure_def,
+            "caption",
+            "outputCaption",
+            "output_caption",
+        )
+        if explicit:
+            return str(explicit)
+        return self._aggregate_relation_source_caption(right_model, measure_def)
+
+    def _aggregate_relation_source_caption(
+        self,
+        right_model: DbTableModelImpl,
+        measure_def: Any,
+    ) -> str:
+        explicit = self._aggregate_relation_extra_value(
+            measure_def,
+            "sourceCaption",
+            "source_caption",
+        )
+        if explicit:
+            return str(explicit)
+
+        source_field = getattr(measure_def, "field", None)
+        if source_field:
+            source_measure = right_model.get_measure(source_field)
+            if source_measure is not None:
+                return source_measure.alias or source_measure.name
+            source_column = right_model.get_column(source_field)
+            if source_column is not None:
+                return source_column.alias or source_column.comment or source_field
+            source_dimension = right_model.get_dimension(source_field)
+            if source_dimension is not None:
+                return source_dimension.alias or source_dimension.name
+            return source_field
+
+        return getattr(measure_def, "alias", None) or ""
+
+    def _aggregate_relation_public_measure_type(
+        self,
+        right_model: DbTableModelImpl,
+        measure_def: Any,
+    ) -> str:
+        explicit = self._aggregate_relation_extra_value(
+            measure_def,
+            "type",
+            "dataType",
+            "data_type",
+        )
+        if explicit:
+            return str(explicit).upper()
+
+        aggregation = str(getattr(measure_def, "aggregation", "") or "").upper()
+        if aggregation in {"COUNT", "COUNT_DISTINCT", "COUNTDISTINCT"}:
+            return "BIGINT"
+
+        source_def = self._aggregate_relation_source_definition(
+            right_model,
+            measure_def,
+        )
+        explicit = self._aggregate_relation_extra_value(
+            source_def,
+            "type",
+            "dataType",
+            "data_type",
+        )
+        if explicit:
+            return str(explicit).upper()
+        if isinstance(source_def, DbModelMeasureImpl):
+            return "NUMBER"
+
+        column_type = getattr(source_def, "column_type", None)
+        value = getattr(column_type, "value", None) or column_type
+        return str(value or "NUMBER").upper()
+
+    def _aggregate_relation_source_definition(
+        self,
+        right_model: DbTableModelImpl,
+        measure_def: Any,
+    ) -> Optional[Any]:
+        source_field = getattr(measure_def, "field", None)
+        if not source_field:
+            return None
+        source_measure = right_model.get_measure(source_field)
+        if source_measure is not None:
+            return source_measure
+        source_column = right_model.get_column(source_field)
+        if source_column is not None:
+            return source_column
+        return right_model.get_dimension(source_field)
+
+    @staticmethod
+    def _aggregate_relation_extra_value(obj: Any, *keys: str) -> Optional[Any]:
+        if obj is None:
+            return None
+        if isinstance(obj, dict):
+            for key in keys:
+                value = obj.get(key)
+                if value not in (None, ""):
+                    return value
+            return None
+
+        extra = getattr(obj, "model_extra", None)
+        if isinstance(extra, dict):
+            for key in keys:
+                value = extra.get(key)
+                if value not in (None, ""):
+                    return value
+
+        for key in keys:
+            value = getattr(obj, key, None)
+            if value not in (None, ""):
+                return value
+        return None
+
+    def _aggregate_relation_public_field_visible(
+        self,
+        model_name: str,
+        field_name: str,
+        visible_fields: Optional[List[str]],
+        denied_columns: Optional[List[DeniedColumn]],
+    ) -> bool:
+        if visible_fields is not None and field_name not in set(visible_fields):
+            return False
+        if not denied_columns:
+            return True
+
+        model = self._models.get(model_name)
+        if model is None:
+            return False
+        measure_def = None
+        relation_def = None
+        for relation in getattr(model, "aggregate_relations", None) or []:
+            for measure in getattr(relation, "measures", None) or []:
+                if getattr(measure, "alias", None) == field_name:
+                    relation_def = relation
+                    measure_def = measure
+                    break
+            if measure_def is not None:
+                break
+        if measure_def is None or relation_def is None:
+            return False
+
+        right_model = self.get_model(relation_def.right_model)
+        if right_model is None:
+            return False
+        source_columns = self._aggregate_relation_source_physical_columns(
+            right_model,
+            measure_def,
+        )
+        for denied in denied_columns:
+            if not denied.table or not denied.column:
+                continue
+            for table, column in source_columns:
+                if denied.table == table and denied.column == column:
+                    return False
+        return True
+
+    def _aggregate_relation_source_physical_columns(
+        self,
+        right_model: DbTableModelImpl,
+        measure_def: Any,
+    ) -> List[Tuple[str, str]]:
+        source_field = getattr(measure_def, "field", None)
+        if not source_field:
+            return []
+
+        source_measure = right_model.get_measure(source_field)
+        if source_measure is not None:
+            table = source_measure.table or right_model.source_table
+            column = source_measure.column or source_measure.name
+            return [(table, column)] if table and column else []
+
+        source_column = right_model.get_column(source_field)
+        if source_column is not None:
+            return [(right_model.source_table, source_column.name)]
+
+        source_dimension = right_model.get_dimension(source_field)
+        if source_dimension is not None:
+            return [(right_model.source_table, source_dimension.column)]
+
+        return []
 
     def _render_aggregate_filter_sql(
         self,
@@ -1994,13 +2868,91 @@ class SemanticQueryService(SemanticServiceResolver):
         attributes = getattr(context, "attributes", None) or {}
         ext_data = attributes.get("extData") or attributes.get("ext_data") or {}
         if isinstance(ext_data, dict) and key in ext_data:
-            return ext_data[key]
+            return self._validate_aggregate_runtime_filter_value(ext_data[key])
         if key in attributes:
-            return attributes[key]
+            return self._validate_aggregate_runtime_filter_value(attributes[key])
         raise ValueError(
             f"{AGGREGATE_JOIN_RUNTIME_FILTER_MISSING_CODE}: "
             f"aggregate relation runtime filter is missing: {key}"
         )
+
+    def _validate_aggregate_runtime_filter_value(self, value: Any) -> Any:
+        if isinstance(value, str) and not self._AGGREGATE_RUNTIME_FILTER_SAFE_RE.fullmatch(value):
+            raise ValueError(
+                f"{AGGREGATE_JOIN_RUNTIME_FILTER_UNSAFE_CODE}: "
+                "aggregate relation runtime filter string only supports "
+                "letters, digits, underscores, and hyphens"
+            )
+        return value
+
+    def _render_aggregate_relation_access_filter(
+        self,
+        model: DbTableModelImpl,
+        root_alias: str,
+    ) -> Tuple[Optional[str], List[Any]]:
+        access = getattr(model, "access", None)
+        if (
+            access is None
+            or not getattr(access, "enabled", True)
+            or not getattr(access, "row_filter_enabled", False)
+        ):
+            return None, []
+
+        expression = access.get_row_filter_sql()
+        if not expression:
+            return None, []
+
+        row_filter_type = getattr(access, "row_filter_type", RowFilterType.NONE)
+        row_filter_value = getattr(row_filter_type, "value", row_filter_type)
+        row_filter_kind = str(row_filter_value or RowFilterType.NONE.value).lower()
+
+        if row_filter_kind == RowFilterType.SQL.value:
+            params = self._aggregate_relation_access_filter_params(access)
+            if expression.count("?") != len(params):
+                self._raise_aggregate_relation_unsupported(
+                    "aggregate relation SQL row filter parameter count mismatch"
+                )
+            return expression, params
+
+        if row_filter_kind not in {
+            RowFilterType.NONE.value,
+            RowFilterType.EXPRESSION.value,
+        }:
+            self._raise_aggregate_relation_unsupported(
+                "aggregate relation row filter type is not supported: "
+                f"{row_filter_kind}"
+            )
+
+        def _resolver(name: str) -> str:
+            return self._resolve_aggregate_root_field_sql(model, name, root_alias)
+
+        try:
+            compiled = self._get_formula_compiler().compile(
+                expression,
+                _resolver,
+                calculate_context=CalculateQueryContext(),
+            )
+        except FormulaError as exc:
+            self._raise_aggregate_relation_unsupported(
+                "cannot compile aggregate relation row filter expression: "
+                f"{exc}"
+            )
+            raise AssertionError("unreachable")
+
+        return compiled.sql_fragment, list(compiled.bind_params)
+
+    @staticmethod
+    def _aggregate_relation_access_filter_params(access: Any) -> List[Any]:
+        for attr in ("row_filter_params", "rowFilterParams", "params"):
+            value = getattr(access, attr, None)
+            if value is not None:
+                return list(value)
+        metadata = getattr(access, "metadata", None) or {}
+        for key in ("rowFilterParams", "row_filter_params", "params"):
+            value = metadata.get(key)
+            if value is not None:
+                return list(value)
+        return []
 
     def _render_aggregate_outer_filters(
         self,
@@ -2097,14 +3049,48 @@ class SemanticQueryService(SemanticServiceResolver):
                 "expression": expression_sql,
             })
 
+        def _null_check_sql(field_sql: str, op: str) -> Optional[str]:
+            if not field_sql:
+                return None
+            normalized_op = str(op or "").strip().lower().replace("_", " ")
+            if normalized_op in {"is null", "isnull", "null"}:
+                return f"{field_sql} is null"
+            if normalized_op in {"is not null", "not null", "isnotnull"}:
+                return f"{field_sql} is not null"
+            return None
+
+        def _relation_outer_field_sql_for_null_check(field_name: str) -> Optional[str]:
+            if field_name in aggregate_output_measures:
+                return f"{relation_alias}.{field_name}"
+            if field_name in (relation.group_by or []) and field_name not in left_to_right:
+                return f"{relation_alias}.{field_name}"
+            return None
+
+        def _append_null_check_diagnostic(field_name: str, op: str) -> None:
+            diagnostics.append({
+                "decision": "retained",
+                "field": field_name,
+                "op": op,
+                "target": "outer",
+                "reasonCode": "NULL_CHECK_OUTER_ONLY",
+                "expression": None,
+            })
+
         def _render_simple(item: Dict[str, Any]) -> None:
             field_name = _simple_field(item)
             if not field_name:
                 self._raise_aggregate_relation_unsupported(
                     "aggregate relation slice item requires field"
-                )
+            )
             op = _simple_op(item)
             value = item.get("value")
+            relation_null_field_sql = _relation_outer_field_sql_for_null_check(field_name)
+            null_check_sql = _null_check_sql(relation_null_field_sql or "", op)
+            if null_check_sql:
+                where_parts.append(null_check_sql)
+                _append_null_check_diagnostic(field_name, op)
+                return
+
             if field_name in aggregate_output_measures:
                 outer_sql = f"{relation_alias}.{field_name}"
                 condition_sql, condition_params = self._render_aggregate_filter_sql(
@@ -2173,16 +3159,26 @@ class SemanticQueryService(SemanticServiceResolver):
                         "OR aggregate relation slice item requires field"
                     )
                 op = _simple_op(child)
-                field_sql = self._resolve_aggregate_root_field_sql(
-                    model,
-                    field_name,
-                    root_alias,
-                )
-                condition_sql, condition_params = self._render_aggregate_filter_sql(
-                    field_sql,
-                    op,
-                    child.get("value"),
-                )
+                if field_name in aggregate_output_measures:
+                    field_sql = f"{relation_alias}.{field_name}"
+                elif field_name in (relation.group_by or []) and field_name not in left_to_right:
+                    field_sql = f"{relation_alias}.{field_name}"
+                else:
+                    field_sql = self._resolve_aggregate_root_field_sql(
+                        model,
+                        field_name,
+                        root_alias,
+                    )
+                null_check_sql = _null_check_sql(field_sql, op)
+                if null_check_sql:
+                    condition_sql = null_check_sql
+                    condition_params = []
+                else:
+                    condition_sql, condition_params = self._render_aggregate_filter_sql(
+                        field_sql,
+                        op,
+                        child.get("value"),
+                    )
                 parts.append(condition_sql)
                 or_params.extend(condition_params)
                 diagnostics.append({
@@ -5830,15 +6826,37 @@ class SemanticQueryService(SemanticServiceResolver):
                 error=result.error,
             )
 
-        return SemanticQueryResponse.from_legacy(
+        total_data: Optional[Dict[str, Any]] = None
+        total_count = result.total
+        if build_result.total_sql:
+            total_result = await executor.execute(
+                build_result.total_sql,
+                build_result.total_params,
+            )
+            if total_result.error:
+                return SemanticQueryResponse.from_legacy(
+                    data=[],
+                    columns_info=build_result.columns,
+                    sql=build_result.sql,
+                    error=f"Total query failed: {total_result.error}",
+                )
+            total_data = dict(total_result.rows[0]) if total_result.rows else {"total": 0}
+            try:
+                total_count = int(total_data.get("total") or 0)
+            except (TypeError, ValueError):
+                total_count = result.total
+
+        response = SemanticQueryResponse.from_legacy(
             data=result.rows,
             columns_info=build_result.columns,
-            total=result.total,
+            total=total_count,
             sql=build_result.sql,
             start=start,
             limit=limit,
             has_more=result.has_more,
         )
+        response.total_data = total_data
+        return response
 
     def set_executor(self, executor) -> None:
         """Set the database executor."""
@@ -5996,7 +7014,7 @@ class SemanticQueryService(SemanticServiceResolver):
             )
 
         if mode == QueryMode.VALIDATE:
-            return SemanticQueryResponse.from_legacy(
+            response = SemanticQueryResponse.from_legacy(
                 data=[],
                 columns_info=build_result.columns,
                 sql=build_result.sql,
@@ -6004,6 +7022,8 @@ class SemanticQueryService(SemanticServiceResolver):
                 warnings=build_result.warnings,
                 duration_ms=(time.time() - start_time) * 1000,
             )
+            self._attach_aggregate_relation_total_debug(response, build_result)
+            return self._attach_aggregate_relation_diagnostics(response, build_result)
 
         cache_key = self._get_cache_key(model, request)
         if self._enable_cache and cache_key in self._cache:
@@ -6043,6 +7063,8 @@ class SemanticQueryService(SemanticServiceResolver):
                 "from_cache": False,
             },
         )
+        self._attach_aggregate_relation_total_debug(response, build_result)
+        self._attach_aggregate_relation_diagnostics(response, build_result)
         if build_result.warnings:
             response.warnings = build_result.warnings
 
@@ -6678,6 +7700,32 @@ class SemanticQueryService(SemanticServiceResolver):
                     "description": f"{measure.alias or measure_name} (Aggregation: {agg_name})",
                 }
 
+            # Aggregate relation output measures
+            for relation in getattr(model, "aggregate_relations", None) or []:
+                for field_info in self._aggregate_relation_public_metadata_fields(
+                    relation,
+                ):
+                    field_name = field_info["fieldName"]
+                    if field_name not in fields:
+                        fields[field_name] = field_info
+                    else:
+                        existing_models = fields[field_name].get("models") or {}
+                        fields[field_name].update(
+                            {
+                                key: value
+                                for key, value in field_info.items()
+                                if key != "models"
+                            }
+                        )
+                        fields[field_name]["models"] = existing_models
+                    fields[field_name]["models"][model_name] = {
+                        "description": (
+                            f"{field_info['name']} "
+                            f"(Aggregate relation: {relation.right_model}; "
+                            f"Aggregation: {field_info['aggregation']})"
+                        ),
+                    }
+
             # Predefined formula fields (from columnGroups.formula)
             predefined = getattr(model, "predefined_calculated_fields", None)
             if predefined:
@@ -6763,6 +7811,14 @@ class SemanticQueryService(SemanticServiceResolver):
                                 # Expression not found → fail-closed
                                 formula_accessible = False
                         if formula_accessible:
+                            kept_models[model_name] = model_info
+                    elif field_info.get("aggregateRelation"):
+                        if self._aggregate_relation_public_field_visible(
+                            model_name,
+                            field_name,
+                            visible_fields,
+                            denied_columns,
+                        ):
                             kept_models[model_name] = model_info
                     elif field_name in model_effective:
                         kept_models[model_name] = model_info

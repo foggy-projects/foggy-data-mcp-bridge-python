@@ -4,7 +4,7 @@
   "status": "contractOnly",
   "owner": "java",
   "source": "JavaQueryModelAggregateJoinSnapshotTest",
-  "contractVersion": "querymodel-aggregate-join-2",
+  "contractVersion": "querymodel-aggregate-join-3",
   "purpose": "Define the neutral Java snapshot envelope for Python QueryModel aggregate join implementation and governance replay.",
   "requiredEnvelopeFields": [
     "schemaVersion",
@@ -34,6 +34,12 @@
       "fields",
       "aggregateRelation"
     ],
+    "diagnostics": [
+      "diagnostics",
+      "requiredDecisions",
+      "requiredTargets",
+      "requiredFields"
+    ],
     "error": [
       "errorCode",
       "messageMarkers"
@@ -47,12 +53,19 @@
       "rowsForbiddenFields",
       "fieldAccess",
       "systemSlice",
-      "deniedColumns"
+      "deniedColumns",
+      "orderBy",
+      "returnTotal",
+      "totalSql",
+      "normalizedTotalSql",
+      "totalData",
+      "totalSqlMarkers"
     ],
     "error": [
       "fieldAccess",
       "calculatedFields",
-      "predefinedCalculatedField"
+      "predefinedCalculatedField",
+      "forbiddenMessageMarkers"
     ]
   },
   "requiredCases": [
@@ -145,6 +158,56 @@
       "id": "aggregate-join-raw-sql-access-builder-outer-only",
       "type": "sql",
       "description": "A raw SQL accessBuilder predicate stays outside the RHS aggregate subquery."
+    },
+    {
+      "id": "aggregate-join-orderby-aggregate-output",
+      "type": "sql",
+      "description": "Ordering by an aggregate relation output renders against the outer aggregate alias instead of the RHS source column."
+    },
+    {
+      "id": "aggregate-join-return-total",
+      "type": "sql",
+      "description": "returnTotal keeps aggregate relation SQL and exposes a matching totalData envelope."
+    },
+    {
+      "id": "aggregate-join-null-check-outer-only-is-null",
+      "type": "sql",
+      "description": "IS NULL on a nullable aggregate relation output remains outer-only and records retained diagnostics."
+    },
+    {
+      "id": "aggregate-join-null-check-outer-only-is-not-null",
+      "type": "sql",
+      "description": "IS NOT NULL on a nullable aggregate relation output remains outer-only and records retained diagnostics."
+    },
+    {
+      "id": "aggregate-join-semantic-debug-extra-diagnostics",
+      "type": "diagnostics",
+      "description": "Semantic V3 debug.extra exposes aggregate relation diagnostics with pushed WHERE/HAVING decisions."
+    },
+    {
+      "id": "aggregate-join-composite-key-pushdown",
+      "type": "sql",
+      "description": "Composite join keys duplicate safe key predicates into RHS WHERE and aggregate output predicates into HAVING."
+    },
+    {
+      "id": "aggregate-join-structured-access-builder-pushdown",
+      "type": "sql",
+      "description": "Structured accessBuilder field-reference predicates are parameterized and pushed into the RHS aggregate relation."
+    },
+    {
+      "id": "aggregate-join-runtime-filter-unsafe-refusal",
+      "type": "error",
+      "description": "Unsafe runtime filter text fails closed and does not leak the rejected raw value."
+    },
+    {
+      "id": "aggregate-join-left-dimension-key",
+      "type": "sql",
+      "description": "Aggregate relation can join on a left dimension business key while unrelated request predicates remain outside RHS pushdown."
+    },
+    {
+      "id": "aggregate-join-rhs-dimension-fixed-filter",
+      "type": "sql",
+      "description": "RHS fixed filters can traverse a dimension join inside the aggregate relation derived query."
     },
     {
       "id": "aggregate-join-metadata-lineage",

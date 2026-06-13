@@ -36,6 +36,16 @@ REQUIRED_CASE_IDS = {
     "aggregate-join-predefined-calculated-field-denied-source-refusal",
     "aggregate-join-predefined-calculated-field-allowed-exec",
     "aggregate-join-raw-sql-access-builder-outer-only",
+    "aggregate-join-orderby-aggregate-output",
+    "aggregate-join-return-total",
+    "aggregate-join-null-check-outer-only-is-null",
+    "aggregate-join-null-check-outer-only-is-not-null",
+    "aggregate-join-semantic-debug-extra-diagnostics",
+    "aggregate-join-composite-key-pushdown",
+    "aggregate-join-structured-access-builder-pushdown",
+    "aggregate-join-runtime-filter-unsafe-refusal",
+    "aggregate-join-left-dimension-key",
+    "aggregate-join-rhs-dimension-fixed-filter",
     "aggregate-join-metadata-lineage",
 }
 
@@ -51,13 +61,14 @@ def test_contract_schema_and_required_cases() -> None:
     assert contract["feature"] == "queryModelAggregateJoin"
     assert contract["status"] == "contractOnly"
     assert contract["source"] == "JavaQueryModelAggregateJoinSnapshotTest"
-    assert contract["contractVersion"] == "querymodel-aggregate-join-2"
+    assert contract["contractVersion"] == "querymodel-aggregate-join-3"
 
     required_envelope = set(contract["requiredEnvelopeFields"])
     assert {"schemaVersion", "feature", "source", "cases"}.issubset(required_envelope)
 
     case_ids = {case["id"] for case in contract["requiredCases"]}
     assert REQUIRED_CASE_IDS.issubset(case_ids)
+    assert len(case_ids) == 29
 
 
 def test_contract_pins_diagnostics_and_metadata_lineage() -> None:
@@ -72,6 +83,9 @@ def test_contract_pins_diagnostics_and_metadata_lineage() -> None:
     assert {"decision", "field", "op", "target"}.issubset(
         set(diagnostic["requiredFields"])
     )
+    assert "diagnostics" in contract["requiredExpectedFieldsByType"]
+    assert "forbiddenMessageMarkers" in contract["optionalExpectedFieldsByType"]["error"]
+    assert "returnTotal" in contract["optionalExpectedFieldsByType"]["sql"]
 
     assert {
         "aggregation",

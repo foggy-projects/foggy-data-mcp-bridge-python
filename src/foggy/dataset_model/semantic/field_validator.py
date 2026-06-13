@@ -750,6 +750,9 @@ def _collect_model_schema_fields(model: Any) -> Set[str]:
             fields.add(calc_name)
 
     for relation in getattr(model, "aggregate_relations", None) or []:
+        for group_field in getattr(relation, "group_by", None) or []:
+            if group_field:
+                fields.add(group_field)
         for measure in getattr(relation, "measures", None) or []:
             alias = getattr(measure, "alias", None)
             if alias:

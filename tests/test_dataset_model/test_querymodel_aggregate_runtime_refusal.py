@@ -10,7 +10,10 @@ from foggy.dataset_model.impl.model import (
     AggregateRelationMeasureDef,
 )
 from foggy.dataset_model.semantic.service import SemanticQueryService
-from foggy.demo.models.ecommerce_models import create_fact_order_model
+from foggy.demo.models.ecommerce_models import (
+    create_fact_order_model,
+    create_fact_sales_model,
+)
 from foggy.mcp_spi import SemanticQueryRequest
 
 
@@ -57,6 +60,13 @@ def _service_with(model):
     return service
 
 
+def _service_with_registered_aggregate_relation():
+    service = SemanticQueryService()
+    service.register_model(_order_model_with_aggregate_relation())
+    service.register_model(create_fact_sales_model())
+    return service
+
+
 def test_query_model_refuses_aggregate_relations_when_rhs_model_is_missing():
     model = _order_model_with_aggregate_relation()
     service = _service_with(model)
@@ -77,6 +87,100 @@ def test_query_model_refuses_aggregate_relations_when_rhs_model_is_missing():
         "carrierCount": 1,
         "model": "FactOrderModel",
     }
+
+
+@pytest.mark.parametrize(
+    ("request_kwargs", "expected_marker"),
+    [
+        ({"group_by": ["orderId"]}, "groupBy"),
+        ({"having": [{"field": "salesAmount", "op": ">", "value": 0}]}, "having"),
+        (
+            {
+                "post_aggregate_calculations": [
+                    {"name": "salesRatio", "expression": "salesAmount / totalAmount"}
+                ]
+            },
+            "post stages",
+        ),
+        (
+            {
+                "post_aggregate_calculations": [
+                    {"name": "salesRatio", "expression": "salesAmount / totalAmount"}
+                ],
+                "post_slice": [{"field": "salesRatio", "op": ">", "value": 0}],
+            },
+            "post stages",
+        ),
+        (
+            {
+                "time_window": {
+                    "field": "orderDate",
+                    "grain": "month",
+                    "comparison": "yoy",
+                    "targetMetrics": ["salesAmount"],
+                }
+            },
+            "timeWindow",
+        ),
+    ],
+    ids=[
+        "group-by",
+        "having",
+        "post-aggregate-calculation",
+        "post-slice",
+        "time-window",
+    ],
+)
+def test_query_model_refuses_aggregate_relation_broader_request_stages(
+    request_kwargs,
+    expected_marker,
+):
+    service = _service_with_registered_aggregate_relation()
+
+    response = service.query_model(
+        "FactOrderModel",
+        SemanticQueryRequest(
+            columns=["orderId", "salesAmount"],
+            limit=10,
+            **request_kwargs,
+        ),
+        mode="validate",
+    )
+
+    assert response.sql is None
+    assert response.error is not None
+    assert AGGREGATE_JOIN_UNSUPPORTED_CODE in response.error
+    assert expected_marker in response.error
+    assert "fact_order" not in response.error
+    assert "fact_sales" not in response.error
+    assert response.error_detail == {
+        "code": AGGREGATE_JOIN_UNSUPPORTED_CODE,
+        "carrierCount": 1,
+        "model": "FactOrderModel",
+    }
+
+
+def test_internal_build_query_refuses_aggregate_relation_pivot_before_sql_generation():
+    model = _order_model_with_aggregate_relation()
+    service = _service_with_registered_aggregate_relation()
+
+    with pytest.raises(ValueError) as exc_info:
+        service._build_query(
+            model,
+            SemanticQueryRequest(
+                pivot={
+                    "outputFormat": "flat",
+                    "rows": ["orderId"],
+                    "metrics": ["salesAmount"],
+                },
+            ),
+        )
+
+    error = str(exc_info.value)
+    assert AGGREGATE_JOIN_UNSUPPORTED_CODE in error
+    assert "pivot" in error
+    assert "fact_order" not in error
+    assert "fact_sales" not in error
 
 
 def test_build_query_with_governance_refuses_missing_rhs_model():

@@ -107,6 +107,13 @@ Current P0 execution records:
 - [P0-86-querymodel-aggregate-java-fixture-gap-inventory.md](workitems/P0-86-querymodel-aggregate-java-fixture-gap-inventory.md)
 - [P0-87-querymodel-aggregate-governance-snapshot-expansion.md](workitems/P0-87-querymodel-aggregate-governance-snapshot-expansion.md)
 - [P0-88-querymodel-aggregate-api-metadata-contract.md](workitems/P0-88-querymodel-aggregate-api-metadata-contract.md)
+- [P0-89-querymodel-aggregate-sql-behavior-expansion.md](workitems/P0-89-querymodel-aggregate-sql-behavior-expansion.md)
+- [P0-90-querymodel-aggregate-request-stage-refusal.md](workitems/P0-90-querymodel-aggregate-request-stage-refusal.md)
+- [P0-91-querymodel-aggregate-java-fixture-export-backlog.md](workitems/P0-91-querymodel-aggregate-java-fixture-export-backlog.md)
+- [P0-92-querymodel-aggregate-v3-java-fixture-export.md](workitems/P0-92-querymodel-aggregate-v3-java-fixture-export.md)
+- [P0-93-querymodel-aggregate-v3-python-replay.md](workitems/P0-93-querymodel-aggregate-v3-python-replay.md)
+- [P0-94-querymodel-aggregate-low-risk-runtime-slices.md](workitems/P0-94-querymodel-aggregate-low-risk-runtime-slices.md)
+- [P0-95-querymodel-aggregate-orderby-returntotal-gate.md](workitems/P0-95-querymodel-aggregate-orderby-returntotal-gate.md)
 
 Current P1/P2 planning records:
 
@@ -175,7 +182,12 @@ Current active snapshot lanes:
   SQLite SQL lowering, SQLite live-result parity, RHS denied-source governance,
   aggregate output lineage, pushdown diagnostics, runtime extData filter
   fail-closed behavior, Java fixture gap inventory, active v2 governance
-  snapshot replay, and public API metadata contract
+  snapshot replay, public API metadata contract, group-key alias request-slice
+  pushdown coverage, derived relation parameter/explain coverage, RHS
+  projection pruning, mixed OR / AND in-range predicate boundary coverage, and
+  active v3 29-case fixture replay covering bounded `orderBy`, `returnTotal`,
+  unsafe runtime-filter refusal, null-check outer-only predicates, and public
+  `debug.extra` diagnostics for the narrow SQLite aggregate relation path
 
 Latest P0-79+ / P1-2 status:
 
@@ -422,15 +434,30 @@ Latest P0-79+ / P1-2 status:
   no-leak behavior in the narrow SQLite aggregate relation path; follow-up
   assertions now prove unreferenced RHS denied-source pass-through and dynamic
   calculated-field direct/chain denied-source fail-closed behavior. Predefined
-  calculated behavior, raw accessBuilder, and broad runtime positives remain
-  follow-up.
-- P0-88 freezes the public API metadata contract for aggregate relation
-  lineage: Python public DTOs should expose exactly the Java seven-key
-  `aggregateRelation` object while keeping engine-only metadata internal.
-- P0-79+ records the aggregate-join sequence as completed through P0-88, with
+  calculated dependency denial and positive predefined calculated execution are
+  now covered; raw accessBuilder predicates now stay root/outer-only in the
+  SQLite runtime path; broad runtime positives remain follow-up.
+- P0-88 implements the public API metadata contract for aggregate relation
+  lineage: Python V3 metadata now exposes aggregate output fields as measures
+  with exactly the Java seven-key `aggregateRelation` object while keeping
+  engine-only metadata internal; RHS denied source columns hide the
+  corresponding aggregate output metadata.
+- P0-79+ records the aggregate-join sequence as completed through P0-95, with
   P0-87 v2 snapshot/replay active, the first P0-87 runtime fieldAccess,
-  system_slice, denied-source, and dynamic calculated-denial slices complete,
-  and P0-88 contract ready.
+  system_slice, denied-source, dynamic calculated-denial, and predefined
+  calculated-denial/predefined-execution plus raw accessBuilder outer-only
+  slices complete, P0-88 public V3 metadata exposure implemented, and P0-89
+  SQL behavior coverage complete for group-key alias request slices, derived
+  relation parameter/explain behavior, RHS projection pruning/default
+  aggregation, and mixed OR / AND in-range predicate boundaries. P0-90 records
+  the original fail-closed matrix for broader aggregate relation request
+  stages. P0-91 records the Java fixture export backlog, P0-92/P0-93 promote a
+  v3 29-case Java fixture/replay, P0-94 implements unsafe runtime-filter
+  refusal, null-check outer-only behavior, and public diagnostics, and P0-95
+  opens bounded `orderBy` and `returnTotal` support for the narrow SQLite
+  aggregate relation path. `groupBy`, `having`, post stages, `timeWindow`,
+  pivot combinations, external dialects, multi-relation planning, and Odoo
+  business-model expansion remain outside the current runtime boundary.
 - P1-1 records the remaining semantic-scale choice: namespace opt-out parity or
   live DB/result parity.
 - P2-1 records the initial Python aggregate-join design boundary before any
@@ -507,25 +534,62 @@ Latest P0-79+ / P1-2 status:
   fixture replay green:
   `.venv/bin/python -m pytest tests/integration/test_java_snapshot_parity_manifest.py tests/integration/test_java_querymodel_aggregate_join_snapshot_contract.py tests/integration/test_java_querymodel_aggregate_join_snapshot_parity.py -q`
   with `10 passed in 0.05s`; `git diff --check` passed.
+- Python P0-89 group-key alias request-slice, derived relation
+  parameter/explain, RHS projection pruning, and mixed predicate boundary
+  coverage passed:
+  `.venv/bin/pytest tests/test_dataset_model/test_querymodel_aggregate_sqlite_alignment.py -q`
+  with `28 passed in 0.51s`.
+- Python P0-89 aggregate runtime/replay combined coverage passed:
+  `.venv/bin/python -m pytest tests/test_dataset_model/test_querymodel_aggregate_sqlite_alignment.py tests/test_dataset_model/test_querymodel_aggregate_runtime_refusal.py tests/integration/test_java_snapshot_parity_manifest.py tests/integration/test_java_querymodel_aggregate_join_snapshot_contract.py tests/integration/test_java_querymodel_aggregate_join_snapshot_parity.py -q`
+  with `43 passed in 0.58s`.
+- Python P0-90 request-stage refusal coverage passed:
+  `.venv/bin/pytest tests/test_dataset_model/test_querymodel_aggregate_runtime_refusal.py -q`
+  with `13 passed in 0.58s`.
+- Python P0-90 aggregate runtime/replay combined coverage passed:
+  `.venv/bin/python -m pytest tests/test_dataset_model/test_querymodel_aggregate_sqlite_alignment.py tests/test_dataset_model/test_querymodel_aggregate_runtime_refusal.py tests/integration/test_java_snapshot_parity_manifest.py tests/integration/test_java_querymodel_aggregate_join_snapshot_contract.py tests/integration/test_java_querymodel_aggregate_join_snapshot_parity.py -q`
+  with `51 passed in 0.64s`.
+- Full Python pytest after P0-90 completion passed:
+  `.venv/bin/python -m pytest -q` with
+  `4163 passed, 232 skipped, 53 warnings in 20.29s`; focused ruff
+  `--select F` and `git diff --check` passed for P0-90.
+- Python P0-91 was documentation-only; `git diff --check` passed after the
+  fixture export backlog and cross-reference updates.
+- Java P0-92 aggregate v3 exporter passed:
+  `mvn -pl foggy-dataset-model -P!multi-db -Dtest=JavaQueryModelAggregateJoinSnapshotTest -Dfoggy.parity.snapshot=true test`,
+  producing `querymodel-aggregate-join-3` with `29` cases.
+- Python P0-93 v3 aggregate fixture replay passed:
+  `.venv/bin/python -m pytest tests/integration/test_java_snapshot_parity_manifest.py tests/integration/test_java_querymodel_aggregate_join_snapshot_contract.py tests/integration/test_java_querymodel_aggregate_join_snapshot_parity.py -q`
+  with `10 passed in 0.08s`.
+- Python P0-94 aggregate runtime slice coverage passed:
+  `.venv/bin/python -m pytest tests/test_dataset_model/test_querymodel_aggregate_sqlite_alignment.py -q`
+  with `32 passed in 0.55s`.
+- Python P0-95 aggregate runtime/refusal coverage passed:
+  `.venv/bin/python -m pytest tests/test_dataset_model/test_querymodel_aggregate_sqlite_alignment.py tests/test_dataset_model/test_querymodel_aggregate_runtime_refusal.py -q`
+  with `45 passed in 0.78s`; aggregate Java fixture replay also passed with
+  `10 passed in 0.05s`.
+- Python P0-95 final aggregate runtime/refusal plus Java v3 replay passed:
+  `.venv/bin/python -m pytest tests/test_dataset_model/test_querymodel_aggregate_sqlite_alignment.py tests/test_dataset_model/test_querymodel_aggregate_runtime_refusal.py tests/integration/test_java_snapshot_parity_manifest.py tests/integration/test_java_querymodel_aggregate_join_snapshot_contract.py tests/integration/test_java_querymodel_aggregate_join_snapshot_parity.py -q`
+  with `55 passed in 0.62s`; focused `ruff --select F` and `git diff --check`
+  passed.
 - Java P0-87 aggregate governance exporter passed:
   `JAVA_HOME=/Users/fengjianguang/.jdk/temurin-17/Contents/Home mvn -pl foggy-dataset-model -am -P'!multi-db' -Dspring.profiles.active=sqlite -Dtest=JavaQueryModelAggregateJoinSnapshotTest -Dfoggy.parity.snapshot=true -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTests=false test`,
   producing `querymodel-aggregate-join-2` with 19 cases.
 - Python P0-87 v2 aggregate fixture replay passed:
   `.venv/bin/python -m pytest tests/integration/test_java_snapshot_parity_manifest.py tests/integration/test_java_querymodel_aggregate_join_snapshot_contract.py tests/integration/test_java_querymodel_aggregate_join_snapshot_parity.py -q`
   with `10 passed in 0.08s`.
-- Python P0-87 runtime fieldAccess/system_slice/calculated-denial focused
+- Python P0-87 runtime fieldAccess/system_slice/calculated/predefined/raw-access
   coverage passed:
   `.venv/bin/python -m pytest tests/test_dataset_model/test_querymodel_aggregate_sqlite_alignment.py -q`
-  with `16 passed in 0.71s`.
+  with `20 passed in 0.54s`.
 - Python P0-87 aggregate runtime/replay combined coverage passed:
   `.venv/bin/python -m pytest tests/test_dataset_model/test_querymodel_aggregate_sqlite_alignment.py tests/test_dataset_model/test_querymodel_aggregate_runtime_refusal.py tests/integration/test_java_snapshot_parity_manifest.py tests/integration/test_java_querymodel_aggregate_join_snapshot_contract.py tests/integration/test_java_querymodel_aggregate_join_snapshot_parity.py -q`
-  with `31 passed in 0.53s`.
+  with `35 passed in 0.63s`.
 - Full Python pytest after the current P0-87 runtime slices passed:
   `.venv/bin/python -m pytest -q` with
-  `4143 passed, 232 skipped, 53 warnings in 19.28s`.
+  `4147 passed, 232 skipped, 53 warnings in 18.88s`.
 - Python P0-82 through P0-85 neighboring semantic regression passed:
   `.venv/bin/python -m pytest tests/test_dataset_model/test_semantic_query.py tests/test_dataset_model/test_strict_column_resolution.py tests/test_dataset_model/test_window_functions.py -q`
-  with `131 passed`.
+  with `131 passed in 7.62s`.
 - Python P0-82 through P0-85 focused lint and diff checks passed:
   `.venv/bin/ruff check --select F ...` and `git diff --check`.
 - Python P0-82 through P0-85 full pytest baseline passed:

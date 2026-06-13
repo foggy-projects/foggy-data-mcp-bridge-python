@@ -36,6 +36,16 @@ REQUIRED_CASE_IDS = {
     "aggregate-join-predefined-calculated-field-denied-source-refusal",
     "aggregate-join-predefined-calculated-field-allowed-exec",
     "aggregate-join-raw-sql-access-builder-outer-only",
+    "aggregate-join-orderby-aggregate-output",
+    "aggregate-join-return-total",
+    "aggregate-join-null-check-outer-only-is-null",
+    "aggregate-join-null-check-outer-only-is-not-null",
+    "aggregate-join-semantic-debug-extra-diagnostics",
+    "aggregate-join-composite-key-pushdown",
+    "aggregate-join-structured-access-builder-pushdown",
+    "aggregate-join-runtime-filter-unsafe-refusal",
+    "aggregate-join-left-dimension-key",
+    "aggregate-join-rhs-dimension-fixed-filter",
     "aggregate-join-metadata-lineage",
 }
 
@@ -60,7 +70,7 @@ def test_snapshot_schema_and_required_cases() -> None:
     assert snapshot["schemaVersion"] == 1
     assert snapshot["feature"] == "queryModelAggregateJoin"
     assert snapshot["source"] == "JavaQueryModelAggregateJoinSnapshotTest"
-    assert snapshot["contractVersion"] == "querymodel-aggregate-join-2"
+    assert snapshot["contractVersion"] == "querymodel-aggregate-join-3"
     assert snapshot["dialect"] == "sqlite"
 
     case_ids = {case["id"] for case in snapshot["cases"]}
@@ -80,6 +90,8 @@ def test_java_aggregate_join_snapshot_replays_stable_contract() -> None:
             _assert_error_case(case)
         elif case_type == "metadata":
             _assert_metadata_case(case)
+        elif case_type == "diagnostics":
+            _assert_diagnostics_case(case)
         else:
             raise AssertionError(f"Unsupported aggregate join case type: {case_type!r}")
 
@@ -88,7 +100,7 @@ def test_snapshot_keeps_python_runtime_gap_explicit() -> None:
     snapshot = _load_snapshot()
     case_types = {case["type"] for case in snapshot["cases"]}
 
-    assert {"result", "sql", "error", "metadata"}.issubset(case_types)
+    assert {"result", "sql", "error", "metadata", "diagnostics"}.issubset(case_types)
     assert _case_by_id(snapshot, "aggregate-join-sql-shape-sqlite")["model"] == (
         "OrderSalesAggregateJoinQueryModel"
     )
@@ -137,6 +149,22 @@ def _assert_sql_case(case: dict[str, Any]) -> None:
             f"{case['id']} contains forbidden SQL marker: {marker}"
         )
 
+    if expected.get("orderBy"):
+        assert " order by " in normalized_lower
+        for item in expected["orderBy"]:
+            assert item["field"] in expected["sql"]
+            assert item["dir"].lower() in normalized_lower
+
+    if expected.get("returnTotal"):
+        total_sql = expected["normalizedTotalSql"].lower()
+        assert expected["total"] == expected["totalData"]["total"]
+        assert "count(*)" in total_sql
+        assert " from (" in total_sql
+        for marker in expected.get("totalSqlMarkers", []):
+            assert marker.lower() in total_sql, (
+                f"{case['id']} missing total SQL marker: {marker}"
+            )
+
     _assert_row_contract(case)
     _assert_diagnostics(expected.get("diagnostics", []))
 
@@ -147,8 +175,20 @@ def _assert_error_case(case: dict[str, Any]) -> None:
 
     assert error_code.startswith("QUERYMODEL_AGGREGATE_JOIN_")
     marker_text = json.dumps(expected, ensure_ascii=False)
+    message_text = json.dumps(
+        {
+            key: value
+            for key, value in expected.items()
+            if key.endswith("Message") or key == "message"
+        },
+        ensure_ascii=False,
+    )
     for marker in expected.get("messageMarkers", []):
         assert marker in marker_text, f"{case['id']} missing error marker: {marker}"
+    for marker in expected.get("forbiddenMessageMarkers", []):
+        assert marker not in message_text, (
+            f"{case['id']} leaked forbidden error marker: {marker}"
+        )
 
 
 def _assert_row_contract(case: dict[str, Any]) -> None:
@@ -192,12 +232,35 @@ def _assert_metadata_case(case: dict[str, Any]) -> None:
         assert relation["aggregateExpression"] == field["aggregateExpression"]
 
 
+def _assert_diagnostics_case(case: dict[str, Any]) -> None:
+    expected = case["expected"]
+    diagnostics = expected["diagnostics"]
+
+    _assert_diagnostics(diagnostics)
+    decisions = {diagnostic["decision"] for diagnostic in diagnostics}
+    targets = {diagnostic["target"] for diagnostic in diagnostics}
+    fields = {diagnostic["field"] for diagnostic in diagnostics}
+
+    assert set(expected["requiredDecisions"]).issubset(decisions)
+    assert set(expected["requiredTargets"]).issubset(targets)
+    assert set(expected["requiredFields"]).issubset(fields)
+    assert {
+        "sql",
+        "aggSql",
+        "params",
+        "aggregateRelationDiagnostics",
+    }.issubset(set(expected["debugExtraKeys"]))
+
+
 def _assert_diagnostics(diagnostics: list[dict[str, Any]]) -> None:
     for diagnostic in diagnostics:
         assert diagnostic["decision"] in {"pushed", "retained", "refused"}
         assert diagnostic["field"]
         assert diagnostic["op"]
-        assert diagnostic["target"] in {"where", "having", "outer"}
+        if diagnostic["decision"] == "refused":
+            assert diagnostic["target"] in {None, "where", "having", "outer"}
+        else:
+            assert diagnostic["target"] in {"where", "having", "outer"}
         if diagnostic["decision"] == "pushed":
             assert diagnostic["expression"]
         if diagnostic["decision"] == "retained":
