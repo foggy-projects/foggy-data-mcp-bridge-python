@@ -594,6 +594,35 @@ def _rhs_dimension_id_filter_model() -> DbTableModelImpl:
     )
 
 
+def _rhs_dimension_id_runtime_filter_model() -> DbTableModelImpl:
+    return _left_model(
+        name="OrderSalesAggregateRelationRhsDimensionIdRuntimeFilterQueryModel",
+        alias="fsByRuntimeProductId",
+        filters=[
+            AggregateRelationFilterDef(
+                model="FactSalesModel",
+                field="orderStatus",
+                op="=",
+                value="COMPLETED",
+            ),
+            AggregateRelationFilterDef(
+                model="FactSalesModel",
+                field="product$id",
+                op="=",
+                value={"extData": "productKey"},
+            ),
+        ],
+        measures=[
+            AggregateRelationMeasureDef(
+                model="FactSalesModel",
+                field="salesAmount",
+                aggregation="SUM",
+                alias="salesAmount",
+            )
+        ],
+    )
+
+
 def _rhs_nested_dimension_filter_model() -> DbTableModelImpl:
     return _left_model(
         name="OrderSalesAggregateRelationNestedRhsDimensionFilterQueryModel",
@@ -2045,6 +2074,102 @@ def test_p0_104_rhs_dimension_id_fixed_filter_joins_dimension_inside_rhs(
     assert "left join dim_product dp on agg_src.product_key = dp.product_key" in debug_sql
     assert "dp.product_key = ?" in debug_sql
     assert "product$id" not in debug_sql
+
+
+def test_p0_105_rhs_dimension_id_runtime_filter_resolves_inside_rhs(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "aggregate_relation_rhs_dimension_id_runtime_filter.sqlite"
+    _seed_aggregate_db(db_path)
+    executor = SQLiteExecutor(str(db_path))
+    service = _service(
+        _rhs_dimension_filter_right_model(),
+        _rhs_dimension_id_runtime_filter_model(),
+        executor=executor,
+    )
+    request = SemanticQueryRequest(
+        columns=["orderId", "amount", "salesAmount"],
+        slice=[{"field": "orderId", "op": "=", "value": ORDER_1}],
+    )
+    context = SemanticRequestContext(attributes={"extData": {"productKey": 101}})
+
+    validated = service.query_model(
+        "OrderSalesAggregateRelationRhsDimensionIdRuntimeFilterQueryModel",
+        request,
+        mode="validate",
+        context=context,
+    )
+    assert validated.error is None
+    assert validated.sql is not None
+    normalized = _normal(validated.sql)
+    assert validated.params == ["COMPLETED", 101, ORDER_1, ORDER_1]
+    assert "left join dim_product dp on agg_src.product_key = dp.product_key" in normalized
+    assert "dp.product_key = ?" in normalized
+    assert "ctx.extData" not in normalized
+    assert "product$id" not in normalized
+    assert validated.debug is not None
+    assert validated.debug.extra["aggregateRelationDiagnostics"] == [
+        {
+            "decision": "pushed",
+            "field": "orderId",
+            "op": "=",
+            "target": "where",
+            "reasonCode": None,
+            "expression": "agg_src.order_id = ?",
+        }
+    ]
+
+    try:
+        response = service.query_model(
+            "OrderSalesAggregateRelationRhsDimensionIdRuntimeFilterQueryModel",
+            request,
+            mode="execute",
+            context=context,
+        )
+    finally:
+        service._run_async_in_sync(executor.close())
+
+    assert response.error is None
+    assert response.params == ["COMPLETED", 101, ORDER_1, ORDER_1]
+    assert response.items == [
+        {"orderId": ORDER_1, "amount": 10998, "salesAmount": 5000}
+    ]
+    debug_sql = _normal(response.debug.extra["sql"])
+    assert "left join dim_product dp on agg_src.product_key = dp.product_key" in debug_sql
+    assert "dp.product_key = ?" in debug_sql
+    assert "ctx.extData" not in debug_sql
+    assert "product$id" not in debug_sql
+
+
+def test_p0_105_rhs_dimension_id_runtime_filter_fails_closed() -> None:
+    service = _service(
+        _rhs_dimension_filter_right_model(),
+        _rhs_dimension_id_runtime_filter_model(),
+    )
+
+    missing = service.query_model(
+        "OrderSalesAggregateRelationRhsDimensionIdRuntimeFilterQueryModel",
+        SemanticQueryRequest(columns=["orderId", "amount", "salesAmount"]),
+        mode="validate",
+    )
+    assert missing.sql is None
+    assert missing.error is not None
+    assert AGGREGATE_JOIN_RUNTIME_FILTER_MISSING_CODE in missing.error
+    assert "productKey" in missing.error
+
+    unsafe = service.query_model(
+        "OrderSalesAggregateRelationRhsDimensionIdRuntimeFilterQueryModel",
+        SemanticQueryRequest(columns=["orderId", "amount", "salesAmount"]),
+        mode="validate",
+        context=SemanticRequestContext(
+            attributes={"extData": {"productKey": "101 OR 1=1"}},
+        ),
+    )
+    assert unsafe.sql is None
+    assert unsafe.error is not None
+    assert AGGREGATE_JOIN_RUNTIME_FILTER_UNSAFE_CODE in unsafe.error
+    assert "fact_sales" not in unsafe.error
+    assert "dim_product" not in unsafe.error
 
 
 def test_p0_85_and_filters_push_to_rhs_with_diagnostics() -> None:
