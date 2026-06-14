@@ -665,6 +665,27 @@ def _rhs_nested_dimension_id_filter_model() -> DbTableModelImpl:
     )
 
 
+def _rhs_nested_dimension_id_runtime_filter_model() -> DbTableModelImpl:
+    return _left_model(
+        name="OrderSalesAggregateRelationNestedRhsDimensionIdRuntimeFilterQueryModel",
+        alias="fsByNestedRuntimeCategoryId",
+        filters=[
+            AggregateRelationFilterDef(
+                model="FactSalesModel",
+                field="orderStatus",
+                op="=",
+                value="COMPLETED",
+            ),
+            AggregateRelationFilterDef(
+                model="FactSalesModel",
+                field="category$id",
+                op="=",
+                value={"extData": "categoryKey"},
+            ),
+        ],
+    )
+
+
 def _left_dimension_key_model() -> DbTableModelImpl:
     name = "OrderStoreAggregateRelationDimensionKeyQueryModel"
     return DbTableModelImpl(
@@ -2339,6 +2360,28 @@ def test_p0_108_left_nested_dimension_id_request_slice_fails_closed() -> None:
     )
     assert "region$id" not in response.error
     assert "dim_region" not in response.error
+
+
+def test_p0_109_rhs_nested_dimension_id_runtime_filter_fails_closed() -> None:
+    service = _service(
+        _rhs_nested_dimension_filter_right_model(),
+        _rhs_nested_dimension_id_runtime_filter_model(),
+    )
+
+    response = service.query_model(
+        "OrderSalesAggregateRelationNestedRhsDimensionIdRuntimeFilterQueryModel",
+        SemanticQueryRequest(columns=["orderId", "amount", "salesAmount"]),
+        mode="validate",
+        context=SemanticRequestContext(attributes={"extData": {"categoryKey": 10}}),
+    )
+
+    _assert_aggregate_relation_unsupported_response(
+        response,
+        "nested RHS dimension filters are not supported",
+    )
+    assert "category$id" not in response.error
+    assert "categoryKey" not in response.error
+    assert "dim_category" not in response.error
 
 
 def test_p0_85_and_filters_push_to_rhs_with_diagnostics() -> None:
