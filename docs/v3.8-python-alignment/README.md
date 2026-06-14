@@ -124,6 +124,7 @@ Current P0 execution records:
 - [P0-103-querymodel-aggregate-dimension-id-slice-boundary.md](workitems/P0-103-querymodel-aggregate-dimension-id-slice-boundary.md)
 - [P0-104-querymodel-aggregate-rhs-dimension-id-filter.md](workitems/P0-104-querymodel-aggregate-rhs-dimension-id-filter.md)
 - [P0-105-querymodel-aggregate-rhs-dimension-id-runtime-filter.md](workitems/P0-105-querymodel-aggregate-rhs-dimension-id-runtime-filter.md)
+- [P0-106-querymodel-aggregate-multi-relation-fail-closed.md](workitems/P0-106-querymodel-aggregate-multi-relation-fail-closed.md)
 
 Current P1/P2 planning records:
 
@@ -459,7 +460,7 @@ Latest P0-79+ / P1-2 status:
   with exactly the Java seven-key `aggregateRelation` object while keeping
   engine-only metadata internal; RHS denied source columns hide the
   corresponding aggregate output metadata.
-- P0-79+ records the aggregate-join sequence as completed through P0-105, with
+- P0-79+ records the aggregate-join sequence as completed through P0-106, with
   P0-87 v2 snapshot/replay active, the first P0-87 runtime fieldAccess,
   system_slice, denied-source, dynamic calculated-denial, and predefined
   calculated-denial/predefined-execution plus raw accessBuilder outer-only
@@ -485,10 +486,11 @@ Latest P0-79+ / P1-2 status:
   not leak unreachable RHS aliases. P0-104 proves RHS dimension `$id` fixed
   filters lower inside the RHS aggregate subquery. P0-105 extends that evidence
   to context-backed runtime filters with missing/unsafe fail-closed coverage.
+  P0-106 locks multi-relation carriers as fail-closed before SQL generation.
   `groupBy`, `having`, post stages, `timeWindow`, pivot combinations, external
-  dialects, multi-relation planning, positive nested dimension lowering, full
-  O615 explicit join graph behavior, and Odoo business-model expansion remain
-  outside the current runtime boundary.
+  dialects, positive multi-relation planning, positive nested dimension
+  lowering, full O615 explicit join graph behavior, and Odoo business-model
+  expansion remain outside the current runtime boundary.
 - P1-1 records the remaining semantic-scale choice: namespace opt-out parity or
   live DB/result parity.
 - P2-1 records the initial Python aggregate-join design boundary before any
@@ -633,6 +635,9 @@ Latest P0-79+ / P1-2 status:
 - Python P0-105 RHS dimension `$id` runtime-filter coverage passed:
   `.venv/bin/python -m pytest tests/test_dataset_model/test_querymodel_aggregate_sqlite_alignment.py -k p0_105 -q`
   with `2 passed, 47 deselected in 0.62s`.
+- Python P0-106 multi-relation fail-closed coverage passed:
+  `.venv/bin/python -m pytest tests/test_dataset_model/test_querymodel_aggregate_sqlite_alignment.py -k p0_106 -q`
+  with `1 passed, 49 deselected in 0.64s`.
 - Java P0-87 aggregate governance exporter passed:
   `JAVA_HOME=/Users/fengjianguang/.jdk/temurin-17/Contents/Home mvn -pl foggy-dataset-model -am -P'!multi-db' -Dspring.profiles.active=sqlite -Dtest=JavaQueryModelAggregateJoinSnapshotTest -Dfoggy.parity.snapshot=true -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTests=false test`,
   producing `querymodel-aggregate-join-2` with 19 cases.

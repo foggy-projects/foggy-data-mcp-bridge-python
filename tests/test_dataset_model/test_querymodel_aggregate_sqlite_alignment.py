@@ -703,6 +703,44 @@ def _left_dimension_key_model() -> DbTableModelImpl:
     )
 
 
+def _multi_relation_model() -> DbTableModelImpl:
+    name = "OrderSalesAggregateRelationMultiRelationQueryModel"
+    model = _left_model(name=name, alias="fsByOrder")
+    model.aggregate_relations.append(
+        AggregateRelationDef(
+            left_model=name,
+            right_model="FactSalesModel",
+            alias="fsCostByOrder",
+            group_by=["orderId"],
+            filters=[
+                AggregateRelationFilterDef(
+                    model="FactSalesModel",
+                    field="orderStatus",
+                    op="=",
+                    value="COMPLETED",
+                )
+            ],
+            measures=[
+                AggregateRelationMeasureDef(
+                    model="FactSalesModel",
+                    field="costAmount",
+                    aggregation="SUM",
+                    alias="costAmount",
+                )
+            ],
+            conditions=[
+                AggregateRelationConditionDef(
+                    left_model=name,
+                    left_field="orderId",
+                    right_model="FactSalesModel",
+                    right_field="orderId",
+                )
+            ],
+        )
+    )
+    return model
+
+
 def _left_dimension_slice_non_key_model() -> DbTableModelImpl:
     name = "OrderSalesAggregateRelationDimensionSliceNonKeyQueryModel"
     return DbTableModelImpl(
@@ -2170,6 +2208,40 @@ def test_p0_105_rhs_dimension_id_runtime_filter_fails_closed() -> None:
     assert AGGREGATE_JOIN_RUNTIME_FILTER_UNSAFE_CODE in unsafe.error
     assert "fact_sales" not in unsafe.error
     assert "dim_product" not in unsafe.error
+
+
+def test_p0_106_multi_relation_model_fails_closed_before_sql() -> None:
+    service = _service(_right_model(), _multi_relation_model())
+
+    response = service.query_model(
+        "OrderSalesAggregateRelationMultiRelationQueryModel",
+        SemanticQueryRequest(columns=["orderId", "amount", "salesAmount", "costAmount"]),
+        mode="validate",
+    )
+
+    assert response.sql is None
+    assert response.error is not None
+    assert AGGREGATE_JOIN_UNSUPPORTED_CODE in response.error
+    assert "exactly one aggregate relation is supported" in response.error
+    assert "carrier_count=2" in response.error
+    assert "fact_order" not in response.error
+    assert "fact_sales" not in response.error
+    assert response.error_detail == {
+        "code": AGGREGATE_JOIN_UNSUPPORTED_CODE,
+        "carrierCount": 2,
+        "model": "OrderSalesAggregateRelationMultiRelationQueryModel",
+    }
+
+    with pytest.raises(ValueError) as exc_info:
+        service.build_query_with_governance(
+            "OrderSalesAggregateRelationMultiRelationQueryModel",
+            SemanticQueryRequest(columns=["orderId", "amount", "salesAmount"]),
+        )
+    error = str(exc_info.value)
+    assert AGGREGATE_JOIN_UNSUPPORTED_CODE in error
+    assert "carrier_count=2" in error
+    assert "fact_order" not in error
+    assert "fact_sales" not in error
 
 
 def test_p0_85_and_filters_push_to_rhs_with_diagnostics() -> None:
