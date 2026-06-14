@@ -1867,16 +1867,20 @@ class SemanticQueryService(SemanticServiceResolver):
             )
 
         rhs_where_parts: List[str] = []
+        rhs_join_parts: List[str] = []
+        rhs_join_names: Dict[str, bool] = {}
         params: List[Any] = []
         for filter_def in relation.filters:
             if filter_def.model and filter_def.model != relation.right_model:
                 self._raise_aggregate_relation_unsupported(
                     "RHS filters must belong to the aggregate relation right model"
                 )
-            field_sql = self._resolve_aggregate_right_field_sql(
+            field_sql = self._resolve_aggregate_right_filter_field_sql(
                 right_model,
                 filter_def.field,
                 source_alias,
+                rhs_join_parts,
+                rhs_join_names,
             )
             condition_sql, condition_params = self._render_aggregate_filter_sql(
                 field_sql,
@@ -1888,15 +1892,19 @@ class SemanticQueryService(SemanticServiceResolver):
             params.extend(condition_params)
 
         on_parts: List[str] = []
+        root_join_parts: List[str] = []
+        root_join_names: Dict[str, bool] = {}
         for condition in relation.conditions:
             if condition.op not in (None, "=", "eq"):
                 self._raise_aggregate_relation_unsupported(
                     "only equality aggregate relation join conditions are supported"
                 )
-            left_sql = self._resolve_aggregate_root_field_sql(
+            left_sql = self._resolve_aggregate_root_join_field_sql(
                 model,
                 condition.left_field,
                 root_alias,
+                root_join_parts,
+                root_join_names,
             )
             on_parts.append(f"{left_sql} = {relation_alias}.{condition.right_field}")
 
@@ -1917,21 +1925,40 @@ class SemanticQueryService(SemanticServiceResolver):
             source_alias,
             relation_alias,
             output_measures,
+            root_join_parts,
+            root_join_names,
         )
-        access_filter, access_params = (
-            self._render_aggregate_relation_access_filter(model, root_alias)
+        (
+            access_filter,
+            access_params,
+            access_pushed_where,
+            access_pushed_where_params,
+            access_diagnostics,
+        ) = (
+            self._render_aggregate_relation_access_filters(
+                model,
+                right_model,
+                relation,
+                root_alias,
+                source_alias,
+            )
         )
         if access_filter:
             outer_where.append(access_filter)
             outer_params.extend(access_params)
         rhs_where_parts.extend(pushed_where)
         params.extend(pushed_where_params)
+        rhs_where_parts.extend(access_pushed_where)
+        params.extend(access_pushed_where_params)
+        diagnostics.extend(access_diagnostics)
 
         right_table = self._table_expr_for_model(right_model)
         rhs_sql = (
             f"select {', '.join(rhs_select_parts)} "
             f"from {right_table} {source_alias}"
         )
+        if rhs_join_parts:
+            rhs_sql += f" {' '.join(rhs_join_parts)}"
         if rhs_where_parts:
             rhs_sql += f" where {' and '.join(rhs_where_parts)}"
         rhs_sql += f" group by {', '.join(rhs_group_by_parts)}"
@@ -1940,9 +1967,10 @@ class SemanticQueryService(SemanticServiceResolver):
             params.extend(pushed_having_params)
 
         root_table = self._table_expr_for_model(model)
-        sql = (
-            f"select {', '.join(select_parts)} "
-            f"from {root_table} {root_alias} "
+        sql = f"select {', '.join(select_parts)} from {root_table} {root_alias} "
+        if root_join_parts:
+            sql += f"{' '.join(root_join_parts)} "
+        sql += (
             f"left join ({rhs_sql}) {relation_alias} "
             f"on {' and '.join(on_parts)}"
         )
@@ -2456,6 +2484,84 @@ class SemanticQueryService(SemanticServiceResolver):
         )
         raise AssertionError("unreachable")
 
+    def _resolve_aggregate_right_filter_field_sql(
+        self,
+        model: DbTableModelImpl,
+        field_name: str,
+        source_alias: str,
+        rhs_join_parts: List[str],
+        rhs_join_names: Dict[str, bool],
+    ) -> str:
+        resolved = model.resolve_field_strict(
+            field_name,
+            dialect_name=self._field_formula_dialect_name(),
+        )
+        join_def = resolved.get("join_def") if resolved else None
+        if not join_def:
+            return self._resolve_aggregate_right_field_sql(
+                model,
+                field_name,
+                source_alias,
+            )
+        if join_def.join_to:
+            self._raise_aggregate_relation_unsupported(
+                "nested RHS dimension filters are not supported in aggregate relation query"
+            )
+        if not join_def.table_name:
+            return self._replace_sql_alias(
+                resolved["sql_expr"],
+                resolved.get("table_alias") or model.get_table_alias_for_model(),
+                source_alias,
+            )
+        if join_def.name not in rhs_join_names:
+            rhs_join_names[join_def.name] = True
+            join_alias = join_def.get_alias()
+            rhs_join_parts.append(
+                f"left join {join_def.table_name} {join_alias} "
+                f"on {source_alias}.{join_def.foreign_key} = "
+                f"{join_alias}.{join_def.primary_key}"
+            )
+        return resolved["sql_expr"]
+
+    def _resolve_aggregate_root_join_field_sql(
+        self,
+        model: DbTableModelImpl,
+        field_name: str,
+        root_alias: str,
+        root_join_parts: List[str],
+        root_join_names: Dict[str, bool],
+    ) -> str:
+        resolved = model.resolve_field_strict(
+            field_name,
+            dialect_name=self._field_formula_dialect_name(),
+        )
+        join_def = resolved.get("join_def") if resolved else None
+        if not join_def:
+            return self._resolve_aggregate_root_field_sql(
+                model,
+                field_name,
+                root_alias,
+            )
+        if join_def.join_to:
+            self._raise_aggregate_relation_unsupported(
+                "nested root dimension join keys are not supported in aggregate relation query"
+            )
+        if not join_def.table_name:
+            return self._replace_sql_alias(
+                resolved["sql_expr"],
+                resolved.get("table_alias") or model.get_table_alias_for_model(),
+                root_alias,
+            )
+        if join_def.name not in root_join_names:
+            root_join_names[join_def.name] = True
+            join_alias = join_def.get_alias()
+            root_join_parts.append(
+                f"left join {join_def.table_name} {join_alias} "
+                f"on {root_alias}.{join_def.foreign_key} = "
+                f"{join_alias}.{join_def.primary_key}"
+            )
+        return resolved["sql_expr"]
+
     @staticmethod
     def _replace_sql_alias(sql_expr: str, old_alias: str, new_alias: str) -> str:
         return re.sub(
@@ -2885,22 +2991,25 @@ class SemanticQueryService(SemanticServiceResolver):
             )
         return value
 
-    def _render_aggregate_relation_access_filter(
+    def _render_aggregate_relation_access_filters(
         self,
         model: DbTableModelImpl,
+        right_model: DbTableModelImpl,
+        relation: Any,
         root_alias: str,
-    ) -> Tuple[Optional[str], List[Any]]:
+        source_alias: str,
+    ) -> Tuple[Optional[str], List[Any], List[str], List[Any], List[Dict[str, Any]]]:
         access = getattr(model, "access", None)
         if (
             access is None
             or not getattr(access, "enabled", True)
             or not getattr(access, "row_filter_enabled", False)
         ):
-            return None, []
+            return None, [], [], [], []
 
         expression = access.get_row_filter_sql()
         if not expression:
-            return None, []
+            return None, [], [], [], []
 
         row_filter_type = getattr(access, "row_filter_type", RowFilterType.NONE)
         row_filter_value = getattr(row_filter_type, "value", row_filter_type)
@@ -2912,7 +3021,7 @@ class SemanticQueryService(SemanticServiceResolver):
                 self._raise_aggregate_relation_unsupported(
                     "aggregate relation SQL row filter parameter count mismatch"
                 )
-            return expression, params
+            return expression, params, [], [], []
 
         if row_filter_kind not in {
             RowFilterType.NONE.value,
@@ -2939,7 +3048,116 @@ class SemanticQueryService(SemanticServiceResolver):
             )
             raise AssertionError("unreachable")
 
-        return compiled.sql_fragment, list(compiled.bind_params)
+        pushed_where: List[str] = []
+        pushed_where_params: List[Any] = []
+        diagnostics: List[Dict[str, Any]] = []
+        if row_filter_kind == RowFilterType.EXPRESSION.value:
+            (
+                pushed_sql,
+                pushed_params,
+                pushed_diagnostic,
+            ) = self._aggregate_relation_structured_access_pushdown(
+                model,
+                right_model,
+                relation,
+                root_alias,
+                source_alias,
+                compiled.sql_fragment,
+                list(compiled.bind_params),
+                set(compiled.referenced_fields),
+            )
+            if pushed_sql:
+                pushed_where.append(pushed_sql)
+                pushed_where_params.extend(pushed_params)
+            if pushed_diagnostic:
+                diagnostics.append(pushed_diagnostic)
+
+        return (
+            compiled.sql_fragment,
+            list(compiled.bind_params),
+            pushed_where,
+            pushed_where_params,
+            diagnostics,
+        )
+
+    def _aggregate_relation_structured_access_pushdown(
+        self,
+        model: DbTableModelImpl,
+        right_model: DbTableModelImpl,
+        relation: Any,
+        root_alias: str,
+        source_alias: str,
+        sql_fragment: str,
+        bind_params: List[Any],
+        referenced_fields: set[str],
+    ) -> Tuple[Optional[str], List[Any], Optional[Dict[str, Any]]]:
+        """Push safe structured access-builder key predicates into RHS.
+
+        Security remains enforced by the outer row filter. This helper only
+        mirrors a proven single-key equality predicate into the aggregate
+        source subquery so Java snapshot accessBuilder pushdown can be replayed.
+        """
+        if len(referenced_fields) != 1 or len(bind_params) != 1:
+            return None, [], None
+
+        field_name = next(iter(referenced_fields))
+        left_to_right = {
+            condition.left_field: condition.right_field
+            for condition in relation.conditions or []
+        }
+        right_field = left_to_right.get(field_name)
+        if not right_field:
+            return None, [], None
+
+        left_sql = self._resolve_aggregate_root_field_sql(
+            model,
+            field_name,
+            root_alias,
+        )
+        normalized_sql = self._strip_aggregate_relation_outer_parens(sql_fragment)
+        if normalized_sql not in {f"{left_sql} = ?", f"? = {left_sql}"}:
+            return None, [], None
+
+        right_sql = self._resolve_aggregate_right_field_sql(
+            right_model,
+            right_field,
+            source_alias,
+        )
+        pushed_sql = f"{right_sql} = ?"
+        return (
+            pushed_sql,
+            list(bind_params),
+            {
+                "decision": "pushed",
+                "field": field_name,
+                "op": "=",
+                "target": "where",
+                "reasonCode": None,
+                "expression": pushed_sql,
+            },
+        )
+
+    @staticmethod
+    def _strip_aggregate_relation_outer_parens(sql_fragment: str) -> str:
+        sql = str(sql_fragment or "").strip()
+        while sql.startswith("(") and sql.endswith(")"):
+            depth = 0
+            wraps_entire_fragment = True
+            for index, char in enumerate(sql):
+                if char == "(":
+                    depth += 1
+                elif char == ")":
+                    depth -= 1
+                    if depth == 0 and index != len(sql) - 1:
+                        wraps_entire_fragment = False
+                        break
+                if depth < 0:
+                    wraps_entire_fragment = False
+                    break
+            if not wraps_entire_fragment or depth != 0:
+                break
+            sql = sql[1:-1].strip()
+        return sql
 
     @staticmethod
     def _aggregate_relation_access_filter_params(access: Any) -> List[Any]:
@@ -2964,6 +3182,8 @@ class SemanticQueryService(SemanticServiceResolver):
         source_alias: str,
         relation_alias: str,
         aggregate_output_measures: Dict[str, Any],
+        root_join_parts: Optional[List[str]] = None,
+        root_join_names: Optional[Dict[str, bool]] = None,
     ) -> Tuple[
         List[str],
         List[Any],
@@ -2984,6 +3204,8 @@ class SemanticQueryService(SemanticServiceResolver):
             condition.left_field: condition.right_field
             for condition in relation.conditions or []
         }
+        root_join_parts = root_join_parts if root_join_parts is not None else []
+        root_join_names = root_join_names if root_join_names is not None else {}
 
         def _simple_field(item: Dict[str, Any]) -> Optional[str]:
             return item.get("field") or item.get("column") or item.get("fieldName")
@@ -3116,10 +3338,12 @@ class SemanticQueryService(SemanticServiceResolver):
                 _append_push_diagnostics(field_name, op, "having", pushed_sql)
                 return
 
-            field_sql = self._resolve_aggregate_root_field_sql(
+            field_sql = self._resolve_aggregate_root_join_field_sql(
                 model,
                 field_name,
                 root_alias,
+                root_join_parts,
+                root_join_names,
             )
             condition_sql, condition_params = self._render_aggregate_filter_sql(
                 field_sql,
@@ -3144,6 +3368,15 @@ class SemanticQueryService(SemanticServiceResolver):
                 pushed_where_parts.append(pushed_sql)
                 pushed_where_params.extend(pushed_params)
                 _append_push_diagnostics(field_name, op, "where", pushed_sql)
+            else:
+                diagnostics.append({
+                    "decision": "refused",
+                    "field": field_name,
+                    "op": op,
+                    "target": None,
+                    "reasonCode": "NO_JOIN_KEY_MAPPING",
+                    "expression": None,
+                })
 
         def _render_or(item: Dict[str, Any]) -> None:
             parts = ["1=0"]
@@ -3164,10 +3397,12 @@ class SemanticQueryService(SemanticServiceResolver):
                 elif field_name in (relation.group_by or []) and field_name not in left_to_right:
                     field_sql = f"{relation_alias}.{field_name}"
                 else:
-                    field_sql = self._resolve_aggregate_root_field_sql(
+                    field_sql = self._resolve_aggregate_root_join_field_sql(
                         model,
                         field_name,
                         root_alias,
+                        root_join_parts,
+                        root_join_names,
                     )
                 null_check_sql = _null_check_sql(field_sql, op)
                 if null_check_sql:

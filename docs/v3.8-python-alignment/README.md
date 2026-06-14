@@ -114,6 +114,13 @@ Current P0 execution records:
 - [P0-93-querymodel-aggregate-v3-python-replay.md](workitems/P0-93-querymodel-aggregate-v3-python-replay.md)
 - [P0-94-querymodel-aggregate-low-risk-runtime-slices.md](workitems/P0-94-querymodel-aggregate-low-risk-runtime-slices.md)
 - [P0-95-querymodel-aggregate-orderby-returntotal-gate.md](workitems/P0-95-querymodel-aggregate-orderby-returntotal-gate.md)
+- [P0-96-querymodel-aggregate-structured-access-pushdown.md](workitems/P0-96-querymodel-aggregate-structured-access-pushdown.md)
+- [P0-97-querymodel-aggregate-composite-key-pushdown.md](workitems/P0-97-querymodel-aggregate-composite-key-pushdown.md)
+- [P0-98-querymodel-aggregate-rhs-dimension-filter.md](workitems/P0-98-querymodel-aggregate-rhs-dimension-filter.md)
+- [P0-99-querymodel-aggregate-left-dimension-key.md](workitems/P0-99-querymodel-aggregate-left-dimension-key.md)
+- [P0-100-querymodel-aggregate-left-dimension-slice.md](workitems/P0-100-querymodel-aggregate-left-dimension-slice.md)
+- [P0-101-querymodel-aggregate-nested-dimension-fail-closed.md](workitems/P0-101-querymodel-aggregate-nested-dimension-fail-closed.md)
+- [P0-102-querymodel-aggregate-o615-boundary.md](workitems/P0-102-querymodel-aggregate-o615-boundary.md)
 
 Current P1/P2 planning records:
 
@@ -186,8 +193,15 @@ Current active snapshot lanes:
   pushdown coverage, derived relation parameter/explain coverage, RHS
   projection pruning, mixed OR / AND in-range predicate boundary coverage, and
   active v3 29-case fixture replay covering bounded `orderBy`, `returnTotal`,
-  unsafe runtime-filter refusal, null-check outer-only predicates, and public
-  `debug.extra` diagnostics for the narrow SQLite aggregate relation path
+  unsafe runtime-filter refusal, null-check outer-only predicates, public
+  `debug.extra` diagnostics, structured accessBuilder join-key pushdown, and
+  composite-key pushdown proof, RHS dimension fixed-filter lowering, and left
+  dimension key lowering, and left dimension request-slice pushdown for the
+  narrow SQLite aggregate relation path, plus nested dimension `joinTo`
+  fail-closed coverage for RHS filters, left ON keys, and left request slices,
+  plus a bounded O615-shaped no-column/alias/tenant guard slice covering
+  default projection, aliased join-key pushdown, tenant system-slice RHS
+  pushdown, fieldAccess bypass, and no guard-field leakage
 
 Latest P0-79+ / P1-2 status:
 
@@ -442,7 +456,7 @@ Latest P0-79+ / P1-2 status:
   with exactly the Java seven-key `aggregateRelation` object while keeping
   engine-only metadata internal; RHS denied source columns hide the
   corresponding aggregate output metadata.
-- P0-79+ records the aggregate-join sequence as completed through P0-95, with
+- P0-79+ records the aggregate-join sequence as completed through P0-102, with
   P0-87 v2 snapshot/replay active, the first P0-87 runtime fieldAccess,
   system_slice, denied-source, dynamic calculated-denial, and predefined
   calculated-denial/predefined-execution plus raw accessBuilder outer-only
@@ -453,11 +467,21 @@ Latest P0-79+ / P1-2 status:
   the original fail-closed matrix for broader aggregate relation request
   stages. P0-91 records the Java fixture export backlog, P0-92/P0-93 promote a
   v3 29-case Java fixture/replay, P0-94 implements unsafe runtime-filter
-  refusal, null-check outer-only behavior, and public diagnostics, and P0-95
-  opens bounded `orderBy` and `returnTotal` support for the narrow SQLite
-  aggregate relation path. `groupBy`, `having`, post stages, `timeWindow`,
-  pivot combinations, external dialects, multi-relation planning, and Odoo
-  business-model expansion remain outside the current runtime boundary.
+  refusal, null-check outer-only behavior, and public diagnostics, P0-95 opens
+  bounded `orderBy` and `returnTotal` support, P0-96 opens structured
+  accessBuilder join-key pushdown, and P0-97 proves composite-key pushdown for
+  the narrow SQLite aggregate relation path. P0-98 opens RHS dimension fixed
+  filters inside the RHS aggregate subquery, and P0-99 opens left dimension
+  keys in aggregate relation ON conditions. P0-100 opens request slices on
+  left dimension keys that are also aggregate relation join keys. P0-101 keeps
+  nested dimension `joinTo` paths fail-closed across RHS filters, left ON keys,
+  and left request slices until Java nested-path fixtures and a dedicated
+  lowering design exist. P0-102 opens the bounded O615-shaped no-columns,
+  aliased-key, and scalar tenant guard/no-leak slice. `groupBy`, `having`,
+  post stages, `timeWindow`, pivot combinations, external dialects,
+  multi-relation planning, positive nested dimension lowering, full O615
+  explicit join graph behavior, and Odoo business-model expansion remain
+  outside the current runtime boundary.
 - P1-1 records the remaining semantic-scale choice: namespace opt-out parity or
   live DB/result parity.
 - P2-1 records the initial Python aggregate-join design boundary before any
@@ -571,6 +595,27 @@ Latest P0-79+ / P1-2 status:
   `.venv/bin/python -m pytest tests/test_dataset_model/test_querymodel_aggregate_sqlite_alignment.py tests/test_dataset_model/test_querymodel_aggregate_runtime_refusal.py tests/integration/test_java_snapshot_parity_manifest.py tests/integration/test_java_querymodel_aggregate_join_snapshot_contract.py tests/integration/test_java_querymodel_aggregate_join_snapshot_parity.py -q`
   with `55 passed in 0.62s`; focused `ruff --select F` and `git diff --check`
   passed.
+- Python P0-96 structured accessBuilder pushdown coverage passed:
+  `.venv/bin/python -m pytest tests/test_dataset_model/test_querymodel_aggregate_sqlite_alignment.py -q`
+  with `35 passed in 0.90s`.
+- Python P0-97 composite-key pushdown coverage passed:
+  `.venv/bin/python -m pytest tests/test_dataset_model/test_querymodel_aggregate_sqlite_alignment.py -q`
+  with `36 passed in 1.05s`.
+- Python P0-98 RHS dimension fixed-filter coverage passed:
+  `.venv/bin/python -m pytest tests/test_dataset_model/test_querymodel_aggregate_sqlite_alignment.py -q`
+  with `37 passed in 0.78s`.
+- Python P0-99 left dimension key coverage passed:
+  `.venv/bin/python -m pytest tests/test_dataset_model/test_querymodel_aggregate_sqlite_alignment.py -q`
+  with `38 passed in 0.74s`.
+- Python P0-100 left dimension request-slice coverage passed:
+  `.venv/bin/python -m pytest tests/test_dataset_model/test_querymodel_aggregate_sqlite_alignment.py -q`
+  with `39 passed in 0.81s`.
+- Python P0-101 nested dimension fail-closed coverage passed:
+  `.venv/bin/python -m pytest tests/test_dataset_model/test_querymodel_aggregate_sqlite_alignment.py -k p0_101 -q`
+  with `3 passed, 39 deselected in 0.75s`.
+- Python P0-102 O615 bounded no-column/alias/tenant guard coverage passed:
+  `.venv/bin/python -m pytest tests/test_dataset_model/test_querymodel_aggregate_sqlite_alignment.py -k p0_102 -q`
+  with `2 passed, 42 deselected in 0.59s`.
 - Java P0-87 aggregate governance exporter passed:
   `JAVA_HOME=/Users/fengjianguang/.jdk/temurin-17/Contents/Home mvn -pl foggy-dataset-model -am -P'!multi-db' -Dspring.profiles.active=sqlite -Dtest=JavaQueryModelAggregateJoinSnapshotTest -Dfoggy.parity.snapshot=true -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTests=false test`,
   producing `querymodel-aggregate-join-2` with 19 cases.

@@ -21,8 +21,9 @@ increment before Python broadens aggregate relation behavior beyond the narrow
 SQLite boundary.
 
 Later status note: P0-87 promoted the fixture to v2, P0-92/P0-93 promoted it
-again to the v3 29-case contract, and P0-94/P0-95 implemented the lowest-risk
-v3 runtime slices. This inventory remains the historical gap audit after
+again to the v3 29-case contract, and P0-94/P0-102 implemented the lowest-risk
+v3 runtime slices, nested fail-closed boundary, and bounded O615 neutral slice.
+This inventory remains the historical gap audit after
 P0-82 through P0-85; current status for v3-backed items is summarized in the
 P0-91 follow-up note below.
 
@@ -79,12 +80,12 @@ runtime extData fail-closed behavior.
 | Query `orderBy` and `returnTotal` with aggregate relation | Java acceptance records orderBy and QueryFacade returnTotal behavior. | P0-92/P0-93 later export and replay v3 fixture cases; P0-95 implements bounded support for aggregate output `orderBy` and `returnTotal` in the narrow SQLite path. | Closed for the bounded SQLite path; broad order expressions, total semantics outside this path, and external dialects remain open. | Medium | P0-95 complete; later dialect/broader-stage follow-up | Keep v3 replay plus focused Python order/total SQL and result tests active. |
 | Null-check aggregate output predicates | Java acceptance records RHS aggregate output `is null` / `is not null` staying outer-only. | Python has mixed OR/AND predicate diagnostics, but no exported null-check aggregate relation replay. | Need a stable fixture before Python treats null checks as a frozen optimizer boundary. | Medium | P0-A fixture request | Export SQL/diagnostics cases proving null checks stay on the outer aggregate output alias and do not push into RHS WHERE/HAVING. |
 | Public diagnostic `debug.extra` payload | Java acceptance and diagnostic contract tests expose aggregate relation diagnostics through semantic debug metadata. | Python has internal diagnostic assertions but no shared public debug payload contract. | Need key/reason-code evidence before exposing or asserting public response diagnostics. | Medium | P0-A fixture request | Export response metadata/debug payload with stable diagnostic keys and reason codes. |
-| RHS dimension and left/nested dimension path resolution | Java acceptance records RHS dimension fixed filters, left joined dimension keys, and nested dimension path join-key resolution. | Python has simple fixed RHS filters and group-key alias pushdown, but not exported dimension path aggregate relation replay. | Dimension path lowering is higher risk than scalar key/filter support and should be fixture-led. | High | P0-A fixture request | Export SQL/result markers for RHS dimension joins, left/nested key path aliases, and request-slice join path resolution. |
-| O615 no-column / alias / tenant guard regressions | Java acceptance records O615 no-column requests, explicit join aliases, tenant guard no-leak, RHS dimension `$id`, and RHS dimension filters. | Python has no aggregate-specific replay for these high-regression alias/no-column boundaries. | Need fixture evidence before implementing or claiming parity for no-column and tenant-guard aggregate relation cases. | High | P0-A fixture request | Export no-column, alias, tenant guard, and sanitized fieldAccess cases with forbidden leak markers. |
-| Structured `accessBuilder` field-ref pushdown | Java acceptance records structured accessBuilder field refs pushing into RHS WHERE, while raw SQL remains outer-only. | P0-87 covers raw SQL accessBuilder outer-only; the positive structured field-ref half is not exported. | Need paired positive fixture evidence before broadening accessBuilder pushdown. | Medium | P0-A fixture request | Export SQL/diagnostics case with structured field-ref RHS pushdown and stable markers. |
+| RHS dimension and left/nested dimension path resolution | Java acceptance records RHS dimension fixed filters, left joined dimension keys, and nested dimension path join-key resolution. | P0-92/P0-93 export/replay the v3 dimension cases; P0-98 implements the bounded RHS dimension fixed-filter runtime slice, P0-99 implements the bounded left dimension key runtime slice, P0-100 implements left dimension key request-slice pushdown from Java backlog evidence, and P0-101 proves nested `joinTo` paths fail closed across RHS filters, left ON keys, and left request slices. | Closed for single RHS dimension fixed filters, single left dimension ON keys, left dimension join-key request slices, and nested fail-closed boundary in the narrow SQLite path; positive nested path lowering remains higher risk and should stay fixture-led. | High | P0-98/P0-101 complete; positive nested follow-up | Keep v3 replay plus focused SQLite RHS/left dimension tests active; export/implement nested path aliases separately before opening positive lowering. |
+| O615 no-column / alias / tenant guard regressions | Java acceptance records O615 no-column requests, explicit join aliases, tenant guard no-leak, RHS dimension `$id`, and RHS dimension filters. | P0-102 adds a neutral SQLite runtime slice for no-columns default projection with an aliased scalar join key, plus scalar tenant `system_slice` RHS pushdown/no-leak behavior. | Full O615 explicit join graph behavior, RHS dimension `$id`, and production alias planning still need fixture evidence before Python can claim parity. | High | P0-102 partial; fixture request remains | Keep P0-102 focused tests active and export no-column, explicit alias, tenant guard, RHS dimension `$id`, and sanitized fieldAccess cases with forbidden leak markers for the real O615 graph. |
+| Structured `accessBuilder` field-ref pushdown | Java acceptance records structured accessBuilder field refs pushing into RHS WHERE, while raw SQL remains outer-only. | P0-87 covers raw SQL accessBuilder outer-only; P0-92/P0-93 export/replay the positive structured case; P0-96 implements the bounded single join-key equality slice. | Closed for structured expression join-key equality in the narrow SQLite path; broader expression/path shapes remain outer-only or follow-up. | Medium | P0-96 complete; later broader expression follow-up | Keep v3 replay plus focused SQLite live-result test active. |
 | Runtime filter unsafe-character refusal | Java acceptance records unsafe runtime filter value rejection. | Python covers missing runtime extData fail-closed, not unsafe-value rejection as a fixture replay. | Security-sensitive negative behavior should be exported before runtime changes. | Medium | P0-A fixture request | Export sanitized error case with forbidden raw unsafe marker leakage. |
 | Mixed OR and AND in/range predicate boundary | Java acceptance records mixed predicate boundaries: mixed OR join-key/measure predicates stay outer-only, while AND `in`/range predicates push safely to RHS WHERE/HAVING and remain outer. | P0-89 now adds Python SQLite regressions proving mixed OR outer-only rendering/retained diagnostics and explicit AND wrapper `in`/range RHS pushdown diagnostics. | Runtime behavior is now covered in Python from Java doc/test evidence, but a Java-exported diagnostics case is still needed before treating it as a frozen cross-engine contract. | Medium | P0-89 complete; future Java fixture | Export diagnostics cases with stable reason codes for mixed OR retained entries and AND `in`/range pushed entries. |
-| TMS-style composite-key aggregate fixture | Java acceptance records local TMS-style composite-key evidence. | Python avoids Odoo/TMS business models in P0 and has no engine-neutral composite aggregate fixture. | Need neutral composite-key evidence before touching business models. | High | P1 | Export engine-neutral composite-key fixture, then add Python replay. |
+| TMS-style composite-key aggregate fixture | Java acceptance records local TMS-style composite-key evidence. | P0-92/P0-93 export/replay the v3 composite-key fixture; P0-97 proves it with an engine-neutral Python SQLite model instead of Odoo/TMS business models. | Closed for scalar two-key pushdown in the narrow SQLite path; production TMS evidence and dialect proof remain open. | High | P0-97 complete; later production/dialect follow-up | Keep v3 replay plus focused SQLite live-result test active. |
 | MySQL 5.7 live aggregate relation evidence | Java acceptance records MySQL 5.7 live evidence. | Python aggregate relation runtime is SQLite-only. | External dialect parity remains open after SQLite closure. | High | P1 | Add dialect SQL/result fixture only after governance/API contract gates. |
 | PostgreSQL and production TMS DB evidence | Java acceptance itself marks these as follow-up risks. | No Python evidence. | Not a Python parity target until Java has stable evidence. | Medium | P2 | Track as future cross-dialect/live DB evidence, not a P0 blocker. |
 
@@ -102,9 +103,10 @@ runtime extData fail-closed behavior.
    fixture evidence is still recommended before broad contract freeze.
 4. P0-91 records the next Java fixture export backlog. P0-92/P0-93 later make
    `querymodel-aggregate-join-3` the active 29-case replay lane, and
-   P0-94/P0-95 close only the low-risk runtime subset. Replay-only v3 cases
-   still need separate runtime work items before positive dimension path,
-   structured accessBuilder, O615, or dialect behavior expands.
+   P0-94/P0-102 close only the low-risk runtime subset plus nested fail-closed
+   boundary and bounded O615 neutral slice. Replay-only v3 cases still need
+   separate runtime work items before positive nested dimension path, full
+   O615 graph behavior, or dialect behavior expands.
 
 ## P0-91+ Follow-Up Note
 
@@ -114,12 +116,16 @@ Java evidence. P0-87 later promoted the active snapshot to the 19-case
 candidate export set, P0-92 exported `querymodel-aggregate-join-3`, and P0-93
 activated Python replay for the 29-case v3 fixture.
 
-P0-94/P0-95 close the low-risk runtime items for unsafe runtime-filter refusal,
+P0-94/P0-102 close the low-risk runtime items for unsafe runtime-filter refusal,
 null-check outer-only predicates, public diagnostics, aggregate output
-`orderBy`, and `returnTotal` in the narrow SQLite aggregate relation path.
-Composite keys, structured accessBuilder field-ref pushdown, RHS dimension
-fixed filters, left/nested dimension keys, O615 alias/no-column boundaries,
-external dialects, and production TMS DB evidence remain follow-up gaps.
+`orderBy`, `returnTotal`, structured accessBuilder join-key pushdown, and
+composite-key pushdown proof, RHS dimension fixed-filter lowering, and left
+dimension key lowering, plus left dimension request-slice pushdown in the
+narrow SQLite aggregate relation path, plus nested `joinTo` fail-closed
+coverage, plus a bounded O615-shaped no-column/aliased-key/tenant guard
+runtime slice. Positive nested dimension lowering, non-join-key dimension-path
+request slices, full O615 explicit join graph boundaries, external dialects,
+and production TMS DB evidence remain follow-up gaps.
 
 ## Acceptance Criteria
 
