@@ -825,8 +825,13 @@ def _left_nested_dimension_key_model(
     *,
     name: str = "OrderStoreAggregateRelationNestedDimensionKeyQueryModel",
     nested_on_condition: bool = True,
+    left_field_override: str | None = None,
 ) -> DbTableModelImpl:
-    left_field = "region$regionId" if nested_on_condition else "store$storeId"
+    left_field = (
+        left_field_override
+        if left_field_override is not None
+        else "region$regionId" if nested_on_condition else "store$storeId"
+    )
     return DbTableModelImpl(
         name=name,
         source_table="fact_order",
@@ -2283,6 +2288,57 @@ def test_p0_107_rhs_nested_dimension_id_filter_fails_closed() -> None:
     )
     assert "category$id" not in response.error
     assert "dim_category" not in response.error
+
+
+def test_p0_108_left_nested_dimension_id_on_key_fails_closed() -> None:
+    model_name = "OrderStoreAggregateRelationNestedDimensionIdKeyQueryModel"
+    service = _service(
+        _store_dimension_right_model(),
+        _left_nested_dimension_key_model(
+            name=model_name,
+            left_field_override="region$id",
+        ),
+    )
+
+    response = service.query_model(
+        model_name,
+        SemanticQueryRequest(columns=["orderId", "amount", "areaSqm"]),
+        mode="validate",
+    )
+
+    _assert_aggregate_relation_unsupported_response(
+        response,
+        "nested root dimension join keys are not supported",
+    )
+    assert "region$id" not in response.error
+    assert "dim_region" not in response.error
+
+
+def test_p0_108_left_nested_dimension_id_request_slice_fails_closed() -> None:
+    model_name = "OrderStoreAggregateRelationNestedDimensionIdSliceQueryModel"
+    service = _service(
+        _store_dimension_right_model(),
+        _left_nested_dimension_key_model(
+            name=model_name,
+            nested_on_condition=False,
+        ),
+    )
+
+    response = service.query_model(
+        model_name,
+        SemanticQueryRequest(
+            columns=["orderId", "amount", "areaSqm"],
+            slice=[{"field": "region$id", "op": "=", "value": 1}],
+        ),
+        mode="validate",
+    )
+
+    _assert_aggregate_relation_unsupported_response(
+        response,
+        "nested root dimension join keys are not supported",
+    )
+    assert "region$id" not in response.error
+    assert "dim_region" not in response.error
 
 
 def test_p0_85_and_filters_push_to_rhs_with_diagnostics() -> None:
