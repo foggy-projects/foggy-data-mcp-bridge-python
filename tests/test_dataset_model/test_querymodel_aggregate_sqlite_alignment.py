@@ -565,6 +565,35 @@ def _rhs_dimension_filter_model() -> DbTableModelImpl:
     )
 
 
+def _rhs_dimension_id_filter_model() -> DbTableModelImpl:
+    return _left_model(
+        name="OrderSalesAggregateRelationRhsDimensionIdFilterQueryModel",
+        alias="fsByProductId",
+        filters=[
+            AggregateRelationFilterDef(
+                model="FactSalesModel",
+                field="orderStatus",
+                op="=",
+                value="COMPLETED",
+            ),
+            AggregateRelationFilterDef(
+                model="FactSalesModel",
+                field="product$id",
+                op="=",
+                value=101,
+            ),
+        ],
+        measures=[
+            AggregateRelationMeasureDef(
+                model="FactSalesModel",
+                field="salesAmount",
+                aggregation="SUM",
+                alias="salesAmount",
+            )
+        ],
+    )
+
+
 def _rhs_nested_dimension_filter_model() -> DbTableModelImpl:
     return _left_model(
         name="OrderSalesAggregateRelationNestedRhsDimensionFilterQueryModel",
@@ -1959,6 +1988,63 @@ def test_p0_103_non_join_dimension_id_slice_stays_outer_only(
     debug_sql = _normal(response.debug.extra["sql"])
     assert "ds.store_key = ?" in debug_sql
     assert "agg_src.store_key = ?" not in debug_sql
+
+
+def test_p0_104_rhs_dimension_id_fixed_filter_joins_dimension_inside_rhs(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "aggregate_relation_rhs_dimension_id_filter.sqlite"
+    _seed_aggregate_db(db_path)
+    executor = SQLiteExecutor(str(db_path))
+    service = _service(
+        _rhs_dimension_filter_right_model(),
+        _rhs_dimension_id_filter_model(),
+        executor=executor,
+    )
+    request = SemanticQueryRequest(
+        columns=["orderId", "amount", "salesAmount"],
+        slice=[{"field": "orderId", "op": "=", "value": ORDER_1}],
+    )
+
+    result = service.build_query_with_governance(
+        "OrderSalesAggregateRelationRhsDimensionIdFilterQueryModel",
+        request,
+    )
+    normalized = _normal(result.sql)
+    assert result.params == ["COMPLETED", 101, ORDER_1, ORDER_1]
+    assert "left join dim_product dp on agg_src.product_key = dp.product_key" in normalized
+    assert "dp.product_key = ?" in normalized
+    assert "agg_src.product$id" not in normalized
+    assert "product$id" not in normalized
+    assert result.diagnostics == [
+        {
+            "decision": "pushed",
+            "field": "orderId",
+            "op": "=",
+            "target": "where",
+            "reasonCode": None,
+            "expression": "agg_src.order_id = ?",
+        }
+    ]
+
+    try:
+        response = service.query_model(
+            "OrderSalesAggregateRelationRhsDimensionIdFilterQueryModel",
+            request,
+            mode="execute",
+        )
+    finally:
+        service._run_async_in_sync(executor.close())
+
+    assert response.error is None
+    assert response.params == ["COMPLETED", 101, ORDER_1, ORDER_1]
+    assert response.items == [
+        {"orderId": ORDER_1, "amount": 10998, "salesAmount": 5000}
+    ]
+    debug_sql = _normal(response.debug.extra["sql"])
+    assert "left join dim_product dp on agg_src.product_key = dp.product_key" in debug_sql
+    assert "dp.product_key = ?" in debug_sql
+    assert "product$id" not in debug_sql
 
 
 def test_p0_85_and_filters_push_to_rhs_with_diagnostics() -> None:
