@@ -2384,6 +2384,35 @@ def test_p0_109_rhs_nested_dimension_id_runtime_filter_fails_closed() -> None:
     assert "dim_category" not in response.error
 
 
+def test_p0_110_left_nested_dimension_id_runtime_slice_fails_closed() -> None:
+    model_name = "OrderStoreAggregateRelationNestedDimensionIdRuntimeSliceQueryModel"
+    service = _service(
+        _store_dimension_right_model(),
+        _left_nested_dimension_key_model(
+            name=model_name,
+            nested_on_condition=False,
+        ),
+    )
+
+    response = service.query_model(
+        model_name,
+        SemanticQueryRequest(
+            columns=["orderId", "amount", "areaSqm"],
+            slice=[{"field": "region$id", "op": "=", "value": {"extData": "regionKey"}}],
+        ),
+        mode="validate",
+        context=SemanticRequestContext(attributes={"extData": {"regionKey": 1}}),
+    )
+
+    _assert_aggregate_relation_unsupported_response(
+        response,
+        "nested root dimension join keys are not supported",
+    )
+    assert "region$id" not in response.error
+    assert "regionKey" not in response.error
+    assert "dim_region" not in response.error
+
+
 def test_p0_85_and_filters_push_to_rhs_with_diagnostics() -> None:
     case = _case("aggregate-join-and-pushdown-diagnostics")
     service = _service(_right_model(), _left_model())
