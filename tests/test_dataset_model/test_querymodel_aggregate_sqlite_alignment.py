@@ -645,6 +645,65 @@ def _left_dimension_key_model() -> DbTableModelImpl:
     )
 
 
+def _left_dimension_slice_non_key_model() -> DbTableModelImpl:
+    name = "OrderSalesAggregateRelationDimensionSliceNonKeyQueryModel"
+    return DbTableModelImpl(
+        name=name,
+        source_table="fact_order",
+        columns={
+            "orderId": DbColumnDef(name="order_id", column_type=ColumnType.STRING),
+            "amount": DbColumnDef(name="total_amount", column_type=ColumnType.DECIMAL),
+        },
+        dimension_joins=[
+            DimensionJoinDef(
+                name="store",
+                table_name="dim_store",
+                foreign_key="store_key",
+                primary_key="store_key",
+                properties=[
+                    DimensionPropertyDef(
+                        name="storeId",
+                        column="store_id",
+                        caption="Store ID",
+                    )
+                ],
+            )
+        ],
+        aggregate_relations=[
+            AggregateRelationDef(
+                left_model=name,
+                right_model="FactSalesModel",
+                alias="fsByOrderDimensionSliceNonKey",
+                group_by=["orderId"],
+                filters=[
+                    AggregateRelationFilterDef(
+                        model="FactSalesModel",
+                        field="orderStatus",
+                        op="=",
+                        value="COMPLETED",
+                    )
+                ],
+                measures=[
+                    AggregateRelationMeasureDef(
+                        model="FactSalesModel",
+                        field="salesAmount",
+                        aggregation="SUM",
+                        alias="salesAmount",
+                    )
+                ],
+                conditions=[
+                    AggregateRelationConditionDef(
+                        left_model=name,
+                        left_field="orderId",
+                        right_model="FactSalesModel",
+                        right_field="orderId",
+                    )
+                ],
+            )
+        ],
+    )
+
+
 def _left_nested_dimension_key_model(
     *,
     name: str = "OrderStoreAggregateRelationNestedDimensionKeyQueryModel",
@@ -1786,6 +1845,120 @@ def test_p0_102_tenant_system_slice_pushes_rhs_without_leaking_guard(
     assert "tenantId" not in response.items[0]
     debug_sql = _normal(response.debug.extra["sql"])
     assert "agg_src.tenant_id = ?" in debug_sql
+
+
+def test_p0_103_non_join_dimension_property_slice_stays_outer_only(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "aggregate_relation_non_join_dimension_property_slice.sqlite"
+    _seed_aggregate_db(db_path)
+    executor = SQLiteExecutor(str(db_path))
+    service = _service(
+        _right_model(),
+        _left_dimension_slice_non_key_model(),
+        executor=executor,
+    )
+    request = SemanticQueryRequest(
+        columns=["orderId", "amount", "salesAmount"],
+        slice=[{"field": "store$storeId", "op": "=", "value": "STORE001"}],
+    )
+
+    result = service.build_query_with_governance(
+        "OrderSalesAggregateRelationDimensionSliceNonKeyQueryModel",
+        request,
+    )
+    normalized = _normal(result.sql)
+    assert result.params == ["COMPLETED", "STORE001"]
+    assert "left join dim_store ds on t1.store_key = ds.store_key" in normalized
+    assert "ds.store_id = ?" in normalized
+    assert "agg_src.store_id = ?" not in normalized
+    assert "store$storeId" not in normalized
+    assert result.diagnostics == [
+        {
+            "decision": "refused",
+            "field": "store$storeId",
+            "op": "=",
+            "target": None,
+            "reasonCode": "NO_JOIN_KEY_MAPPING",
+            "expression": None,
+        }
+    ]
+
+    try:
+        response = service.query_model(
+            "OrderSalesAggregateRelationDimensionSliceNonKeyQueryModel",
+            request,
+            mode="execute",
+        )
+    finally:
+        service._run_async_in_sync(executor.close())
+
+    assert response.error is None
+    assert response.params == ["COMPLETED", "STORE001"]
+    assert response.items == [
+        {"orderId": ORDER_1, "amount": 10998, "salesAmount": 9898.2},
+        {"orderId": ORDER_2, "amount": 2500, "salesAmount": 2500},
+    ]
+    debug_sql = _normal(response.debug.extra["sql"])
+    assert "ds.store_id = ?" in debug_sql
+    assert "agg_src.store_id = ?" not in debug_sql
+
+
+def test_p0_103_non_join_dimension_id_slice_stays_outer_only(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "aggregate_relation_non_join_dimension_id_slice.sqlite"
+    _seed_aggregate_db(db_path)
+    executor = SQLiteExecutor(str(db_path))
+    service = _service(
+        _right_model(),
+        _left_dimension_slice_non_key_model(),
+        executor=executor,
+    )
+    request = SemanticQueryRequest(
+        columns=["orderId", "amount", "salesAmount"],
+        slice=[{"field": "store$id", "op": "=", "value": 1}],
+    )
+
+    result = service.build_query_with_governance(
+        "OrderSalesAggregateRelationDimensionSliceNonKeyQueryModel",
+        request,
+    )
+    normalized = _normal(result.sql)
+    assert result.params == ["COMPLETED", 1]
+    assert "left join dim_store ds on t1.store_key = ds.store_key" in normalized
+    assert "ds.store_key = ?" in normalized
+    assert "agg_src.store_key = ?" not in normalized
+    assert "store$id" not in normalized
+    assert result.diagnostics == [
+        {
+            "decision": "refused",
+            "field": "store$id",
+            "op": "=",
+            "target": None,
+            "reasonCode": "NO_JOIN_KEY_MAPPING",
+            "expression": None,
+        }
+    ]
+
+    try:
+        response = service.query_model(
+            "OrderSalesAggregateRelationDimensionSliceNonKeyQueryModel",
+            request,
+            mode="execute",
+        )
+    finally:
+        service._run_async_in_sync(executor.close())
+
+    assert response.error is None
+    assert response.params == ["COMPLETED", 1]
+    assert response.items == [
+        {"orderId": ORDER_1, "amount": 10998, "salesAmount": 9898.2},
+        {"orderId": ORDER_2, "amount": 2500, "salesAmount": 2500},
+    ]
+    debug_sql = _normal(response.debug.extra["sql"])
+    assert "ds.store_key = ?" in debug_sql
+    assert "agg_src.store_key = ?" not in debug_sql
 
 
 def test_p0_85_and_filters_push_to_rhs_with_diagnostics() -> None:

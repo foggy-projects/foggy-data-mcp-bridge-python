@@ -121,6 +121,7 @@ Current P0 execution records:
 - [P0-100-querymodel-aggregate-left-dimension-slice.md](workitems/P0-100-querymodel-aggregate-left-dimension-slice.md)
 - [P0-101-querymodel-aggregate-nested-dimension-fail-closed.md](workitems/P0-101-querymodel-aggregate-nested-dimension-fail-closed.md)
 - [P0-102-querymodel-aggregate-o615-boundary.md](workitems/P0-102-querymodel-aggregate-o615-boundary.md)
+- [P0-103-querymodel-aggregate-dimension-id-slice-boundary.md](workitems/P0-103-querymodel-aggregate-dimension-id-slice-boundary.md)
 
 Current P1/P2 planning records:
 
@@ -456,7 +457,7 @@ Latest P0-79+ / P1-2 status:
   with exactly the Java seven-key `aggregateRelation` object while keeping
   engine-only metadata internal; RHS denied source columns hide the
   corresponding aggregate output metadata.
-- P0-79+ records the aggregate-join sequence as completed through P0-102, with
+- P0-79+ records the aggregate-join sequence as completed through P0-103, with
   P0-87 v2 snapshot/replay active, the first P0-87 runtime fieldAccess,
   system_slice, denied-source, dynamic calculated-denial, and predefined
   calculated-denial/predefined-execution plus raw accessBuilder outer-only
@@ -477,11 +478,13 @@ Latest P0-79+ / P1-2 status:
   nested dimension `joinTo` paths fail-closed across RHS filters, left ON keys,
   and left request slices until Java nested-path fixtures and a dedicated
   lowering design exist. P0-102 opens the bounded O615-shaped no-columns,
-  aliased-key, and scalar tenant guard/no-leak slice. `groupBy`, `having`,
-  post stages, `timeWindow`, pivot combinations, external dialects,
-  multi-relation planning, positive nested dimension lowering, full O615
-  explicit join graph behavior, and Odoo business-model expansion remain
-  outside the current runtime boundary.
+  aliased-key, and scalar tenant guard/no-leak slice. P0-103 proves non-join-key
+  dimension property and dimension `$id` request slices stay outer-only and do
+  not leak unreachable RHS aliases. `groupBy`, `having`, post stages,
+  `timeWindow`, pivot combinations, external dialects, multi-relation planning,
+  positive nested dimension lowering, full O615 explicit join graph behavior,
+  and Odoo business-model expansion remain outside the current runtime
+  boundary.
 - P1-1 records the remaining semantic-scale choice: namespace opt-out parity or
   live DB/result parity.
 - P2-1 records the initial Python aggregate-join design boundary before any
@@ -616,6 +619,10 @@ Latest P0-79+ / P1-2 status:
 - Python P0-102 O615 bounded no-column/alias/tenant guard coverage passed:
   `.venv/bin/python -m pytest tests/test_dataset_model/test_querymodel_aggregate_sqlite_alignment.py -k p0_102 -q`
   with `2 passed, 42 deselected in 0.59s`.
+- Python P0-103 non-join-key dimension property/`$id` request-slice coverage
+  passed:
+  `.venv/bin/python -m pytest tests/test_dataset_model/test_querymodel_aggregate_sqlite_alignment.py -k p0_103 -q`
+  with `2 passed, 44 deselected in 0.75s`.
 - Java P0-87 aggregate governance exporter passed:
   `JAVA_HOME=/Users/fengjianguang/.jdk/temurin-17/Contents/Home mvn -pl foggy-dataset-model -am -P'!multi-db' -Dspring.profiles.active=sqlite -Dtest=JavaQueryModelAggregateJoinSnapshotTest -Dfoggy.parity.snapshot=true -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTests=false test`,
   producing `querymodel-aggregate-join-2` with 19 cases.
