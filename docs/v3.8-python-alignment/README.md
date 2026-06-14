@@ -129,6 +129,7 @@ Current P0 execution records:
 - [P0-108-querymodel-aggregate-left-nested-dimension-id-fail-closed.md](workitems/P0-108-querymodel-aggregate-left-nested-dimension-id-fail-closed.md)
 - [P0-109-querymodel-aggregate-nested-dimension-runtime-fail-closed.md](workitems/P0-109-querymodel-aggregate-nested-dimension-runtime-fail-closed.md)
 - [P0-110-querymodel-aggregate-left-nested-dimension-runtime-slice-fail-closed.md](workitems/P0-110-querymodel-aggregate-left-nested-dimension-runtime-slice-fail-closed.md)
+- [P0-111-querymodel-aggregate-o615-fixture-export-plan.md](workitems/P0-111-querymodel-aggregate-o615-fixture-export-plan.md)
 
 Current P1/P2 planning records:
 
@@ -464,7 +465,7 @@ Latest P0-79+ / P1-2 status:
   with exactly the Java seven-key `aggregateRelation` object while keeping
   engine-only metadata internal; RHS denied source columns hide the
   corresponding aggregate output metadata.
-- P0-79+ records the aggregate-join sequence as completed through P0-110, with
+- P0-79+ records the aggregate-join sequence as completed through P0-111, with
   P0-87 v2 snapshot/replay active, the first P0-87 runtime fieldAccess,
   system_slice, denied-source, dynamic calculated-denial, and predefined
   calculated-denial/predefined-execution plus raw accessBuilder outer-only
@@ -496,7 +497,9 @@ Latest P0-79+ / P1-2 status:
   evidence to left/root ON keys and request slices. P0-109 extends nested
   dimension fail-closed evidence to RHS runtime `$id` filters. P0-110 extends
   left/root nested dimension `$id` fail-closed evidence to runtime request
-  slices.
+  slices. P0-111 records the required Java `querymodel-aggregate-join-4`
+  fixture export plan for full O615 explicit join graph parity before Python
+  opens positive O615 graph lowering.
   `groupBy`, `having`, post stages, `timeWindow`, pivot combinations, external
   dialects, positive multi-relation planning, positive nested dimension
   lowering, full O615 explicit join graph behavior, and Odoo business-model
@@ -662,6 +665,8 @@ Latest P0-79+ / P1-2 status:
   fail-closed coverage passed:
   `.venv/bin/python -m pytest tests/test_dataset_model/test_querymodel_aggregate_sqlite_alignment.py -k p0_110 -q`
   with `1 passed, 54 deselected in 0.65s`.
+- Python P0-111 is doc-only: it records the Java O615 fixture export plan for
+  the next aggregate relation snapshot and does not change runtime code.
 - Java P0-87 aggregate governance exporter passed:
   `JAVA_HOME=/Users/fengjianguang/.jdk/temurin-17/Contents/Home mvn -pl foggy-dataset-model -am -P'!multi-db' -Dspring.profiles.active=sqlite -Dtest=JavaQueryModelAggregateJoinSnapshotTest -Dfoggy.parity.snapshot=true -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTests=false test`,
   producing `querymodel-aggregate-join-2` with 19 cases.

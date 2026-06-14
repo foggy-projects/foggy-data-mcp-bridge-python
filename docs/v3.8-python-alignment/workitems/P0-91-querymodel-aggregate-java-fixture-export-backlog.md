@@ -84,17 +84,17 @@ or currently refused by Python because Java has not supplied a replay contract.
 
 Current baseline after P0-93 is `querymodel-aggregate-join-3` with 29 cases.
 Python replay is active for the v3 fixture, and runtime implementation is
-bounded to P0-94 through P0-102 slices: unsafe runtime-filter refusal,
-null-check outer-only predicates, public diagnostics, aggregate output
-`orderBy`, `returnTotal`, structured accessBuilder join-key pushdown, and
-composite-key pushdown proof, RHS dimension fixed-filter lowering, and left
-dimension key lowering, plus left dimension request-slice pushdown, nested
-dimension fail-closed coverage, and a bounded O615-shaped no-column /
-aliased-key / tenant guard no-leak slice.
+bounded through P0-110 slices: unsafe runtime-filter refusal, null-check
+outer-only predicates, public diagnostics, aggregate output `orderBy`,
+`returnTotal`, structured accessBuilder join-key pushdown, composite-key
+pushdown proof, RHS dimension fixed/`$id`/runtime-filter lowering, left
+dimension ON-key and request-slice lowering, nested dimension fail-closed
+coverage, multi-relation fail-closed evidence, and a bounded O615-shaped
+no-column / aliased-key / tenant guard no-leak slice.
 
 ## Export Backlog
 
-Suggested next snapshot contract name: `querymodel-aggregate-join-3`.
+Suggested next snapshot contract name: `querymodel-aggregate-join-4`.
 
 | Candidate | Java Evidence | Why Python Needs It | Suggested Fixture Payload | Python Use | Priority |
 | --- | --- | --- | --- | --- | --- |
@@ -105,7 +105,7 @@ Suggested next snapshot contract name: `querymodel-aggregate-join-3`.
 | Composite-key aggregate relation | `tmsStyleAggregateRelationShouldPushCompositeKeyFilters`. | P0-92 exports a v3 fixture case and P0-93 replays it; P0-97 proves the bounded SQLite runtime shape with an engine-neutral two-key model. | Closed for scalar two-key pushdown in the narrow SQLite path; dimension-path, external dialect, and production TMS evidence remain open. | Keep replay plus focused SQLite live-result test active. | P0-A complete |
 | RHS dimension fixed filter | `aggregateRelationRhsFixedFilterShouldSupportRightDimensionField`. | P0-92 exports a v3 fixture case and P0-93 replays it; P0-98 implements the bounded SQLite runtime slice. | Closed for a single RHS dimension fixed filter inside the RHS aggregate subquery; denied dimension-column governance and external dialect evidence remain open. | Keep replay plus focused SQLite live-result test active. | P0-A complete |
 | Left joined and nested dimension keys | `aggregateRelationOnLeftKeyShouldSupportJoinedDimensionField`, `aggregateRelationOnLeftDimensionKeySliceShouldResolveJoinPath`, `aggregateRelationNestedDimensionPathOnLeftKeyShouldResolveJoinPath`. | P0-92 exports v3 fixture evidence for the first left-dimension shape and P0-93 replays it; P0-99 implements the bounded left dimension ON-key runtime slice, P0-100 implements the left dimension join-key request-slice shape from backlog evidence, and P0-101 proves nested `joinTo` paths fail closed across RHS filters, left ON keys, and left request slices. Broader positive nested path lowering remains deferred. | Closed for a single left dimension ON key, request slices on the same join key, and nested fail-closed behavior in the narrow SQLite path; positive nested paths and non-join-key dimension-path request slices remain open. | Keep replay plus focused SQLite live-result/fail-closed tests active; add positive nested/non-join-key request-slice work separately after fixture evidence. | P0-A complete for left ON key, join-key slice, and nested fail-closed; follow-up for positive nested lowering |
-| O615 no-column, alias, tenant guard, and join-path cases | O615 probe tests for no-column requests, explicit join aliases, tenant guard, RHS dimension `$id`, and RHS dimension filters. | P0-102 proves the engine-neutral subset in Python: no-columns default projection with an aliased scalar join key, and scalar tenant `system_slice` pushdown/no-leak behavior. The full O615 explicit join graph remains too specific to infer from Python runtime tests alone. | Still needed: Java-exported no-columns request cases, explicit join aliases, tenant guard no-leak assertions on the real O615 path, expected groupBy tenant key markers, RHS dimension `$id`, and sanitized fieldAccess output. | Keep the P0-102 neutral runtime slice active; freeze the full O615 graph as fixture before broader alias/join-path implementation. | P0-A partial |
+| O615 no-column, alias, tenant guard, and join-path cases | O615 probe tests for no-column requests, explicit join aliases, tenant guard, RHS dimension `$id`, RHS dimension filters, and RHS internal dimension join filters. P0-111 identifies the exact Java candidates: `aggregateRelationO615ProbeNoColumnsWithAccessShouldResolveJoinPath`, `aggregateRelationO615ProbeExpressJoinNoColumnsShouldResolveJoinPath`, `aggregateRelationO615TenantGuardShouldBypassFieldAccessWithoutLeaking`, `aggregateRelationO615ProbeExpressJoinDimensionIdSliceShouldResolveJoinPath`, `aggregateRelationO615ProbeRhsDimensionFilterShouldResolveJoinPath`, and `aggregateRelationO615ProbeRhsJoinDimensionFilterShouldResolveJoinPath`. | P0-102 proves the engine-neutral subset in Python: no-columns default projection with an aliased scalar join key, and scalar tenant `system_slice` pushdown/no-leak behavior. P0-103 through P0-110 close nearby dimension `$id` and nested fail-closed/runtime boundaries. The full O615 explicit join graph remains too specific to infer from Python runtime tests alone. | Export these as `querymodel-aggregate-join-4`: normalized request payloads, result row counts/public fields, SQL join-path markers, tenant RHS pushdown/groupBy markers, diagnostics where available, and forbidden leak markers for tenant/private aliases/internal join tables. | Keep P0-102 and P0-103 through P0-110 runtime slices active; freeze the full O615 graph as fixture before broader alias/join-path implementation. | P0-A planned by P0-111 |
 | Structured `accessBuilder` field-ref pushdown | `aggregateRelationAccessBuilderFieldRefShouldPushRightWhere`; raw SQL outer-only is already in v2. | P0-92 exports a v3 fixture case and P0-93 replays it; P0-96 implements the bounded single join-key equality runtime slice. | Closed for structured expression join-key equality in the narrow SQLite path; raw SQL remains outer-only, and broader expression shapes remain outer-only. | Keep replay plus focused SQLite live-result test active. | P0-A complete |
 | Runtime filter unsafe-character refusal | `aggregateRelationRuntimeFilterShouldRejectUnsafeCharacters`. | P0-92 exports and P0-93 replays the negative security case; P0-94 implements sanitized unsafe string refusal. | Closed for simple runtime extData strings in the narrow path. | Keep replay and focused unsafe-value refusal test active. | P0-A complete |
 | MySQL 5.7 explain markers | MySQL profile tests covering pushed RHS filters and EXPLAIN markers. | Python aggregate relation runtime is SQLite-only; dialect expansion needs SQL/explain evidence before implementation. | Dialect-tagged MySQL 5.7 SQL/explain markers such as index use, ref access, and expected pushed filter markers. | Plan P1/P2 dialect work; no SQLite behavior change. | P1 |
@@ -132,17 +132,20 @@ result, metadata, or error fixtures.
 
 1. Keep the P0-92/P0-93 v3 neutral fixture replay active for the 29-case
    contract.
-2. Treat P0-94 through P0-102 as the completed low-risk runtime slice: unsafe
+2. Treat P0-94 through P0-110 as the completed low-risk runtime slice: unsafe
    runtime filter refusal, null-check outer-only diagnostics, public
    `debug.extra` diagnostics, `orderBy`, `returnTotal`, and structured
    accessBuilder join-key pushdown, composite-key pushdown proof, RHS
-   dimension fixed-filter lowering, left dimension ON-key lowering, and left
-   dimension request-slice pushdown, plus nested `joinTo` fail-closed
-   coverage and the bounded O615 no-column/aliased-key/tenant-guard slice.
-3. Review the replay-only v3 cases before implementing more runtime behavior:
-   positive nested dimension join paths, non-join-key dimension-path request
-   slices, and full O615 explicit join graph boundaries.
-4. Keep MySQL 5.7, PostgreSQL, production TMS DB, multi-relation, and broad
+   dimension fixed/`$id`/runtime-filter lowering, left dimension ON-key and
+   request-slice lowering, multi-relation fail-closed evidence, plus nested
+   `joinTo` fail-closed coverage and the bounded O615
+   no-column/aliased-key/tenant-guard slice.
+3. Export or replay the P0-111 `querymodel-aggregate-join-4` O615 cases before
+   implementing more runtime behavior in the positive O615 graph path.
+4. Review the replay-only v3 and future v4 cases before implementing broader
+   runtime behavior: positive nested dimension join paths, non-join-key
+   dimension-path request slices, and full O615 explicit join graph boundaries.
+5. Keep MySQL 5.7, PostgreSQL, production TMS DB, multi-relation, and broad
    QueryModel stage behavior outside the next implementation slice.
 
 ## Acceptance Criteria
