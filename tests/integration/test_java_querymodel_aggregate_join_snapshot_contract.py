@@ -119,13 +119,15 @@ def test_manifest_tracks_aggregate_join_as_active_snapshot_lane() -> None:
     assert entry["javaSnapshotOutput"] == (
         "foggy-dataset-model/target/parity/_querymodel_aggregate_join_snapshot.json"
     )
-    assert entry["pythonFixtures"] == [
+    assert {
         "tests/fixtures/java_querymodel_aggregate_join_snapshot_contract.json",
         "tests/fixtures/java_querymodel_aggregate_join_snapshot_parity.json",
-    ]
-    assert entry["pythonTests"] == [
+        "tests/fixtures/java_querymodel_aggregate_join_o615_snapshot_contract.json",
+    }.issubset(set(entry["pythonFixtures"]))
+    assert {
         "tests/integration/test_java_querymodel_aggregate_join_snapshot_contract.py",
         "tests/integration/test_java_querymodel_aggregate_join_snapshot_parity.py",
-    ]
+        "tests/integration/test_java_querymodel_aggregate_join_o615_snapshot_contract.py",
+    }.issubset(set(entry["pythonTests"]))
     assert entry["javaExported"]
     assert entry["plannedExtensions"]

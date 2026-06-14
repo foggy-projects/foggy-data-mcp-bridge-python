@@ -1,0 +1,200 @@
+{
+  "schemaVersion": 1,
+  "feature": "queryModelAggregateJoin",
+  "status": "contractOnly",
+  "owner": "java",
+  "source": "AggregateJoinQueryModelTest",
+  "contractVersion": "querymodel-aggregate-join-4",
+  "purpose": "Define the O615 explicit join graph snapshot cases required before Python opens positive O615 aggregate relation graph lowering.",
+  "javaExporterPlanned": "foggy-dataset-model/src/test/java/com/foggyframework/dataset/db/model/parity/JavaQueryModelAggregateJoinSnapshotTest.java",
+  "requiredEnvelopeFields": [
+    "schemaVersion",
+    "feature",
+    "source",
+    "contractVersion",
+    "cases"
+  ],
+  "requiredCaseFields": [
+    "id",
+    "type",
+    "javaTest",
+    "model",
+    "request",
+    "expected"
+  ],
+  "requiredExpectedFieldsByType": {
+    "sql": [
+      "sqlMarkers",
+      "forbiddenSqlMarkers",
+      "params"
+    ],
+    "result": [
+      "rows",
+      "rowsRequiredFields",
+      "rowsForbiddenFields"
+    ],
+    "diagnostics": [
+      "diagnostics",
+      "requiredDecisions",
+      "requiredTargets",
+      "requiredFields"
+    ]
+  },
+  "o615RequiredEvidenceKeys": [
+    "normalizedRequest",
+    "normalizedSql",
+    "sqlMarkers",
+    "forbiddenSqlMarkers",
+    "rows",
+    "rowsRequiredFields",
+    "rowsForbiddenFields"
+  ],
+  "requiredCases": [
+    {
+      "id": "aggregate-join-o615-no-columns-with-access",
+      "type": "result",
+      "javaTest": "aggregateRelationO615ProbeNoColumnsWithAccessShouldResolveJoinPath",
+      "model": "OrderStationStockProjectionO615ProbeQueryModel",
+      "description": "O615 three-key aggregate relation model resolves a no-columns request with field access/default projection.",
+      "requiredEvidence": [
+        "normalizedRequest",
+        "defaultProjection",
+        "rows",
+        "rowsRequiredFields",
+        "sqlMarkers"
+      ],
+      "requiredSqlMarkers": [
+        "left join",
+        "group by"
+      ],
+      "forbiddenLeakMarkers": [
+        "tenant_id",
+        "internalAlias"
+      ],
+      "pythonBoundary": "replay-first"
+    },
+    {
+      "id": "aggregate-join-o615-explicit-join-no-columns",
+      "type": "result",
+      "javaTest": "aggregateRelationO615ProbeExpressJoinNoColumnsShouldResolveJoinPath",
+      "model": "OrderStationStockProjectionO615ExpressJoinProbeQueryModel",
+      "description": "O615 explicit join alias path resolves a no-columns request with orderNo slicing.",
+      "requiredEvidence": [
+        "normalizedRequest",
+        "defaultProjection",
+        "rows",
+        "rowsRequiredFields",
+        "sqlMarkers"
+      ],
+      "requiredSqlMarkers": [
+        "left join",
+        "order",
+        "group by"
+      ],
+      "forbiddenLeakMarkers": [
+        "tenant_id",
+        "internalAlias"
+      ],
+      "pythonBoundary": "replay-first"
+    },
+    {
+      "id": "aggregate-join-o615-tenant-guard-no-leak",
+      "type": "sql",
+      "javaTest": "aggregateRelationO615TenantGuardShouldBypassFieldAccessWithoutLeaking",
+      "model": "OrderStationStockProjectionO615ExpressJoinProbeQueryModel",
+      "description": "O615 systemSlice tenant guard bypasses user fieldAccess, pushes into RHS aggregate SQL, keeps tenant in RHS groupBy, and does not leak tenant output.",
+      "requiredEvidence": [
+        "normalizedRequest",
+        "systemSlice",
+        "fieldAccess",
+        "sqlMarkers",
+        "rowsForbiddenFields",
+        "forbiddenSqlMarkers"
+      ],
+      "requiredSqlMarkers": [
+        "tenant",
+        "group by"
+      ],
+      "forbiddenLeakMarkers": [
+        "tenantId",
+        "tenant_id"
+      ],
+      "pythonBoundary": "replay-first"
+    },
+    {
+      "id": "aggregate-join-o615-dimension-id-slice",
+      "type": "result",
+      "javaTest": "aggregateRelationO615ProbeExpressJoinDimensionIdSliceShouldResolveJoinPath",
+      "model": "OrderStationStockProjectionO615ExpressJoinProbeQueryModel",
+      "description": "O615 destinationServiceArea$id request slice resolves through the explicit join graph.",
+      "requiredEvidence": [
+        "normalizedRequest",
+        "selectedDimensionId",
+        "rows",
+        "rowsRequiredFields",
+        "sqlMarkers"
+      ],
+      "requiredSqlMarkers": [
+        "destinationServiceArea",
+        "store_key"
+      ],
+      "forbiddenLeakMarkers": [
+        "internalAlias"
+      ],
+      "pythonBoundary": "replay-first"
+    },
+    {
+      "id": "aggregate-join-o615-rhs-dimension-filter",
+      "type": "result",
+      "javaTest": "aggregateRelationO615ProbeRhsDimensionFilterShouldResolveJoinPath",
+      "model": "OrderStationStockProjectionO615RhsDimensionProbeQueryModel",
+      "description": "O615 RHS dimension filter combines with orderNo slice and resolves inside the aggregate relation.",
+      "requiredEvidence": [
+        "normalizedRequest",
+        "rhsDimensionFilter",
+        "rows",
+        "rowsRequiredFields",
+        "sqlMarkers"
+      ],
+      "requiredSqlMarkers": [
+        "left join",
+        "where",
+        "group by"
+      ],
+      "forbiddenLeakMarkers": [
+        "internalAlias"
+      ],
+      "pythonBoundary": "replay-first"
+    },
+    {
+      "id": "aggregate-join-o615-rhs-join-dimension-filter",
+      "type": "result",
+      "javaTest": "aggregateRelationO615ProbeRhsJoinDimensionFilterShouldResolveJoinPath",
+      "model": "OrderStationStockProjectionO615RhsJoinDimensionProbeQueryModel",
+      "description": "O615 RHS aggregate source joins an internal dimension table for filter resolution while also applying orderNo slicing.",
+      "requiredEvidence": [
+        "normalizedRequest",
+        "rhsInternalDimensionJoin",
+        "rows",
+        "rowsRequiredFields",
+        "sqlMarkers"
+      ],
+      "requiredSqlMarkers": [
+        "left join",
+        "where",
+        "group by"
+      ],
+      "forbiddenLeakMarkers": [
+        "internalAlias"
+      ],
+      "pythonBoundary": "replay-first"
+    }
+  ],
+  "plannedPythonReplay": {
+    "fixturePath": "tests/fixtures/java_querymodel_aggregate_join_o615_snapshot_parity.json",
+    "contractTestPath": "tests/integration/test_java_querymodel_aggregate_join_o615_snapshot_contract.py",
+    "futureReplayTestPath": "tests/integration/test_java_querymodel_aggregate_join_o615_snapshot_parity.py",
+    "initialMode": "contract-only",
+    "implementationBoundary": "Do not implement positive Python O615 explicit join graph lowering until Java exports querymodel-aggregate-join-4 parity evidence."
+  }
+}

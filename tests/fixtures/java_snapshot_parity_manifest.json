@@ -353,11 +353,13 @@
       "javaSnapshotOutput": "foggy-dataset-model/target/parity/_querymodel_aggregate_join_snapshot.json",
       "pythonFixtures": [
         "tests/fixtures/java_querymodel_aggregate_join_snapshot_contract.json",
-        "tests/fixtures/java_querymodel_aggregate_join_snapshot_parity.json"
+        "tests/fixtures/java_querymodel_aggregate_join_snapshot_parity.json",
+        "tests/fixtures/java_querymodel_aggregate_join_o615_snapshot_contract.json"
       ],
       "pythonTests": [
         "tests/integration/test_java_querymodel_aggregate_join_snapshot_contract.py",
-        "tests/integration/test_java_querymodel_aggregate_join_snapshot_parity.py"
+        "tests/integration/test_java_querymodel_aggregate_join_snapshot_parity.py",
+        "tests/integration/test_java_querymodel_aggregate_join_o615_snapshot_contract.py"
       ],
       "javaExported": [
         "happy SQLite SQL/result case proving RHS preaggregation before LEFT JOIN",
@@ -389,8 +391,8 @@
         "V3 metadata aggregateRelation lineage fields"
       ],
       "plannedExtensions": [
-        "Python runtime implementation for the low-risk v3 SQL/runtime slices",
-        "Positive Python orderBy and returnTotal runtime support after explicit implementation gate",
+        "querymodel-aggregate-join-4 Java O615 explicit join graph snapshot export and Python replay",
+        "Positive Python O615 graph lowering only after querymodel-aggregate-join-4 fixture replay is active",
         "MySQL/PostgreSQL aggregate join replay expansion after SQLite closure"
       ],
       "verification": [
@@ -400,7 +402,8 @@
         "Python loader refuses aggregate join declarations instead of loading them as ordinary explicit joins",
         "Python proxy/model layer preserves aggregate relation carrier structure while runtime remains fail-closed",
         "Python loader extracts aggregate relation carriers and reports carrier_count before fail-closed rejection",
-        "Python has a guarded SQLite aggregate relation runtime boundary and keeps unsupported shapes fail-closed"
+        "Python has a guarded SQLite aggregate relation runtime boundary and keeps unsupported shapes fail-closed",
+        "Python keeps the O615 v4 contract-only fixture active without marking querymodel-aggregate-join-4 as Java-exported"
       ]
     }
   ]
