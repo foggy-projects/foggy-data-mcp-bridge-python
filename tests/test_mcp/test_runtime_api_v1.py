@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from foggy.dataset_model.engine.compose import ComposedSql
 from foggy.mcp.routers.runtime_api_v1 import create_runtime_api_v1_router
 from foggy.mcp_spi import SemanticQueryResponse
 
@@ -40,6 +41,9 @@ class _FakeSemanticService:
 
     def invalidate_model_cache(self):
         self.cache_invalidations += 1
+
+    def execute_sql(self, sql, params, *, route_model=None):
+        return [{"orderId": "FO-001", "routeModel": route_model}]
 
 
 class _FakeAccessor:
@@ -99,7 +103,26 @@ def _client(accessor=None, semantic_service=None, state=None):
     return TestClient(app)
 
 
-def test_capabilities_returns_runtime_envelope_and_honest_unsupported_states():
+def _patch_compose_compile(monkeypatch):
+    captured = []
+
+    def fake_compile(plan, ctx, *, semantic_service, bindings=None,
+                     model_info_provider=None, dialect="mysql"):
+        captured.append(plan)
+        return ComposedSql(sql="SELECT order_id FROM fact_order", params=[])
+
+    monkeypatch.setattr(
+        "foggy.dataset_model.engine.compose.compilation.compiler.compile_plan_to_sql",
+        fake_compile,
+    )
+    monkeypatch.setattr(
+        "foggy.dataset_model.engine.compose.runtime.plan_execution.compile_plan_to_sql",
+        fake_compile,
+    )
+    return captured
+
+
+def test_capabilities_returns_runtime_envelope_and_supported_p14_states():
     client = _client()
 
     response = client.get("/api/v1/capabilities")
@@ -121,6 +144,11 @@ def test_capabilities_returns_runtime_envelope_and_honest_unsupported_states():
     assert body["data"]["capabilities"]["models.validate"] == "supported"
     assert body["data"]["capabilities"]["models.refresh"] == "supported"
     assert body["data"]["capabilities"]["tables.inspect"] == "supported"
+    assert body["data"]["capabilities"]["compose.validate"] == "supported"
+    assert body["data"]["capabilities"]["compose.preview"] == "supported"
+    assert body["data"]["capabilities"]["compose.execute"] == "supported"
+    assert body["data"]["capabilities"]["fsscript.execute"] == "supported"
+    assert body["data"]["capabilities"]["fsscript.cteBridge"] == "supported"
 
 
 def test_models_list_and_describe_use_runtime_envelope():
@@ -320,3 +348,130 @@ def test_table_inspect_rejects_invalid_identifier():
     assert body["success"] is False
     assert body["error"]["code"] == "TABLE_INSPECT_FAILED"
     assert body["error"]["phase"] == "tables.inspect"
+
+
+def test_compose_validate_success_uses_runtime_envelope():
+    client = _client()
+
+    response = client.post(
+        "/api/v1/compose/validate",
+        json={
+            "script": (
+                "const plan = dsl({model: 'FactOrderQueryModel', "
+                "columns: ['orderId'], limit: 3}); return { plans: plan };"
+            )
+        },
+    )
+
+    body = response.json()
+    assert body["success"] is True
+    assert body["data"]["valid"] is True
+    assert body["data"]["scriptKind"] == "compose"
+    assert body["data"]["mode"] == "validate"
+
+
+def test_compose_preview_returns_sql_evidence(monkeypatch):
+    _patch_compose_compile(monkeypatch)
+    client = _client()
+
+    response = client.post(
+        "/api/v1/compose/preview",
+        json={
+            "script": (
+                "const plan = dsl({model: 'FactOrderQueryModel', "
+                "columns: ['orderId'], limit: 3}); return { plans: plan };"
+            )
+        },
+    )
+
+    body = response.json()
+    assert body["success"] is True
+    assert body["data"]["scriptKind"] == "compose"
+    assert body["data"]["mode"] == "preview"
+    assert body["data"]["value"]["plans"]["sql"] == "SELECT order_id FROM fact_order"
+
+
+def test_compose_execute_returns_rows(monkeypatch):
+    _patch_compose_compile(monkeypatch)
+    client = _client()
+
+    response = client.post(
+        "/api/v1/compose/execute",
+        json={
+            "script": (
+                "const plan = dsl({model: 'FactOrderQueryModel', "
+                "columns: ['orderId'], limit: 3}); return { plans: plan };"
+            )
+        },
+    )
+
+    body = response.json()
+    assert body["success"] is True
+    assert body["data"]["mode"] == "execute"
+    assert body["data"]["value"]["plans"][0]["orderId"] == "FO-001"
+
+
+def test_compose_sandbox_violation_maps_contract_error():
+    client = _client()
+
+    response = client.post(
+        "/api/v1/compose/validate",
+        json={"script": "import java.lang.System; return { plans: [] };"},
+    )
+
+    body = response.json()
+    assert body["success"] is False
+    assert body["error"]["code"] == "COMPOSE_SANDBOX_VIOLATION"
+    assert body["error"]["phase"] == "compose.validate"
+    assert body["error"]["safeToAutoRepair"] is False
+
+
+def test_fsscript_execute_success():
+    client = _client()
+
+    response = client.post("/api/v1/fsscript/execute", json={"script": "return 1 + 2;"})
+
+    body = response.json()
+    assert body["success"] is True
+    assert body["data"]["scriptKind"] == "fsscript"
+    assert body["data"]["mode"] == "execute"
+    assert body["data"]["value"] == 3
+
+
+def test_fsscript_cte_bridge_denied_by_default():
+    client = _client()
+
+    response = client.post(
+        "/api/v1/fsscript/execute",
+        json={"script": "return foggy.cte.preview({script: \"return { plans: [] };\"});"},
+    )
+
+    body = response.json()
+    assert body["success"] is False
+    assert body["error"]["code"] == "FSSCRIPT_CTE_BRIDGE_DENIED"
+    assert body["error"]["phase"] == "fsscript.execute"
+    assert body["error"]["safeToAutoRepair"] is False
+
+
+def test_fsscript_cte_bridge_preview_success(monkeypatch):
+    _patch_compose_compile(monkeypatch)
+    client = _client()
+
+    response = client.post(
+        "/api/v1/fsscript/execute",
+        json={
+            "script": (
+                "return foggy.cte.preview({script: \"const plan = dsl({model: "
+                "'FactOrderQueryModel', columns: ['orderId'], limit: 3}); "
+                "return { plans: plan };\"});"
+            ),
+            "capabilities": {"cteBridge": True},
+        },
+    )
+
+    body = response.json()
+    assert body["success"] is True
+    assert body["data"]["scriptKind"] == "fsscript"
+    assert body["data"]["value"]["scriptKind"] == "compose"
+    assert body["data"]["value"]["mode"] == "preview"
+    assert body["data"]["value"]["value"]["plans"]["sql"] == "SELECT order_id FROM fact_order"

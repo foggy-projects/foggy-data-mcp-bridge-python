@@ -9,6 +9,7 @@ from __future__ import annotations
 import inspect
 import json
 import re
+from dataclasses import asdict, is_dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -31,6 +32,8 @@ def _json_serializable(value: Any) -> Any:
         return float(value)
     if isinstance(value, (datetime, date)):
         return value.isoformat()
+    if is_dataclass(value):
+        return _json_serializable(asdict(value))
     if isinstance(value, dict):
         return {k: _json_serializable(v) for k, v in value.items()}
     if isinstance(value, (list, tuple, set)):
@@ -79,6 +82,11 @@ def _effective_namespace(value: Any) -> Optional[str]:
     if not namespace or namespace == "default":
         return None
     return namespace
+
+
+def _runtime_namespace(value: Any) -> str:
+    namespace = _effective_namespace(value)
+    return namespace or "default"
 
 
 def _resolve_model_path(raw_path: Any) -> Optional[str]:
@@ -181,6 +189,88 @@ def _extract_error_field(message: str, payload: Dict[str, Any]) -> Optional[str]
     return _extract_first_field(payload)
 
 
+def _bool_flag(payload: Dict[str, Any], key: str) -> bool:
+    value = payload.get(key) if isinstance(payload, dict) else None
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() == "true"
+
+
+def _script_text(request: Dict[str, Any]) -> str:
+    script = request.get("script") if isinstance(request, dict) else None
+    return script if isinstance(script, str) else ""
+
+
+def _request_params(request: Dict[str, Any]) -> Dict[str, Any]:
+    params = request.get("params") if isinstance(request, dict) else None
+    return dict(params) if isinstance(params, dict) else {}
+
+
+def _cte_bridge_enabled(request: Dict[str, Any]) -> bool:
+    capabilities = request.get("capabilities") if isinstance(request, dict) else None
+    options = request.get("options") if isinstance(request, dict) else None
+    return _bool_flag(capabilities or {}, "cteBridge") or _bool_flag(options or {}, "cteBridge")
+
+
+def _compose_error_code(mode: str) -> str:
+    if mode == "validate":
+        return "COMPOSE_SCRIPT_INVALID"
+    if mode == "preview":
+        return "COMPOSE_COMPILE_FAILED"
+    return "COMPOSE_EXECUTE_FAILED"
+
+
+def _compose_runtime_code(mode: str) -> str:
+    return "COMPOSE_EXECUTE_FAILED" if mode == "execute" else _compose_error_code(mode)
+
+
+def _compose_phase(mode: str) -> str:
+    return f"compose.{mode}"
+
+
+def _fsscript_error(message: str, *, code: str = "FSSCRIPT_EXECUTE_FAILED") -> Dict[str, Any]:
+    return {
+        "code": code,
+        "phase": "fsscript.execute",
+        "message": message,
+        "safeToAutoRepair": code != "FSSCRIPT_CTE_BRIDGE_DENIED",
+    }
+
+
+class _RuntimeComposeError(Exception):
+    def __init__(
+        self,
+        *,
+        code: str,
+        phase: str,
+        message: str,
+        field: Optional[str] = None,
+        safe_to_auto_repair: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.phase = phase
+        self.field = field
+        self.safe_to_auto_repair = safe_to_auto_repair
+
+    def to_contract_error(self) -> Dict[str, Any]:
+        error = {
+            "code": self.code,
+            "phase": self.phase,
+            "message": str(self),
+            "safeToAutoRepair": self.safe_to_auto_repair,
+        }
+        if self.field is not None:
+            error["field"] = self.field
+        return error
+
+
+class _FsscriptCteBridgeDenied(Exception):
+    pass
+
+
 def _error_from_query_response(
     *,
     model: str,
@@ -276,6 +366,22 @@ def create_runtime_api_v1_router(
             return getattr(state, "data_source_manager", None) if state else None
         return None
 
+    def _get_authority_resolver() -> Any:
+        if state_getter:
+            state = state_getter()
+            resolver = getattr(state, "authority_resolver", None) if state else None
+            if resolver is not None:
+                return resolver
+        return _AllowAllAuthorityResolver()
+
+    def _get_default_dialect() -> str:
+        if state_getter:
+            state = state_getter()
+            dialect = getattr(state, "default_dialect", None) if state else None
+            if dialect:
+                return str(dialect)
+        return "mysql"
+
     def _configured_model_sources() -> list[tuple[str, Optional[str]]]:
         properties = _get_properties()
         sources: list[tuple[str, Optional[str]]] = []
@@ -299,6 +405,202 @@ def create_runtime_api_v1_router(
 
         return load_models_from_directory(path, namespace=namespace)
 
+    class _AllowAllAuthorityResolver:
+        def resolve(self, request: Any) -> Any:
+            from foggy.dataset_model.engine.compose.security import (
+                AuthorityResolution,
+                ModelBinding,
+            )
+
+            return AuthorityResolution(bindings={
+                model_request.model: ModelBinding(
+                    field_access=None,
+                    denied_columns=[],
+                    system_slice=[],
+                )
+                for model_request in request.models
+            })
+
+    def _build_compose_context(request: Dict[str, Any], params: Optional[Dict[str, Any]] = None) -> Any:
+        from foggy.dataset_model.engine.compose.context import ComposeQueryContext, Principal
+
+        return ComposeQueryContext(
+            principal=Principal(user_id="runtime-api"),
+            namespace=_runtime_namespace(request.get("namespace")),
+            authority_resolver=_get_authority_resolver(),
+            trace_id=request.get("traceId"),
+            params=params if params is not None else _request_params(request),
+        )
+
+    def _compose_response(result: Any, mode: str, value: Any = None) -> Dict[str, Any]:
+        actual_value = result.value if value is None else value
+        return {
+            "valid": True,
+            "scriptKind": "compose",
+            "mode": mode,
+            "value": actual_value,
+            "sql": result.sql,
+            "params": list(result.params or []),
+            "warnings": list(result.warnings or []),
+        }
+
+    def _map_compose_exception(mode: str, exc: Exception) -> _RuntimeComposeError:
+        from foggy.dataset_model.engine.compose.compilation.errors import ComposeCompileError
+        from foggy.dataset_model.engine.compose.sandbox.exceptions import (
+            ComposeSandboxViolationError,
+        )
+        from foggy.dataset_model.engine.compose.schema.errors import ComposeSchemaError
+
+        phase = _compose_phase(mode)
+        if isinstance(exc, ComposeSandboxViolationError):
+            return _RuntimeComposeError(
+                code="COMPOSE_SANDBOX_VIOLATION",
+                phase=phase,
+                message=str(exc),
+                safe_to_auto_repair=False,
+            )
+        if isinstance(exc, ComposeSchemaError):
+            return _RuntimeComposeError(
+                code=_compose_error_code(mode),
+                phase=phase,
+                message=str(exc),
+                field=getattr(exc, "offending_field", None),
+                safe_to_auto_repair=True,
+            )
+        if isinstance(exc, ComposeCompileError):
+            return _RuntimeComposeError(
+                code=_compose_error_code(mode),
+                phase=phase,
+                message=str(exc),
+                safe_to_auto_repair=True,
+            )
+        return _RuntimeComposeError(
+            code=_compose_runtime_code(mode),
+            phase=phase,
+            message=str(exc),
+            safe_to_auto_repair=False,
+        )
+
+    def _run_compose(request: Dict[str, Any], mode: str) -> Dict[str, Any]:
+        from foggy.dataset_model.engine.compose.runtime import run_script
+        from foggy.dataset_model.engine.compose.runtime.script_runtime import (
+            ScriptResult,
+            _run_script_no_intercept,
+        )
+
+        script = _script_text(request)
+        if not script.strip():
+            raise _RuntimeComposeError(
+                code="COMPOSE_SCRIPT_INVALID",
+                phase=_compose_phase(mode),
+                message="parameter 'script' is required and must be non-blank",
+                safe_to_auto_repair=True,
+            )
+
+        ctx = _build_compose_context(request)
+        try:
+            if mode == "validate":
+                _run_script_no_intercept(
+                    script,
+                    ctx,
+                    semantic_service=_get_service(),
+                    dialect=_get_default_dialect(),
+                )
+                return _compose_response(ScriptResult(value=None), mode, value=None)
+            result = run_script(
+                script,
+                ctx,
+                semantic_service=_get_service(),
+                dialect=_get_default_dialect(),
+                preview_mode=mode == "preview",
+            )
+            return _compose_response(result, mode)
+        except _RuntimeComposeError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - Runtime API must return envelopes.
+            raise _map_compose_exception(mode, exc) from exc
+
+    class _DeniedCteBridge:
+        def validate(self, _request: Any = None) -> Any:
+            raise _FsscriptCteBridgeDenied("foggy.cte.validate is disabled for this request.")
+
+        def preview(self, _request: Any = None) -> Any:
+            raise _FsscriptCteBridgeDenied("foggy.cte.preview is disabled for this request.")
+
+        def execute(self, _request: Any = None) -> Any:
+            raise _FsscriptCteBridgeDenied("foggy.cte.execute is disabled for this request.")
+
+    class _CteBridge:
+        def __init__(self, parent_request: Dict[str, Any]) -> None:
+            self._parent_request = parent_request
+
+        def validate(self, request: Any = None) -> Any:
+            return self._invoke("validate", request)
+
+        def preview(self, request: Any = None) -> Any:
+            return self._invoke("preview", request)
+
+        def execute(self, request: Any = None) -> Any:
+            return self._invoke("execute", request)
+
+        def _invoke(self, mode: str, request: Any = None) -> Any:
+            compose_request = self._compose_request(request, mode)
+            return _run_compose(compose_request, mode)
+
+        def _compose_request(self, request: Any = None, mode: str = "validate") -> Dict[str, Any]:
+            if request is None:
+                return {"script": "", "namespace": self._parent_request.get("namespace")}
+            if isinstance(request, str):
+                return {
+                    "script": request,
+                    "namespace": self._parent_request.get("namespace"),
+                    "params": {},
+                }
+            if isinstance(request, dict):
+                return {
+                    "script": request.get("script"),
+                    "namespace": request.get("namespace", self._parent_request.get("namespace")),
+                    "params": request.get("params", {}),
+                    "traceId": request.get("traceId", self._parent_request.get("traceId")),
+                }
+            raise _RuntimeComposeError(
+                code="COMPOSE_SCRIPT_INVALID",
+                phase=_compose_phase(mode),
+                message="cte request must be a string script or object containing script",
+                safe_to_auto_repair=True,
+            )
+
+    def _run_fsscript(request: Dict[str, Any]) -> Dict[str, Any]:
+        from foggy.fsscript.evaluator import ExpressionEvaluator
+        from foggy.fsscript.expressions.control_flow import ReturnException
+        from foggy.fsscript.parser import FsscriptParser
+
+        script = _script_text(request)
+        if not script.strip():
+            raise RuntimeError("parameter 'script' is required and must be non-blank")
+
+        params = _request_params(request)
+        cte_bridge = _CteBridge(request) if _cte_bridge_enabled(request) else _DeniedCteBridge()
+        context: Dict[str, Any] = {
+            "params": dict(params),
+            "foggy": {"cte": cte_bridge},
+        }
+        context.update(params)
+        parser = FsscriptParser(script)
+        program = parser.parse_program()
+        evaluator = ExpressionEvaluator(context=context, module_loader=None, bean_registry=None)
+        try:
+            value = evaluator.evaluate(program)
+        except ReturnException as exc:
+            value = getattr(exc, "value", None)
+        return {
+            "valid": True,
+            "scriptKind": "fsscript",
+            "mode": "execute",
+            "value": value,
+            "warnings": [],
+        }
+
     @router.get("/capabilities")
     async def capabilities() -> JSONResponse:
         data = {
@@ -316,8 +618,11 @@ def create_runtime_api_v1_router(
                 "query.validate": "supported",
                 "query.execute": "supported",
                 "tables.inspect": "supported",
-                "compose.validate": "unsupported",
-                "compose.execute": "unsupported",
+                "compose.validate": "supported",
+                "compose.preview": "supported",
+                "compose.execute": "supported",
+                "fsscript.execute": "supported",
+                "fsscript.cteBridge": "supported",
             },
         }
         return _envelope(success=True, data=data)
@@ -774,11 +1079,46 @@ def create_runtime_api_v1_router(
         )
 
     @router.post("/compose/validate")
-    async def validate_compose() -> JSONResponse:
-        return _unsupported("compose.validate", "compose.validate")
+    async def validate_compose(
+        request: Dict[str, Any] = Body(default_factory=dict),
+    ) -> JSONResponse:
+        try:
+            return _envelope(success=True, data=_run_compose(request, "validate"))
+        except _RuntimeComposeError as exc:
+            return _envelope(success=False, error=exc.to_contract_error())
+
+    @router.post("/compose/preview")
+    async def preview_compose(
+        request: Dict[str, Any] = Body(default_factory=dict),
+    ) -> JSONResponse:
+        try:
+            return _envelope(success=True, data=_run_compose(request, "preview"))
+        except _RuntimeComposeError as exc:
+            return _envelope(success=False, error=exc.to_contract_error())
 
     @router.post("/compose/execute")
-    async def execute_compose() -> JSONResponse:
-        return _unsupported("compose.execute", "compose.execute")
+    async def execute_compose(
+        request: Dict[str, Any] = Body(default_factory=dict),
+    ) -> JSONResponse:
+        try:
+            return _envelope(success=True, data=_run_compose(request, "execute"))
+        except _RuntimeComposeError as exc:
+            return _envelope(success=False, error=exc.to_contract_error())
+
+    @router.post("/fsscript/execute")
+    async def execute_fsscript(
+        request: Dict[str, Any] = Body(default_factory=dict),
+    ) -> JSONResponse:
+        try:
+            return _envelope(success=True, data=_run_fsscript(request))
+        except _FsscriptCteBridgeDenied as exc:
+            return _envelope(
+                success=False,
+                error=_fsscript_error(str(exc), code="FSSCRIPT_CTE_BRIDGE_DENIED"),
+            )
+        except _RuntimeComposeError as exc:
+            return _envelope(success=False, error=exc.to_contract_error())
+        except Exception as exc:  # noqa: BLE001 - Runtime API must return envelopes.
+            return _envelope(success=False, error=_fsscript_error(str(exc)))
 
     return router
